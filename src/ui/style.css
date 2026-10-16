@@ -1,0 +1,53 @@
+/*
+ * hermes-bubbles — page-scoped styling.
+ *
+ * Only what Tailwind utilities cannot express (scrollbars, the caret animation,
+ * prose spacing inside a bubble). Colors come from the dashboard's variables so
+ * the plugin repaints with the active theme; see DESIGN.md.
+ */
+
+.hb-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.hb-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.hb-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+.hb-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* The streaming caret on the live bubble. */
+@keyframes hb-caret {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+
+.hb-caret {
+  animation: hb-caret 1.1s steps(1, end) infinite;
+}
+
+/* Tool output and args: monospace, wrapped, never a horizontal scrollbar on a phone. */
+.hb-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.hb-bubble-text {
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hb-caret {
+    animation: none;
+  }
+}

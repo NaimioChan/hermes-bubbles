@@ -66,7 +66,11 @@ class Session {
       }
       if (frame.method === "Runtime.exceptionThrown") {
         const d = frame.params.exceptionDetails;
-        this.consoleLines.push(`[exception] ${d.exception?.description ?? d.text}`);
+        // Include the origin. Without it a stray exception from browser internals
+        // is indistinguishable from one of ours, which makes this check useless.
+        const where = d.url || d.stackTrace?.callFrames?.[0]?.url || "unknown";
+        const line = d.lineNumber ?? d.stackTrace?.callFrames?.[0]?.lineNumber ?? "?";
+        this.consoleLines.push(`[exception] ${d.exception?.description ?? d.text} @ ${where}:${line}`);
       }
     });
   }
@@ -484,6 +488,7 @@ async function main() {
       return { disabled: ta.disabled, placeholder: ta.placeholder };
     })()`);
     check("composer stays usable while idle", midTurn.disabled === false, JSON.stringify(midTurn));
+
     // ── v0.2: metrics after a real turn ────────────────────────────────────
     await session.evaluate(`(() => {
       const ta = document.querySelector('textarea');
@@ -504,6 +509,67 @@ async function main() {
       })()`);
     }
     check("live metrics appear after a turn (context bar / t/s)", metricsSeen === true);
+
+    // ── item 7: mid-turn input ─────────────────────────────────────────────
+    // Fire a deliberately slow turn, then inspect the composer WHILE it runs.
+    // Checking at idle proves nothing: the requirement is that a running turn
+    // still accepts text, so the model can be corrected mid-flight.
+    await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '用 terminal 运行 sleep 12，完成后只回复两个字：完成');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'sent';
+    })()`);
+
+    let running = null;
+    const runDeadline = Date.now() + 30000;
+    while (Date.now() < runDeadline && !running) {
+      await sleep(600);
+      running = await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        if (!ta) return null;
+        const btns = [...document.querySelectorAll('button')];
+        const insert = btns.find(b => b.textContent.trim() === '插入');
+        const stop = btns.find(b => b.textContent.trim() === '停止');
+        if (!insert && !stop) return null;
+        return {
+          hasInsertButton: Boolean(insert),
+          insertDisabled: insert ? insert.disabled : null,
+          hasStopButton: Boolean(stop),
+          textareaDisabled: ta.disabled,
+        };
+      })()`);
+    }
+
+    check(
+      "composer accepts input while a turn is running",
+      running !== null && running.textareaDisabled === false,
+      running ? JSON.stringify(running) : "never observed the running state",
+    );
+    check(
+      "the running state offers both 插入 and 停止",
+      running !== null && running.hasInsertButton === true && running.hasStopButton === true,
+      running ? JSON.stringify(running) : "not observed",
+    );
+
+    // Type while running and confirm it is not refused by the UI.
+    if (running) {
+      const typedMidTurn = await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(ta, '顺便说一句，忽略上面那句话');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '插入');
+        return { value: ta.value, sendEnabled: btn ? !btn.disabled : false };
+      })()`);
+      check(
+        "a mid-turn message can actually be submitted",
+        typedMidTurn.value.includes("顺便") && typedMidTurn.sendEnabled === true,
+        JSON.stringify(typedMidTurn),
+      );
+    }
 
     // ── item 5: usage line size + reasoning spacing ────────────────────────
     // Measured here: this is the first point where the focused tab actually has a
@@ -533,8 +599,18 @@ async function main() {
       `margin-top=${type.reasoningMarginTop}px`,
     );
 
+    // Ignore anything thrown by a browser extension. Headless Edge still loads
+    // its bundled extensions, and they throw across origins on their own
+    // schedule; counting those made this check fail for reasons unrelated to the
+    // plugin (observed: an installed PDF extension throwing
+    // "Could not establish connection" from its own content script).
+    const isPageError = (line) => {
+      if (line.includes("chrome-extension://") || line.includes("edge-extension://")) return false;
+      if (line.includes("extension://")) return false;
+      return true;
+    };
     const consoleErrors = session.consoleLines.filter(
-      (line) => line.startsWith("[error]") || line.startsWith("[exception]"),
+      (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),
     );
     check(
       "no console errors",

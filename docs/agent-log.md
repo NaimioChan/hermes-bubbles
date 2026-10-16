@@ -11,7 +11,7 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 ## 2026-10-17 00:40 · hermes · v0.3 按七条反馈返工
 
 - 改：新增 `src/ui/{TabStrip,HistoryPanel}.ts`、`tests/layout-classes.test.ts`、`scripts/audit-classes.mjs`；删 `src/ui/SessionSidebar.ts`；重写 `src/ui/{ChatPage,Composer,style.css}`；`src/app/controller.ts` 支持中途发送
-- 验证：`npm test` 261 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 32/32；`node scripts/audit-classes.mjs` 0 缺失
+- 验证：`npm test` 261 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 35/35；`node scripts/audit-classes.mjs` 0 缺失
 - 遗留：会话删除/重命名（issue #5）；vault/sudo 等其余服务端请求（issue #4）
 - 下一步：issue #4
 
@@ -34,6 +34,12 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 5. 用量行改用 `hb-text-tiny`（9.375px，比思考行 10.3125px 略小）；思考块的间距从失效的 `mt-1.5` 改成 `hb-stack-gap`（实测 7.5px）。
 6. 输入框 `resize:none`，去掉那个反直觉的原生手柄。
 7. 运行中允许发送：主按钮变「插入」，停止按钮降为次要；后端在 `prompt.submit` 的 `status` 里回报 queued / steered / redirected，页面把它显示成一行提示。
+
+### 验收脚本里三个假断言
+
+第 7 条（运行中允许输入）一开始只在**空闲态**断言输入框没被禁用——那什么都证明不了，需求说的就是运行中。改成先发一条 `sleep 12` 的慢任务，再在运行期间观察：拿到了 `{"hasInsertButton":true,"hasStopButton":true,"textareaDisabled":false}`，并确认输入的字真的能提交。顺带发现「插入」按钮在输入框为空时是禁用的（`insertDisabled:true`），这是对的，不要动。
+
+「no console errors」查出两条 `Could not establish connection. Receiving end does not exist.`。原来是异常日志没记来源，补上 `d.url` 后立刻看清是 `chrome-extension://pdffkfellgipmhklpdmokmckkkfcopbh/...`——headless Edge 照旧加载自带扩展，是扩展自己跨源抛的，与插件无关。改为过滤 `*extension://` 来源。这类噪声不记来源就永远查不清，所以顺手把来源写进日志。
 
 ### 又两个假断言（验收脚本）
 

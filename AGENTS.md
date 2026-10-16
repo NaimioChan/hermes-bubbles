@@ -24,14 +24,16 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 
 ## 架构铁律
 
-1. **协议层纯函数、无 DOM、可单测。** `src/protocol/` 与 `src/core/` 里不许出现 `window`、`document`、`WebSocket`、`fetch`。它们只做：帧编解码、请求通道、事件 → 时间线归约、历史 → 时间线投影。所有 `src/core/` 的行为必须有一条 vitest 覆盖。
+1. **协议层纯函数、无 DOM、可单测。** `src/core/` 里不许出现 `window`、`document`、`WebSocket`、`fetch`。它们只做：事件 → 时间线归约、历史 → 时间线投影、去重。所有 `src/core/` 的行为必须有一条 vitest 覆盖。
 2. **`src/ui/` 不许直接 `new WebSocket`。** 一律经 `src/gateway/`。传输可替换（测试用假 transport），这是重连逻辑能被测的前提。
 3. **不引 React 依赖。** `react` / `react-dom` 只在 devDependencies 里出类型，运行时一律取 `SDK.React`。打包产物里出现 react 的代码即视为构建配置出错。
 4. **主题跟着仪表盘走。** 颜色一律用 `--color-*` / `--radius` / `--spacing-mul` 这些 CSS 变量，不许写死十六进制色值（`DESIGN.md` 里的语义色除外，且必须在 `DESIGN.md` 登记）。换主题必须整体跟着变。
 5. **事件按 `session_id` 过滤。** 一个 socket 会收到所有会话的事件；只有当前会话的才进时间线。
 6. **同一事件可能重复到达。** 后端把每个已连接的 socket 都加进会话的 fan-out，重连窗口内会重复投递。`message.delta` 重复会让气泡里出现两份同样的字。去重靠 `(replay_epoch, session_id, seq)`。
-7. **服务端请求（approval / clarify）必须应答。** 不注册 handler 的后端会当这个客户端是旧版本，直接 fail 掉请求，等于把 agent 卡死。
-8. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+7. **服务端请求（approval / clarify）必须应答，答不了就立刻回 `-32601`。** 不回的后端会当这个客户端是旧版本，一直等到自己的超时（clarify 是 3600s），等于把 agent 卡死。快速失败比沉默好。
+8. **发 RPC 前先 `await ensureOpen()`，不要 `connect()` 之后直接发。** `connect()` 是 fire-and-forget，URL provider 是异步的，紧跟其后的请求会在 socket 存在之前发出去并失败——而 socket 几毫秒后就绪。`Controller.start()` 已经这么做了。
+9. **`gateway.ready` 必须走归约，不能提前 return。** 它是 `meta.connected` 变 true 的唯一来源，跳过它输入框会一直禁用。
+10. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 
@@ -49,3 +51,19 @@ npm run install-plugin
 ```
 
 动了 UI 之后，还要在真实仪表盘里点一遍：发一条消息、看流式气泡、展开一个工具卡片、刷新页面看历史恢复。
+
+`node scripts/verify.mjs` 把这套点检自动化了（15 项，跑真模型真往返），需要仪表盘在 9119 上跑着。
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues，仓库 `NaimioChan/hermes-bubbles`，走 `gh` CLI。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五个规范状态角色各对应同名标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文：根 `GLOSSARY.md` + `docs/adr/`。见 `docs/agents/domain.md`。

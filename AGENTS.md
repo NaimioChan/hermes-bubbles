@@ -34,7 +34,9 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 8. **所有 RPC 走 `Controller.rpc()`（内部 `await ensureOpen()`），不要直接 `client.request()`。** `connect()` 是 fire-and-forget，URL provider 是异步的，紧跟其后的请求会在 socket 存在之前发出去并失败——而 socket 几毫秒后就绪。这条踩过两次：一次是开会话，一次是拉命令目录。需要绕过 `rpc()` 的只有已经显式 `await ensureSession()` 的那几个。
 9. **`gateway.ready` 必须走归约，不能提前 return。** 它是 `meta.connected` 变 true 的唯一来源，跳过它输入框会一直禁用。
 10. **组件里的钩子不能出现在提前 `return` 之后。** 钩子数量在两次渲染间变化会抛 React #310，整页白屏，而逻辑单测和 `tsc` 都看不见。`tests/hook-order.test.ts` 会在源码层面拦住它。
-11. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+11. **新样式写进 `src/ui/style.css`，别用宿主可能没有的 Tailwind 类。** 插件跑在仪表盘**预编译**的 CSS 上，那份产物只含它自己用过的类；我们造的类若不在其中，**静默失效**（不报错、不警告，属性就是不生效）。踩过三个：`resize-none`、`max-h-[70vh]`、`text-[0.625rem]`。改完跑 `node scripts/audit-classes.mjs`，`tests/layout-classes.test.ts` 会在 CI 层拦住。
+12. **运行中也要允许发消息。** Hermes 的行为是中途输入 = 打断修正，后端 `prompt.submit` 的 busy 路径会决定排队 / 插入 / 改向并在 `status` 里回报。别再把输入框禁用掉。
+13. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 

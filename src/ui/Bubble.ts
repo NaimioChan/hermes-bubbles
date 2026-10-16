@@ -23,24 +23,11 @@ interface BubbleProps {
 const USER_RADIUS = "calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 0.5) calc(var(--radius) * 1.6)";
 const ASSISTANT_RADIUS = "calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 0.5)";
 
-function Label({ sdk, text, muted }: { sdk: HermesPluginSdk; text: string; muted?: boolean }) {
-  const { React } = sdk;
-  return React.createElement(
-    "div",
-    {
-      className: "mb-1 text-[0.6875rem] font-medium uppercase tracking-[0.06em]",
-      style: { color: muted ? "var(--color-muted-foreground)" : "var(--color-muted-foreground)" },
-    },
-    text,
-  );
-}
-
 function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
   const { React } = sdk;
   return React.createElement(
     "div",
     { className: "flex flex-col items-end" },
-    React.createElement(Label, { sdk, text: "你" }),
     React.createElement(
       "div",
       {
@@ -88,7 +75,7 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
 
   return React.createElement(
     "div",
-    { className: "mt-1.5", style: { maxWidth: "min(72ch, 82%)" } },
+    { className: "hb-stack-gap", style: { maxWidth: "min(72ch, 82%)" } },
     React.createElement(
       "button",
       {
@@ -121,7 +108,7 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
       ? React.createElement(
           "div",
           {
-            className: "mt-1 truncate px-2 py-1 text-xs",
+            className: "hb-mt-sm hb-truncate px-2 py-1 text-xs",
             style: {
               color: "var(--color-muted-foreground)",
               borderLeft: "2px solid var(--color-border)",
@@ -134,7 +121,7 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
       ? React.createElement(
           "div",
           {
-            className: "hb-pre mt-1 whitespace-pre-wrap break-words px-2 py-1.5 text-xs",
+            className: "hb-pre hb-mt-sm whitespace-pre-wrap break-words px-2 py-1.5 text-xs",
             style: {
               background: "color-mix(in oklab, var(--color-muted) 45%, var(--color-card))",
               color: "var(--color-muted-foreground)",
@@ -156,7 +143,6 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
   return React.createElement(
     "div",
     { className: "flex flex-col items-start" },
-    React.createElement(Label, { sdk, text: "Hermes" }),
     React.createElement(
       "div",
       {
@@ -198,7 +184,7 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
       ? React.createElement(
           "div",
           {
-            className: "mt-1 text-[0.625rem] tabular-nums",
+            className: "hb-text-tiny hb-mt-sm tabular-nums",
             style: { color: "var(--color-muted-foreground)" },
           },
           [item.usage.total ? `${formatCount(item.usage.total)} tokens` : "", item.usage.context_percent ? `上下文 ${item.usage.context_percent}%` : ""]
@@ -273,7 +259,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
     open
       ? React.createElement(
           "div",
-          { className: "mt-1.5 space-y-1.5" },
+          { className: "hb-stack-gap space-y-1.5" },
           argsText
             ? React.createElement(
                 "pre",

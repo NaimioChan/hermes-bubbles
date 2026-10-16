@@ -112,8 +112,30 @@ describe("filterCommands", () => {
     expect(filterCommands(entries, "HELP").map((e) => e.name)).toEqual(["help"]);
   });
 
-  it("honours the limit", () => {
+  it("honours an explicit limit", () => {
     expect(filterCommands(entries, "", 2)).toHaveLength(2);
+  });
+
+  it("returns every match when the limit is large (the menu must not truncate)", () => {
+    // A real install matches 100+ commands on a bare "/". The old 12-row cap made
+    // most of them unreachable: filtering ran on the already-cut list.
+    const many: CommandEntry[] = Array.from({ length: 150 }, (_, i) => ({
+      name: `cmd${i}`,
+      description: "",
+      kind: "command" as const,
+    }));
+    expect(filterCommands(many, "", 200)).toHaveLength(150);
+    expect(filterCommands(many, "", 12)).toHaveLength(12);
+  });
+
+  it("filters the whole set, not a pre-truncated slice", () => {
+    const many: CommandEntry[] = Array.from({ length: 150 }, (_, i) => ({
+      name: `cmd${i}`,
+      description: "",
+      kind: "command" as const,
+    }));
+    // cmd149 sorts last, so a 12-row pre-cut would lose it entirely.
+    expect(filterCommands(many, "cmd149", 200).map((e) => e.name)).toEqual(["cmd149"]);
   });
 
   it("returns nothing when nothing matches", () => {

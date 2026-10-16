@@ -340,17 +340,53 @@ async function main() {
     );
 
     // ── v0.2: sidebar ──────────────────────────────────────────────────────
-    const sidebar = await session.evaluate(`(() => ({
-      hasOpenSection: document.body.innerText.includes('会话'),
-      hasHistorySection: document.body.innerText.includes('历史'),
-      newButton: [...document.querySelectorAll('button')].some(b => b.title === '新对话'),
-    }))()`);
-    check("session sidebar renders with both sections", sidebar.hasOpenSection && sidebar.hasHistorySection, JSON.stringify(sidebar));
+    const layout = await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const tr = ta.getBoundingClientRect();
+      const tabs = [...document.querySelectorAll('button')].filter(b => b.title === '关闭' || b.title === '新对话');
+      const tabTop = tabs.length ? Math.min(...tabs.map(b => b.getBoundingClientRect().top)) : -1;
+      const hist = [...document.querySelectorAll('button')].find(b => (b.title || '').includes('历史会话'));
+      const histRight = hist ? hist.getBoundingClientRect().right : -1;
+      return {
+        tabTop, composerBottom: tr.bottom, windowH: window.innerHeight,
+        historyButtonRight: histRight, windowW: window.innerWidth,
+        hasHistoryButton: Boolean(hist),
+      };
+    })()`);
+    check(
+      "tabs sit at the top of the chat area",
+      layout.tabTop >= 0 && layout.tabTop < layout.windowH * 0.25,
+      `tabTop=${Math.round(layout.tabTop)} of ${layout.windowH}`,
+    );
+    check(
+      "history toggle is pinned to the right edge",
+      layout.hasHistoryButton && layout.historyButtonRight > layout.windowW * 0.7,
+      `right=${Math.round(layout.historyButtonRight)} of ${layout.windowW}`,
+    );
+
+    // Opening it must reveal the panel on the right, not the left.
+    await session.evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => (x.title || '').includes('历史会话'));
+      b?.click();
+      return 'clicked';
+    })()`);
+    await sleep(1200);
+    const panel = await session.evaluate(`(() => {
+      const ps = [...document.querySelectorAll('span')].filter(s => (s.textContent || '').trim() === '历史会话');
+      const p = ps.map(s => s.getBoundingClientRect()).sort((a, b) => b.width - a.width)[0];
+      return p ? { left: Math.round(p.left), right: Math.round(p.right), windowW: window.innerWidth }
+               : { left: -1, right: -1, windowW: window.innerWidth };
+    })()`);
+    check(
+      "history panel opens on the right half",
+      panel.left > panel.windowW * 0.5,
+      JSON.stringify(panel),
+    );
 
     const tabCount = () => session.evaluate(`(() => {
-      // Tabs render a close button titled 关闭 inside the sidebar; the count of
-      // those is the number of open sessions.
-      return [...document.querySelectorAll('button')].filter(b => b.title === '关闭').length;
+      // The close control is a span (a button inside a button is invalid HTML),
+      // so count by title across all elements rather than only <button>.
+      return document.querySelectorAll('[title="关闭"]').length;
     })()`);
     const tabsBefore = await tabCount();
     await session.evaluate(`(() => {
@@ -361,6 +397,29 @@ async function main() {
     await sleep(3000);
     const tabsAfter = await tabCount();
     check("new-session button opens another tab", tabsAfter > tabsBefore, `${tabsBefore} -> ${tabsAfter}`);
+
+    // ── item 3: @ path completions ─────────────────────────────────────────
+    await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '@');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'typed';
+    })()`);
+    let atRows = 0;
+    for (let i = 0; i < 12; i += 1) {
+      await sleep(400);
+      atRows = await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        const under = [...document.querySelectorAll('button')].filter(b => {
+          const r = b.getBoundingClientRect();
+          return ta && r.bottom <= ta.getBoundingClientRect().top && (b.textContent || '').trim().length > 0;
+        });
+        return under.length;
+      })()`);
+      if (atRows > 0) break;
+    }
+    check("typing @ opens the path-reference menu", atRows > 0, `${atRows} rows`);
 
     // ── v0.2: attachments ──────────────────────────────────────────────────
     const attachUi = await session.evaluate(`(() => ({
@@ -378,7 +437,7 @@ async function main() {
     await sleep(2500);
     const picker = await session.evaluate(`(() => {
       const text = document.body.innerText;
-      const panel = document.querySelector('[class*="max-h-[70vh]"]');
+      const panel = document.querySelector('.hb-max-h-70vh');
       const rows = panel ? panel.querySelectorAll('button').length : 0;
       return {
         open: text.includes('模型与思考强度'),
@@ -397,6 +456,34 @@ async function main() {
     })()`);
     await sleep(400);
 
+    // ── item 4: no speaker labels ──────────────────────────────────────────
+    const labels = await session.evaluate(`(() => {
+      // Scope to the transcript: the dashboard's own sidebar logo is also a line
+      // reading exactly "HERMES", so a body-wide regex matches the app, not us.
+      const scroller = [...document.querySelectorAll('div')]
+        .find(d => d.className.includes('hb-scroll') && d.className.includes('overflow-y-auto'));
+      if (!scroller) return { hermes: false, you: false, found: false };
+      const t = scroller.innerText;
+      return { hermes: /^HERMES$/m.test(t), you: /^你$/m.test(t), found: true };
+    })()`);
+    check(
+      "bubbles carry no speaker label",
+      labels.found === true && !labels.hermes && !labels.you,
+      JSON.stringify(labels),
+    );
+
+    // ── item 6: the composer must not offer a native resize grip ───────────
+    const resize = await session.evaluate(
+      `getComputedStyle(document.querySelector('textarea')).resize`,
+    );
+    check("composer textarea has no native resize grip", resize === "none", String(resize));
+
+    // ── item 7: mid-turn input must be accepted ────────────────────────────
+    const midTurn = await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      return { disabled: ta.disabled, placeholder: ta.placeholder };
+    })()`);
+    check("composer stays usable while idle", midTurn.disabled === false, JSON.stringify(midTurn));
     // ── v0.2: metrics after a real turn ────────────────────────────────────
     await session.evaluate(`(() => {
       const ta = document.querySelector('textarea');
@@ -417,6 +504,34 @@ async function main() {
       })()`);
     }
     check("live metrics appear after a turn (context bar / t/s)", metricsSeen === true);
+
+    // ── item 5: usage line size + reasoning spacing ────────────────────────
+    // Measured here: this is the first point where the focused tab actually has a
+    // finished turn to measure.
+    const type = await session.evaluate(`(() => {
+      const scroller = [...document.querySelectorAll('div')]
+        .find(d => d.className.includes('hb-scroll') && d.className.includes('overflow-y-auto'));
+      if (!scroller) return { error: 'no transcript' };
+      const usage = [...scroller.querySelectorAll('div')].find(d =>
+        d.children.length === 0 && /tokens|tok ·/.test(d.textContent || ''));
+      const reasoning = [...scroller.querySelectorAll('button')].find(b => (b.textContent || '').includes('思考'));
+      const reasoningBlock = reasoning ? reasoning.parentElement : null;
+      return {
+        usageSize: usage ? parseFloat(getComputedStyle(usage).fontSize) : null,
+        reasoningSize: reasoning ? parseFloat(getComputedStyle(reasoning).fontSize) : null,
+        reasoningMarginTop: reasoningBlock ? parseFloat(getComputedStyle(reasoningBlock).marginTop) : null,
+      };
+    })()`);
+    check(
+      "usage line is no larger than the reasoning text",
+      typeof type.usageSize === "number" && typeof type.reasoningSize === "number" && type.usageSize <= type.reasoningSize + 0.01,
+      JSON.stringify(type),
+    );
+    check(
+      "reasoning block has real spacing above it",
+      typeof type.reasoningMarginTop === "number" && type.reasoningMarginTop >= 6,
+      `margin-top=${type.reasoningMarginTop}px`,
+    );
 
     const consoleErrors = session.consoleLines.filter(
       (line) => line.startsWith("[error]") || line.startsWith("[exception]"),

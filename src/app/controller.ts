@@ -300,17 +300,40 @@ export class ChatController {
     }
   }
 
-  /** Submit a resolved message, with the text shown to the user when it differs. */
+  /**
+   * Submit a resolved message, with the text shown to the user when it differs.
+   *
+   * Sending while a turn is live is deliberately allowed: the gateway's busy path
+   * decides whether the text queues, steers (injected into the running turn's
+   * next tool result) or redirects, and reports which in `status`. The composer
+   * used to disable itself instead, which is not how Hermes behaves elsewhere —
+   * mid-turn input is a correction, not an error.
+   */
   private async submitMessage(message: string, display: string): Promise<void> {
     if (!message.trim()) return;
     const runtimeId = await this.ensureSession();
     if (!runtimeId) throw new Error("会话尚未建立");
+    const wasRunning = activeTimeline(this.state).meta.running;
+
     this.setState(appendUserToActive(this.state, display || message));
-    const result = await this.client.request<{ user_row_id?: number }>("prompt.submit", {
+    const result = await this.client.request<{ status?: string; user_row_id?: number }>("prompt.submit", {
       session_id: runtimeId,
       text: message,
     });
     this.setState(ackUserInActive(this.state, result?.user_row_id));
+
+    // Tell the user what the backend did with a mid-turn message: without this
+    // the text just sits in the transcript and looks ignored until the turn ends.
+    if (wasRunning) {
+      const status = result?.status;
+      if (status === "steered") {
+        this.notice("已插入当前任务，模型会在下一步看到它", "info");
+      } else if (status === "redirected") {
+        this.notice("已改为新方向", "info");
+      } else if (status === "queued") {
+        this.notice("已排队，当前任务结束后发送", "info");
+      }
+    }
   }
 
   /** Append a local notice line to the focused transcript. */

@@ -8,6 +8,38 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 00:40 · hermes · v0.3 按七条反馈返工
+
+- 改：新增 `src/ui/{TabStrip,HistoryPanel}.ts`、`tests/layout-classes.test.ts`、`scripts/audit-classes.mjs`；删 `src/ui/SessionSidebar.ts`；重写 `src/ui/{ChatPage,Composer,style.css}`；`src/app/controller.ts` 支持中途发送
+- 验证：`npm test` 261 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 32/32；`node scripts/audit-classes.mjs` 0 缺失
+- 遗留：会话删除/重命名（issue #5）；vault/sudo 等其余服务端请求（issue #4）
+- 下一步：issue #4
+
+### 这轮最重要的一条：宿主 CSS 里没有的类会静默失效
+
+插件跑在仪表盘**预编译**的 Tailwind 产物上，那份 CSS 只含仪表盘自己源码用过的类。我们新造的类如果不在其中，**不报错、不警告，属性完全不生效**。三个用户可见的 bug 全出自这里：
+
+- `resize-none` 不在 → 输入框保留原生缩放手柄（用户第 6 条）
+- `max-h-[70vh]` 不在 → 模型选择器没有高度上限
+- `text-[0.625rem]` 不在 → 用量行按 15px 基准渲染（用户第 5 条）
+
+注意**不能简单禁掉任意值语法**：实测 `text-[0.6875rem]`、`tracking-[0.06em]`、`w-[0.5em]`、`max-h-48` 都在宿主 CSS 里且生效，而 `mt-1.5`、`max-w-[16ch]`、`disabled:opacity-40`、`group-hover:opacity-100` 不在。判据是**这个类在不在**，不是它长什么样。于是：新增 `scripts/audit-classes.mjs`（对照真实编译产物逐个核对）与 `tests/layout-classes.test.ts`（守护，宿主缺失时回退到实测白名单）。
+
+### 其余六条的落点
+
+1. 命令目录原来被截到 12 条，且**过滤跑在截断后的列表上**——超过 12 的命令永远搜不到。改成渲染上限 200（列表可滚动），过滤针对全量。
+2. 布局改成：会话页签在顶、历史在右侧可收起。新增 `TabStrip` / `HistoryPanel`，删掉原来的左侧 `SessionSidebar`。
+3. `@` 补全原来要求 query 至少一个字符，而裸 `@` 恰恰是后端给出 `@diff` / `@file:` / `@folder:` / `@url:` 根的最有用情形。去掉长度限制。
+4. 气泡去掉「你」「HERMES」标签，靠左右对齐与配色区分。
+5. 用量行改用 `hb-text-tiny`（9.375px，比思考行 10.3125px 略小）；思考块的间距从失效的 `mt-1.5` 改成 `hb-stack-gap`（实测 7.5px）。
+6. 输入框 `resize:none`，去掉那个反直觉的原生手柄。
+7. 运行中允许发送：主按钮变「插入」，停止按钮降为次要；后端在 `prompt.submit` 的 `status` 里回报 queued / steered / redirected，页面把它显示成一行提示。
+
+### 又两个假断言（验收脚本）
+
+- 「无发言人标签」用全文正则匹配 `/^HERMES$/m`，命中的是**仪表盘自己的侧栏 logo**，不是气泡。改成只在转写区里找。
+- 「用量行字号」的断言被放在新建 tab 之后，那时聚焦的 tab 已经空转写区，量到 null；移到跑完一轮之后测量，并顺手把「思考块有真实间距」也补成断言（7.5px）。
+
 ## 2026-10-16 23:40 · hermes · v0.2 装修：把它做成正常 aichat 的样子
 
 - 改：新增 `src/core/{sessions,slash,attachments,metrics}.ts`、`src/ui/{Composer,SessionSidebar,ModelPicker}.ts`、`tests/{sessions,slash,attachments,metrics,hook-order}.test.ts`；重写 `src/app/controller.ts`（多会话）、`src/ui/{ChatPage,Bubble}.ts`；扩 `docs/01-protocol-contract.md`（slash/模型/附件/多会话/用量五节）

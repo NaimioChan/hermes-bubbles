@@ -8,7 +8,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页。
 
 ![气泡聊天页](docs/assets/chat-bubbles.png)
 
-左侧是会话列表（打开中的 tab + 历史），右侧是转写区：用户气泡、工具卡片、可展开的思考过程，底部输入框带附件、模型、思考强度与实时指标。
+打开的会话是顶部一排页签，历史会话在右侧面板（可收起），中间是转写区：气泡、工具卡片、半显式可展开的思考过程，底部输入框带附件、模型、思考强度与实时指标。
 
 ![斜杠命令菜单](docs/assets/slash-menu.png)
 
@@ -40,7 +40,7 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 | clarify 卡片 | 已交付 | 同上，按 `qid` 回答案 |
 | 多轮续聊 | 已交付 | 一个会话内连续发消息；`session.create` 一次，之后复用 runtime id |
 | 停止 | 已交付 | `session.interrupt`，失败也会本地封口气泡 |
-| 斜杠命令 | 已交付 | `/` 唤起菜单，目录一次拉全后本地过滤；`command.dispatch` 的六种指令都接了 |
+| 斜杠命令 | 已交付 | `/` 唤起菜单，目录一次拉全后本地过滤（不截断）；`command.dispatch` 的六种指令都接了 |
 | 会话列表与切换 | 已交付 | 侧栏两段：打开中的 tab 与历史会话，可新建、切换、关闭、重开 |
 | 多开会话 | 已交付 | 一条 socket 承载多个会话，事件按 `session_id` 分流，每个 tab 独立时间线 |
 | 附件 | 已交付 | `+` 按钮与拖放/粘贴；按类型走 `image.attach_bytes` / `pdf.attach` / `file.attach` |
@@ -49,7 +49,7 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 | 思考强度 | 已交付 | 七档 `config.set key=reasoning scope=session` |
 | 思考过程半显式 | 已交付 | 流式时显示最后一行 + 光标，结束后收成一行摘要，可展开全文 |
 | 实时指标 | 已交付 | 上下文条 + 占用百分比、缓存命中率、输出速度、花费，随 `session.usage` 更新 |
-| 中途 steer | 未开工 | `session.steer` 已有契约，未接 UI；running 时输入框仍禁用 |
+| 中途 steer | 已交付 | 运行中仍可发送；后端按 `prompt.submit` 的 busy 路径决定排队 / 插入 / 改向，页面把结果显示成一行提示 |
 | 会话删除 / 重命名 | 未开工 | `session.delete` / `session.title` 已有契约 |
 
 ## 架构
@@ -117,6 +117,18 @@ src/
 | 打包产物 | 112.5 KiB（不含 React） |
 
 插件的后端路由 `/api/plugins/hermes-bubbles/capabilities` 会在页面渲染前问一次后端「这些方法/事件还在不在」，缺任何一条就报出缺的名字。协议漂移时它会先坏在明处，而不是渲染出一个空对话。
+
+## 样式约束：只用宿主 CSS 里已有的类
+
+插件渲染在仪表盘**预编译**好的 Tailwind 产物里，那份 CSS 只包含仪表盘自己源码用过的类。我们新造一个它没有的类，**不会报错、不会有警告，就是那条属性完全不生效**。这一条踩出过三个可见 bug：`resize-none`（输入框保留原生缩放手柄）、`max-h-[70vh]`（模型选择器没有高度上限）、`text-[0.625rem]`（用量行按 15px 基准渲染）。
+
+所以：新样式一律写进 `src/ui/style.css`，作为显式的 `hb-` 类。
+
+```bash
+node scripts/audit-classes.mjs   # 列出所有「用了但宿主 CSS 里没有、也不会报错」的类
+```
+
+`tests/layout-classes.test.ts` 会守这条：`hb-` 类必须在自己的样式表里有定义，非 `hb-` 类必须在宿主 CSS 里存在（宿主没装时回退到一份实测过的白名单，保证新克隆也能跑）。
 
 ## 已知限制
 

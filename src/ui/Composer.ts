@@ -46,7 +46,15 @@ export interface ComposerProps {
   onError: (message: string) => void;
 }
 
-const MENU_LIMIT = 12;
+/**
+ * Cap on rows rendered in the popover.
+ *
+ * The list scrolls, so this is a rendering ceiling rather than a result limit:
+ * a fresh `/` on this install matches 100+ commands, and cutting the list at 12
+ * made most of them unreachable by typing more (the filter ran on the truncated
+ * set). Rendering 200 rows is cheap; the user scrolls or types to narrow.
+ */
+const MENU_LIMIT = 200;
 
 export function Composer(props: ComposerProps) {
   const { sdk } = props;
@@ -74,7 +82,10 @@ export function Composer(props: ComposerProps) {
   const pathVisible = Boolean(atToken && pathItems.length);
 
   useEffect(() => {
-    if (!atToken || atToken.query.length < 1) {
+    // A bare "@" is the most useful case: the backend answers it with the
+    // reference roots (@diff / @file: / @folder: / @url:). Requiring at least one
+    // character here was why typing "@" showed nothing.
+    if (!atToken) {
       setPathItems([]);
       return;
     }
@@ -143,7 +154,7 @@ export function Composer(props: ComposerProps) {
 
   const submit = useCallback(() => {
     const value = text.trim();
-    if (!value || props.running) return;
+    if (!value) return;
     setText("");
     setCaret(0);
     setMenuDismissed(false);
@@ -209,6 +220,7 @@ export function Composer(props: ComposerProps) {
     [props],
   );
 
+  const canSend = Boolean(text.trim()) && props.connected;
   const chips = metricChips(props.usage);
   const tone = pressureTone(null);
   const contextChip = chips.find((c) => c.key === "context");
@@ -234,7 +246,7 @@ export function Composer(props: ComposerProps) {
                 "span",
                 {
                   key: item.id,
-                  className: "inline-flex items-center gap-1.5 px-2 py-1 text-[0.6875rem]",
+                  className: "hb-text-micro inline-flex items-center gap-1.5 px-2 py-1",
                   style: {
                     background: "var(--color-muted)",
                     color: "var(--color-foreground)",
@@ -242,7 +254,7 @@ export function Composer(props: ComposerProps) {
                   },
                 },
                 React.createElement("span", null, item.kind === "image" ? "🖼" : item.kind === "pdf" ? "📄" : "📎"),
-                React.createElement("span", { className: "max-w-[16ch] truncate" }, item.name),
+                React.createElement("span", { className: "hb-truncate hb-max-w-16ch" }, item.name),
                 item.size ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, formatBytes(item.size)) : null,
                 item.status === "staging"
                   ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "…")
@@ -296,7 +308,7 @@ export function Composer(props: ComposerProps) {
                   ? React.createElement(
                       "span",
                       {
-                        className: "px-1 text-[0.625rem]",
+                        className: "hb-text-tiny px-1",
                         style: { background: "var(--color-muted)", borderRadius: "3px", color: "var(--color-muted-foreground)" },
                       },
                       "技能",
@@ -389,7 +401,7 @@ export function Composer(props: ComposerProps) {
           placeholder: props.connected
             ? "发消息，或输入 / 唤起命令、@ 引用文件"
             : "连接中…",
-          className: "max-h-48 min-h-[2rem] flex-1 resize-none bg-transparent py-1.5 text-sm outline-none",
+          className: "hb-resize-none hb-min-h-input max-h-48 flex-1 bg-transparent py-1.5 text-sm outline-none",
           style: { color: "var(--color-foreground)", fontFamily: "var(--font-sans)" },
           onChange: (event: { target: { value: string; selectionStart: number } }) => {
             setText(event.target.value);
@@ -411,7 +423,7 @@ export function Composer(props: ComposerProps) {
             {
               type: "button",
               title: `模型：${props.model || "默认"}（点击切换）`,
-              className: "max-w-[18ch] cursor-pointer truncate px-2 py-1.5 text-[0.6875rem]",
+              className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
               style: { color: "var(--color-muted-foreground)" },
               onClick: props.onOpenModelPicker,
             },
@@ -422,7 +434,7 @@ export function Composer(props: ComposerProps) {
             {
               type: "button",
               title: `思考强度：${reasoningLabel(props.reasoning || "medium")}`,
-              className: "cursor-pointer px-2 py-1.5 text-[0.6875rem]",
+              className: "hb-text-micro cursor-pointer px-2 py-1.5",
               style: { color: "var(--color-muted-foreground)" },
               onClick: () => {
                 const current = props.reasoning || "medium";
@@ -433,36 +445,47 @@ export function Composer(props: ComposerProps) {
             },
             `思考·${reasoningLabel(props.reasoning || "medium")}`,
           ),
+          // While a turn runs the primary action becomes "插入": the message is
+          // delivered mid-turn (queued / steered / redirected by the backend).
+          // Stop is a separate control so correcting and cancelling do not
+          // compete for the same button.
           props.running
             ? React.createElement(
                 "button",
                 {
                   type: "button",
-                  className: "cursor-pointer px-3 py-1.5 text-xs",
+                  title: "停止当前任务",
+                  className: "cursor-pointer px-2.5 py-1.5 text-xs",
                   style: {
-                    background: "var(--color-destructive)",
-                    color: "var(--color-destructive-foreground, #fff)",
+                    background: "var(--color-muted)",
+                    color: "var(--color-muted-foreground)",
                     borderRadius: "calc(var(--radius) * 0.6)",
                   },
                   onClick: props.onStop,
                 },
                 "停止",
               )
-            : React.createElement(
-                "button",
-                {
-                  type: "button",
-                  disabled: !text.trim() || !props.connected,
-                  className: "cursor-pointer px-3 py-1.5 text-xs disabled:opacity-40",
-                  style: {
-                    background: "var(--color-primary)",
-                    color: "var(--color-primary-foreground)",
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                  },
-                  onClick: submit,
-                },
-                "发送",
-              ),
+            : null,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              disabled: !canSend,
+              title: props.running ? "插入到当前任务" : "发送",
+              className: "cursor-pointer px-3 py-1.5 text-xs",
+              style: {
+                background: props.running ? "var(--color-muted)" : "var(--color-primary)",
+                color: props.running ? "var(--color-foreground)" : "var(--color-primary-foreground)",
+                borderRadius: "calc(var(--radius) * 0.6)",
+                // `disabled:opacity-40` is absent from the host bundle, so the
+                // dimming is done here rather than hoped for.
+                opacity: canSend ? 1 : 0.4,
+                cursor: canSend ? "pointer" : "default",
+              },
+              onClick: submit,
+            },
+            props.running ? "插入" : "发送",
+          ),
         ),
       ),
 
@@ -470,7 +493,7 @@ export function Composer(props: ComposerProps) {
       React.createElement(
         "div",
         {
-          className: "mt-1 flex items-center gap-3 px-1 text-[0.6875rem] tabular-nums",
+          className: "hb-text-micro mt-1 flex items-center gap-3 px-1 tabular-nums",
           style: { color: "var(--color-muted-foreground)" },
         },
         props.status

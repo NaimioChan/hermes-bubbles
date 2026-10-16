@@ -1,13 +1,14 @@
 /**
- * The page: session sidebar, transcript, composer, approval cards.
+ * The page: tab strip on top, transcript in the middle, history panel on the
+ * right, composer at the bottom.
  *
  * This is what the registry mounts at `/chat`. It owns a `ChatController` and
  * re-renders from it through `useSyncExternalStore`, so a streaming turn costs
  * one render per event batch and nothing re-renders that did not change.
  *
  * Everything with a decision in it lives in `core/` or the controller; this file
- * is wiring, layout, and the two pieces of state that are genuinely view-local
- * (the approval cards on screen and the model picker's open/closed flag).
+ * is wiring and the state that is genuinely view-local (approval cards on
+ * screen, the model picker's open flag, the history panel's collapsed state).
  */
 
 import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
@@ -17,8 +18,9 @@ import type { TimelineItem } from "../core/types";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
+import { HistoryPanel, type StoredSession } from "./HistoryPanel";
 import { ModelPicker } from "./ModelPicker";
-import { SessionSidebar, type StoredSession } from "./SessionSidebar";
+import { TabStrip } from "./TabStrip";
 import { runningLabel } from "./format";
 import type { HermesPluginSdk } from "./sdk";
 
@@ -60,7 +62,7 @@ function ApprovalCardView({
       ? React.createElement(
           "pre",
           {
-            className: "hb-pre mt-1 p-2",
+            className: "hb-pre hb-mt-sm p-2",
             style: {
               fontFamily: "var(--font-mono)",
               fontSize: "0.8125rem",
@@ -73,7 +75,7 @@ function ApprovalCardView({
       : null,
     React.createElement(
       "div",
-      { className: "mt-2 flex flex-wrap gap-2" },
+      { className: "hb-stack-gap flex flex-wrap gap-2" },
       choices.map((choice) =>
         React.createElement(
           "button",
@@ -126,7 +128,7 @@ function ClarifyCardView({
         question.choices
           ? React.createElement(
               "div",
-              { className: "mt-1 flex flex-wrap gap-2" },
+              { className: "hb-mt-sm flex flex-wrap gap-2" },
               question.choices.map((choice) =>
                 React.createElement(
                   "button",
@@ -172,6 +174,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [catalog, setCatalog] = useState<CommandEntry[]>([]);
   const [stored, setStored] = useState<StoredSession[]>([]);
   const [loadingStored, setLoadingStored] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
@@ -362,82 +365,96 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   }, [controller]);
 
   const tabs: readonly SessionTab[] = state.tabs;
+  const activeStoredId = tabs.find((t) => t.key === state.activeKey)?.storedId ?? null;
   const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
 
   return React.createElement(
     "div",
-    { className: "flex h-full min-h-0" },
+    { className: "flex h-full min-h-0 flex-col" },
 
-    React.createElement(SessionSidebar, {
+    // ── tabs ────────────────────────────────────────────────────────────
+    React.createElement(TabStrip, {
       sdk,
       tabs,
       activeKey: state.activeKey,
       runningKeys: running,
-      stored,
-      loadingStored,
+      historyOpen,
       onFocus: (key: string) => controller.focusSession(key),
       onClose: (key: string) => controller.closeSession(key),
       onNew,
-      onOpenStored,
-      onRefresh: refreshStored,
+      onToggleHistory: () => setHistoryOpen((v: boolean) => !v),
     }),
 
+    // ── transcript + history ────────────────────────────────────────────
     React.createElement(
       "div",
-      { className: "flex h-full min-h-0 flex-1 flex-col" },
+      { className: "flex min-h-0 flex-1" },
 
-      // ── transcript ──────────────────────────────────────────────────────
       React.createElement(
         "div",
-        { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll" },
+        { className: "flex min-h-0 flex-1 flex-col" },
         React.createElement(
           "div",
-          { className: "mx-auto flex flex-col gap-3", style: { maxWidth: "860px" } },
-          timeline.items.length === 0
-            ? React.createElement(
+          { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll" },
+          React.createElement(
+            "div",
+            { className: "mx-auto flex flex-col gap-3", style: { maxWidth: "860px" } },
+            timeline.items.length === 0
+              ? React.createElement(
+                  "div",
+                  { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
+                  "开始一段对话。输入 / 唤起命令。",
+                )
+              : timeline.items.map((item: TimelineItem) =>
+                  React.createElement(Bubble, { key: item.id, sdk, item }),
+                ),
+            cards.map((card) =>
+              React.createElement(
                 "div",
-                { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
-                "开始一段对话。输入 / 唤起命令。",
-              )
-            : timeline.items.map((item: TimelineItem) =>
-                React.createElement(Bubble, { key: item.id, sdk, item }),
+                { key: card.id },
+                card.kind === "approval"
+                  ? React.createElement(ApprovalCardView, { sdk, card, onAnswer: answer })
+                  : React.createElement(ClarifyCardView, { sdk, card, onAnswer: answerClarify }),
               ),
-          cards.map((card) =>
-            React.createElement(
-              "div",
-              { key: card.id },
-              card.kind === "approval"
-                ? React.createElement(ApprovalCardView, { sdk, card, onAnswer: answer })
-                : React.createElement(ClarifyCardView, { sdk, card, onAnswer: answerClarify }),
             ),
+            error
+              ? React.createElement("div", { className: "text-xs", style: { color: "var(--color-destructive)" } }, error)
+              : null,
+            React.createElement("div", { ref: bottomRef }),
           ),
-          error
-            ? React.createElement("div", { className: "text-xs", style: { color: "var(--color-destructive)" } }, error)
-            : null,
-          React.createElement("div", { ref: bottomRef }),
         ),
+
+        React.createElement(Composer, {
+          sdk,
+          running: timeline.meta.running,
+          status,
+          connected: timeline.meta.connected,
+          usage: timeline.meta.usage,
+          model: modelChoice.model || timeline.meta.model,
+          provider: modelChoice.provider || timeline.meta.provider,
+          reasoning,
+          attachments,
+          catalog,
+          onSend,
+          onStop,
+          onPickFiles,
+          onRemoveAttachment,
+          onOpenModelPicker: openModelPicker,
+          onPickReasoning,
+          onCompletePath,
+          onError: setError,
+        }),
       ),
 
-      // ── composer ────────────────────────────────────────────────────────
-      React.createElement(Composer, {
+      React.createElement(HistoryPanel, {
         sdk,
-        running: timeline.meta.running,
-        status,
-        connected: timeline.meta.connected,
-        usage: timeline.meta.usage,
-        model: modelChoice.model || timeline.meta.model,
-        provider: modelChoice.provider || timeline.meta.provider,
-        reasoning,
-        attachments,
-        catalog,
-        onSend,
-        onStop,
-        onPickFiles,
-        onRemoveAttachment,
-        onOpenModelPicker: openModelPicker,
-        onPickReasoning,
-        onCompletePath,
-        onError: setError,
+        open: historyOpen,
+        sessions: stored,
+        loading: loadingStored,
+        activeStoredId,
+        onOpen: onOpenStored,
+        onRefresh: refreshStored,
+        onClose: () => setHistoryOpen(false),
       }),
     ),
 

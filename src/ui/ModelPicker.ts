@@ -56,7 +56,7 @@ export function ModelPicker(props: ModelPickerProps) {
     React.createElement(
       "div",
       {
-        className: "flex max-h-[70vh] w-full flex-col overflow-hidden",
+        className: "hb-max-h-70vh flex w-full flex-col overflow-hidden",
         style: {
           maxWidth: "34rem",
           background: "var(--color-card)",
@@ -114,8 +114,9 @@ export function ModelPicker(props: ModelPickerProps) {
       React.createElement("input", {
         value: filter,
         placeholder: "筛选模型…",
-        className: "m-3 mb-1 bg-transparent px-2 py-1.5 text-xs outline-none",
+        className: "mb-1 bg-transparent px-2 py-1.5 text-xs outline-none",
         style: {
+          margin: "0.75rem 0.75rem 0.25rem",
           color: "var(--color-foreground)",
           borderRadius: "calc(var(--radius) * 0.6)",
           boxShadow: "inset 0 0 0 1px var(--color-border)",

@@ -94,6 +94,18 @@ export class ChatController {
     void this.client.connect();
   }
 
+  /**
+   * Wait until the socket is usable, then open a session.
+   *
+   * The await is the point: `connect()` is fire-and-forget, so an immediate
+   * `openSession()` sends `session.create` before a socket exists and fails with
+   * "gateway not connected" — on a connection that succeeds moments later.
+   */
+  async start(storedId?: string): Promise<void> {
+    await this.client.ensureOpen();
+    await this.openSession(storedId);
+  }
+
   dispose(): void {
     this.client.dispose();
     this.listeners.clear();
@@ -132,6 +144,7 @@ export class ChatController {
     if (!id || this.resyncing) return;
     this.resyncing = true;
     try {
+      await this.client.ensureOpen();
       const result = await this.client.request<{ messages: TranscriptMessage[] }>("session.history", {
         session_id: id,
       });
@@ -164,7 +177,7 @@ export class ChatController {
     const trimmed = text.trim();
     if (!trimmed) return;
     if (!this.timeline.meta.runtimeId) {
-      await this.openSession();
+      await this.start();
     }
     const sessionId = this.timeline.meta.runtimeId;
     if (!sessionId) throw new Error("会话尚未建立");
@@ -196,6 +209,11 @@ export class ChatController {
   private handleEvent(event: GatewayEvent): void {
     if (event.type === "gateway.ready") {
       this.dedupe.setEpoch(this.client.epoch);
+      // `gateway.ready` is the first frame and the proof the channel works.
+      // Reduce it (rather than returning early) so `meta.connected` flips true
+      // and the composer leaves its disabled "连接中…" state.
+      const next = reduceEvent(this.timeline, event);
+      if (next !== this.timeline) this.setTimeline(next);
       return;
     }
 

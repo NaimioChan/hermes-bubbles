@@ -272,8 +272,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.setServerRequestSink((card) => {
       setCards((prev) => [...prev, { ...card, kind: card.method === "approval" ? "approval" : "clarify" }]);
     });
-    controller.connect();
-    controller.openSession().catch((err: unknown) => {
+    // `start()` waits for the socket before opening the session. Calling
+    // `connect()` then `openSession()` races and reports "gateway not connected"
+    // on a connection that succeeds a moment later.
+    controller.start().catch((err: unknown) => {
       setError(err instanceof Error ? err.message : String(err));
     });
     return () => {

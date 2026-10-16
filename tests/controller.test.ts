@@ -286,6 +286,7 @@ describe("resync", () => {
     socket.event("message.complete", { text: "", status: "complete" }, { session_id: "runtime-1", seq: 2 });
 
     const resyncing = controller.resync();
+    await tick();
     const index = socket.frames().findIndex((f) => f.method === "session.history");
     socket.reply(index, {
       count: 2,
@@ -306,6 +307,7 @@ describe("resync", () => {
     socket.event("message.delta", { text: "正在写" }, { session_id: "runtime-1", seq: 2 });
 
     const resyncing = controller.resync();
+    await tick();
     const index = socket.frames().findIndex((f) => f.method === "session.history");
     socket.reply(index, { count: 1, messages: [{ role: "user", text: "问题" }] });
     await resyncing;
@@ -319,6 +321,7 @@ describe("resync", () => {
     const { controller, socket } = await boot();
     socket.event("message.delta", { text: "别丢我" }, { session_id: "runtime-1", seq: 1 });
     const resyncing = controller.resync();
+    await tick();
     const index = socket.frames().findIndex((f) => f.method === "session.history");
     socket.deliver({ jsonrpc: "2.0", id: socket.frames()[index]?.id, error: { code: -32000, message: "boom" } });
     await resyncing;
@@ -342,5 +345,65 @@ describe("subscription", () => {
   it("returns a stable snapshot between changes (React requirement)", async () => {
     const { controller } = await boot();
     expect(controller.getSnapshot()).toBe(controller.getSnapshot());
+  });
+});
+
+describe("connect race (regression: 'gateway not connected' on a healthy socket)", () => {
+  it("waits for the socket before opening the session", async () => {
+    const controller = makeController();
+    // start() must not resolve until a socket exists; the URL provider is async,
+    // so a naive connect()+openSession() sends session.create into the void.
+    const started = controller.start();
+    await tick();
+    const socket = FakeSocket.instances.at(-1) as FakeSocket;
+    socket.open();
+    socket.event("gateway.ready", { heartbeat: false, replay_epoch: "e" });
+    await tick();
+
+    const index = socket.frames().findIndex((f) => f.method === "session.create");
+    expect(index).toBeGreaterThanOrEqual(0);
+    socket.reply(index, { session_id: "runtime-1", messages: [], info: {} });
+    await started;
+    expect(controller.getSnapshot().meta.runtimeId).toBe("runtime-1");
+  });
+
+  it("never surfaces 'gateway not connected' while the socket is still coming up", async () => {
+    const controller = makeController();
+    const started = controller.start().catch((e: unknown) => (e as Error).message);
+    await tick();
+    const socket = FakeSocket.instances.at(-1) as FakeSocket;
+    socket.open();
+    socket.event("gateway.ready", { heartbeat: false, replay_epoch: "e" });
+    await tick();
+    const index = socket.frames().findIndex((f) => f.method === "session.create");
+    socket.reply(index, { session_id: "runtime-1", messages: [], info: {} });
+    const outcome = await started;
+    expect(outcome).not.toBe("gateway not connected");
+  });
+
+  it("flips meta.connected on gateway.ready so the composer enables", async () => {
+    const { controller } = await connectAndOpen();
+    expect(controller.getSnapshot().meta.connected).toBe(true);
+  });
+
+  it("keeps the composer disabled until gateway.ready arrives", async () => {
+    const controller = makeController();
+    controller.connect();
+    await tick();
+    const socket = FakeSocket.instances.at(-1) as FakeSocket;
+    socket.open();
+    // Socket open, but the backend has not spoken yet.
+    expect(controller.getSnapshot().meta.connected).toBe(false);
+    socket.event("gateway.ready", { heartbeat: false, replay_epoch: "e" });
+    expect(controller.getSnapshot().meta.connected).toBe(true);
+  });
+
+  it("rejects ensureOpen on a terminal auth refusal instead of hanging", async () => {
+    const controller = makeController();
+    const started = controller.start().catch((e: unknown) => (e as Error).message);
+    await tick();
+    const socket = FakeSocket.instances.at(-1) as FakeSocket;
+    socket.onclose?.({ code: 4401 });
+    await expect(started).resolves.toMatch(/鉴权/);
   });
 });

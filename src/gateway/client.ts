@@ -32,6 +32,17 @@ export class GatewayClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private everConnected = false;
+  /** Short machine tag for the last terminal failure: "auth" | "scope" | "". */
+  private failureKind = "";
+  /** Human-facing text for that failure. */
+  private failureMessage = "";
+  /**
+   * Callers that need a usable socket (any RPC) park here until one exists.
+   * Without this, `connect(); openSession();` races: the RPC is sent before the
+   * URL even resolves, and the caller sees "gateway not connected" on a socket
+   * that comes up milliseconds later.
+   */
+  private openWaiters: { resolve: () => void; reject: (error: Error) => void }[] = [];
   /** Epoch reported by the backend, exposed so the dedupe gate can key on it. */
   epoch = "";
 
@@ -99,6 +110,7 @@ export class GatewayClient {
         close: () => socket.close(),
       };
       this.channel.bind(transport);
+      this.settleOpenWaiters(null);
       if (this.everConnected) this.options.onReconnected?.();
       this.everConnected = true;
     };
@@ -125,7 +137,10 @@ export class GatewayClient {
       // 4401/4403 are auth/scope refusals: retrying with the same credential
       // will fail identically, so stop and surface it.
       if (event.code === 4401 || event.code === 4403) {
-        this.setState("error", event.code === 4401 ? "鉴权失败，请刷新页面" : "聊天功能未启用");
+        this.failureKind = event.code === 4401 ? "auth" : "scope";
+        this.failureMessage = event.code === 4401 ? "鉴权失败，请刷新页面" : "聊天功能未启用";
+        this.settleOpenWaiters(new Error(this.failureMessage));
+        this.setState("error", this.failureMessage);
         return;
       }
       this.dropAndReconnect();
@@ -160,9 +175,41 @@ export class GatewayClient {
   request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     return this.channel.request<T>(method, params);
   }
+  /**
+   * Resolve once a socket is usable, starting one if needed.
+   *
+   * Callers should await this instead of `connect()` when they are about to send
+   * an RPC. `connect()` alone is fire-and-forget: it returns before the URL
+   * provider resolves, so an immediate `request()` fails on a socket that is
+   * about to be fine.
+   */
+  async ensureOpen(): Promise<void> {
+    if (this.disposed) throw new Error("gateway disposed");
+    if (this.state === "open" && this.channel.isBound) return;
+    // 4401/4403 are terminal auth/scope refusals: waiting will not help, and
+    // the reconnect loop has already stopped.
+    if (this.state === "error" && (this.failureKind === "auth" || this.failureKind === "scope")) {
+      throw new Error(this.failureMessage || "gateway unavailable");
+    }
+    const waiter = new Promise<void>((resolve, reject) => {
+      this.openWaiters.push({ resolve, reject });
+    });
+    void this.connect();
+    return waiter;
+  }
+
+  private settleOpenWaiters(error: Error | null): void {
+    const waiters = this.openWaiters;
+    this.openWaiters = [];
+    for (const waiter of waiters) {
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+  }
 
   dispose(): void {
     this.disposed = true;
+    this.settleOpenWaiters(new Error("gateway disposed"));
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

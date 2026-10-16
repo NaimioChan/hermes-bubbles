@@ -187,6 +187,25 @@ async function main() {
     await waitFor(session, "Boolean(document.querySelector('textarea'))", { label: "composer textarea" });
     check("bubble composer rendered", true);
 
+    // Regression: the composer must leave "连接中…" on its own, with no user
+    // action. The original bug fired session.create before the socket existed,
+    // painted "gateway not connected", and only recovered if you typed.
+    let composerReady = false;
+    const composerDeadline = Date.now() + 15000;
+    while (Date.now() < composerDeadline && !composerReady) {
+      composerReady = await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        return Boolean(ta) && !ta.disabled && !ta.placeholder.includes('连接中');
+      })()`);
+      if (!composerReady) await sleep(500);
+    }
+    check("composer becomes ready without user action (connect race)", composerReady === true);
+
+    const noGatewayError = await session.evaluate(
+      `!document.body.innerText.includes('gateway not connected')`,
+    );
+    check("no 'gateway not connected' banner on a healthy socket", noGatewayError === true);
+
     const hasXterm = await session.evaluate("Boolean(document.querySelector('.xterm'))");
     check("built-in xterm terminal is gone (route overridden)", hasXterm === false, `xterm present: ${hasXterm}`);
 

@@ -12,12 +12,30 @@ export interface Usage {
   model?: string;
   input?: number;
   output?: number;
+  reasoning?: number;
+  prompt?: number;
+  completion?: number;
   total?: number;
+  calls?: number;
+  compressions?: number;
+  /** Context window occupancy; `context_max` absent means no budget was reported. */
   context_used?: number;
   context_max?: number;
   context_percent?: number;
+  context_source?: string;
+  /** The backend estimated rather than measured — the UI prefixes `~`. */
+  context_estimated?: boolean;
+  /** Rolling cache hit rate; absent when the provider reports no cache reads. */
+  cache_hit_pct?: number;
+  cache_read?: number;
+  cache_write?: number;
+  avg_latency_s?: number;
+  /** Rolling output throughput; absent before the first completed call. */
+  avg_tps?: number;
+  active_subagents?: number;
   cost_usd?: number;
-  calls?: number;
+  cost_status?: string;
+  credits_lines?: string[];
 }
 
 export interface UserItem {
@@ -83,6 +101,8 @@ export interface SessionMeta {
   title: string;
   model: string;
   provider: string;
+  /** Reasoning level the route is using; "" when the session has not said. */
+  reasoningEffort: string;
   running: boolean;
   usage: Usage | null;
   /** Last `status.update.text`, cleared when the turn ends. */
@@ -96,6 +116,7 @@ export const emptyMeta: SessionMeta = {
   title: "",
   model: "",
   provider: "",
+  reasoningEffort: "",
   running: false,
   usage: null,
   status: "",

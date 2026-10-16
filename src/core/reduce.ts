@@ -330,6 +330,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
           ...meta,
           model: str(info.model) || meta.model,
           provider: str(info.provider) || meta.provider,
+          reasoningEffort: str(info.reasoning_effort) || meta.reasoningEffort,
           running: typeof info.running === "boolean" ? info.running : meta.running,
           title: str(info.title) || meta.title,
           usage: (info.usage as Usage | null) ?? meta.usage,

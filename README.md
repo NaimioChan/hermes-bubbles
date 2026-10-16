@@ -8,6 +8,10 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页。
 
 ![气泡聊天页](docs/assets/chat-bubbles.png)
 
+左侧是会话列表（打开中的 tab + 历史），右侧是转写区：用户气泡、工具卡片、可展开的思考过程，底部输入框带附件、模型、思考强度与实时指标。
+
+![斜杠命令菜单](docs/assets/slash-menu.png)
+
 ## 快速开始
 
 ```bash
@@ -31,33 +35,47 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 |---|---|---|
 | 流式气泡 | 已交付 | `message.delta` 逐块追加到当前气泡，末尾带闪烁光标 |
 | 工具卡片 | 已交付 | 按 `tool_id` 配对 start/complete，运行中展开、完成后折叠，左侧状态色条 |
-| 推理折叠 | 已交付 | `reasoning.delta` 收进气泡下方的可展开区 |
 | 历史恢复 | 已交付 | `session.history` 投影成同样的气泡结构，刷新后不丢 |
 | 审批卡片 | 已交付 | `approval` 服务端请求渲染成允许/拒绝按钮，直接回帧 |
 | clarify 卡片 | 已交付 | 同上，按 `qid` 回答案 |
 | 多轮续聊 | 已交付 | 一个会话内连续发消息；`session.create` 一次，之后复用 runtime id |
 | 停止 | 已交付 | `session.interrupt`，失败也会本地封口气泡 |
-| 会话列表 / 切换 | 未开工 | 现在每次打开 `/chat` 都是新会话 |
-| 附件 / 粘贴图片 | 未开工 | 需要 `file.attach` + 上传 |
-| 中途 steer | 未开工 | `session.steer` 已有契约，未接 UI |
+| 斜杠命令 | 已交付 | `/` 唤起菜单，目录一次拉全后本地过滤；`command.dispatch` 的六种指令都接了 |
+| 会话列表与切换 | 已交付 | 侧栏两段：打开中的 tab 与历史会话，可新建、切换、关闭、重开 |
+| 多开会话 | 已交付 | 一条 socket 承载多个会话，事件按 `session_id` 分流，每个 tab 独立时间线 |
+| 附件 | 已交付 | `+` 按钮与拖放/粘贴；按类型走 `image.attach_bytes` / `pdf.attach` / `file.attach` |
+| `@` 路径引用 | 已交付 | `complete.path` 补全 |
+| 模型选择 | 已交付 | `model.options` 列表 + `config.set`；会话级切换，贵的模型会回报确认要求 |
+| 思考强度 | 已交付 | 七档 `config.set key=reasoning scope=session` |
+| 思考过程半显式 | 已交付 | 流式时显示最后一行 + 光标，结束后收成一行摘要，可展开全文 |
+| 实时指标 | 已交付 | 上下文条 + 占用百分比、缓存命中率、输出速度、花费，随 `session.usage` 更新 |
+| 中途 steer | 未开工 | `session.steer` 已有契约，未接 UI；running 时输入框仍禁用 |
+| 会话删除 / 重命名 | 未开工 | `session.delete` / `session.title` 已有契约 |
 
 ## 架构
 
 ```
 src/
 ├── core/          纯逻辑，无 DOM 无 socket，全部可单测
-│   ├── types.ts       时间线模型（气泡 / 工具卡 / 提示）
+│   ├── types.ts       时间线模型（气泡 / 工具卡 / 提示 / 用量）
 │   ├── reduce.ts      事件 → 时间线
 │   ├── history.ts     历史行 → 时间线
+│   ├── sessions.ts    多会话 store：tab、事件分流、历史替换
+│   ├── slash.ts       斜杠 token / 补全 / dispatch 解析、推理档位
+│   ├── attachments.ts 附件队列、@ token、体积与类型筛查
+│   ├── metrics.ts     用量指标格式化与压力分级
 │   └── dedupe.ts      跨 socket 重复投递闸门
 ├── gateway/       传输
 │   ├── channel.ts     JSON-RPC 通道（请求 / 事件 / 服务端请求）
-│   └── client.ts      socket 生命周期 + 重连退避
+│   └── client.ts      socket 生命周期 + 重连退避 + ensureOpen
 ├── app/
-│   └── controller.ts  会话控制：过滤、去重、乐观气泡、重连补拉
+│   └── controller.ts  会话控制：RPC 网关、路由、模型切换、附件、重同步
 ├── ui/            渲染
-│   ├── ChatPage.ts    页面骨架
-│   ├── Bubble.ts    三种消息块
+│   ├── ChatPage.ts    页面骨架与状态接线
+│   ├── SessionSidebar.ts  会话列表（打开中 / 历史）
+│   ├── Composer.ts    输入框、斜杠菜单、附件托盘、指标条
+│   ├── ModelPicker.ts 模型与思考强度选择器
+│   ├── Bubble.ts      消息块与可展开的思考过程
 │   ├── format.ts      纯展示逻辑（工具名、截断、耗时）
 │   └── style.css      变量驱动的少量样式
 └── index.ts       注册入口
@@ -80,8 +98,8 @@ src/
 
 ## 验证
 
-- `npm test` — 109 项，覆盖归约、历史投影、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（含重连与重同步）。
-- `node scripts/verify.mjs` — 13 项，对**真实仪表盘**跑：插件接管 `/chat`、内置 xterm 消失、主题变量生效、后端能力探针通过、发一条消息后用户气泡出现、助手回答以气泡形式回来、控制台无报错。跑的是真模型真往返。
+- `npm test` — 254 项，覆盖归约、历史投影、多会话分流、斜杠解析与补全、附件队列、用量指标、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（含多开、模型切换、附件、重连与重同步），以及一条**源码级守卫**（钩子不得出现在提前 return 之后——React #310 就是它漏掉的）。
+- `node scripts/verify.mjs` — 24 项，对**真实仪表盘**跑：插件接管 `/chat`、内置 xterm 消失、主题变量生效、后端能力探针通过、无人工操作下输入框自行就绪、`/` 唤起并按字过滤命令、接受补全后 token 被替换、侧栏两段渲染、新建 tab、`+` 与文件输入、模型选择器列出真实 provider、思考强度档位、跑完一轮后指标条出现、控制台无报错。跑的是真模型真往返。
 
 验收截图由该脚本产出，落在 `.cache/shots/`。
 
@@ -96,7 +114,7 @@ src/
 | 需要的事件 | `message.start` `message.delta` `message.interim` `message.complete` `reasoning.delta` `tool.start` `tool.complete` `status.update` `session.usage` `session.title` `session.info` `notice` `error` |
 | 需要的服务端请求 | `approval` `clarify` |
 | Node | 24.21.0 |
-| 打包产物 | 53.5 KiB（不含 React） |
+| 打包产物 | 112.5 KiB（不含 React） |
 
 插件的后端路由 `/api/plugins/hermes-bubbles/capabilities` 会在页面渲染前问一次后端「这些方法/事件还在不在」，缺任何一条就报出缺的名字。协议漂移时它会先坏在明处，而不是渲染出一个空对话。
 

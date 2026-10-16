@@ -141,6 +141,7 @@ export interface LiveSessionSnapshot {
     provider?: string;
     title?: string;
     running?: boolean;
+    reasoning_effort?: string;
     usage?: Usage | null;
   } | null;
 }
@@ -156,6 +157,7 @@ export function timelineFromSnapshot(snapshot: LiveSessionSnapshot, now = Date.n
       title: info.title ?? "",
       model: info.model ?? "",
       provider: info.provider ?? "",
+      reasoningEffort: info.reasoning_effort ?? "",
       running: Boolean(info.running ?? snapshot.running),
       usage: info.usage ?? null,
       status: "",

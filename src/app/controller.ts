@@ -1,22 +1,37 @@
 /**
- * Session controller: the seam between the socket and React.
+ * The app-facing controller.
  *
- * Owns one `GatewayClient`, one timeline, and the rules that only make sense
- * with both in hand — filtering events to the active session, deduplicating
- * fan-out copies, and binding the optimistic user bubble to the backend's
- * acknowledgement.
+ * Owns one socket and the multi-session store, and exposes them to React through
+ * `subscribe()`/`getSnapshot()` (consumed with `useSyncExternalStore`).
  *
- * Framework-free on purpose: it is driven by `subscribe()`/`getSnapshot()` so
- * React can consume it through `useSyncExternalStore`, and tests can drive it
- * with a fake socket and no renderer.
+ * Framework-free on purpose: the whole session lifecycle — open, focus, route,
+ * send, stop, switch model — is exercisable with a fake socket and no renderer.
+ * See AGENTS.md 铁律 1–2.
  */
 
+import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
 import { EventDedupe } from "../core/dedupe";
-import { projectHistory, timelineFromSnapshot, type LiveSessionSnapshot, type TranscriptMessage } from "../core/history";
-import { ackUser, appendUser, reduceEvent, settleTimeline, type GatewayEvent } from "../core/reduce";
-import { emptyTimeline, type Timeline, type TimelineItem } from "../core/types";
-import { GatewayClient, type ConnectionState } from "../gateway/client";
+import { reduceEvent, type GatewayEvent } from "../core/reduce";
+import {
+  ackUserInActive,
+  activeTimeline,
+  appendUserToActive,
+  bindSnapshot,
+  closeTab,
+  emptyMultiState,
+  focus,
+  openDraft,
+  openStored,
+  replaceHistory,
+  routeEvent,
+  settleActive,
+  timelineOf,
+  type MultiState,
+} from "../core/sessions";
+import { parseCommandInput, parseDispatch, type DispatchResult } from "../core/slash";
+import type { TimelineItem } from "../core/types";
 import type { ServerRequest } from "../gateway/channel";
+import { GatewayClient, type ConnectionState } from "../gateway/client";
 
 export interface ServerRequestCard {
   id: string;
@@ -29,25 +44,29 @@ export interface ServerRequestCard {
 export interface ControllerOptions {
   urlProvider: () => Promise<string>;
   socketFactory?: (url: string) => WebSocket;
-  /** Called when the backend asks a question this page can render (approval, clarify). */
   onServerRequest?: (card: ServerRequestCard) => void;
-  /** prompt.submit's ack deadline; the desktop uses 30 min because a turn can legitimately run long. */
-  promptTimeoutMs?: number;
 }
 
 /** Server→client requests this page renders. Anything else is answered `-32601`. */
 const HANDLED_REQUESTS = new Set(["approval", "clarify"]);
 
+export interface ModelOptionProvider {
+  slug: string;
+  name: string;
+  models: string[];
+  is_current?: boolean;
+  authenticated?: boolean;
+  warning?: string;
+}
+
 export class ChatController {
   private readonly client: GatewayClient;
   private readonly dedupe = new EventDedupe();
   private readonly listeners = new Set<() => void>();
-  private timeline: Timeline = emptyTimeline;
-  private state: ConnectionState = "idle";
+  private state: MultiState = emptyMultiState;
+  private connection: ConnectionState = "idle";
   private detail = "";
-  /** Set while a reconnect is in flight so replay does not double-render. */
   private resyncing = false;
-  /** The page's card sink. Swappable so a remount does not need a new socket. */
   private cardSink: ((card: ServerRequestCard) => void) | null = null;
 
   constructor(options: ControllerOptions) {
@@ -56,10 +75,14 @@ export class ChatController {
       urlProvider: options.urlProvider,
       socketFactory: options.socketFactory,
       onState: (state, detail) => {
-        this.state = state;
+        this.connection = state;
         this.detail = detail ?? "";
         if (state !== "open") {
-          this.timeline = { items: this.timeline.items, meta: { ...this.timeline.meta, connected: false } };
+          const sessions: MultiState["sessions"] = {};
+          for (const [key, timeline] of Object.entries(this.state.sessions)) {
+            sessions[key] = { items: timeline.items, meta: { ...timeline.meta, connected: false } };
+          }
+          this.state = { ...this.state, sessions };
         }
         this.emit();
       },
@@ -75,82 +98,399 @@ export class ChatController {
     return () => this.listeners.delete(listener);
   };
 
-  getSnapshot = (): Timeline => this.timeline;
+  getSnapshot = (): MultiState => this.state;
 
-  getConnection = (): { state: ConnectionState; detail: string } => ({ state: this.state, detail: this.detail });
+  getConnection = (): { state: ConnectionState; detail: string } => ({
+    state: this.connection,
+    detail: this.detail,
+  });
+
+  /** The focused tab's timeline — what the transcript renders. */
+  getActiveTimeline = () => activeTimeline(this.state);
 
   private emit(): void {
     for (const listener of this.listeners) listener();
   }
 
-  private setTimeline(next: Timeline): void {
-    this.timeline = next;
+  private setState(next: MultiState): void {
+    this.state = next;
     this.emit();
   }
 
-  // ── lifecycle ────────────────────────────────────────────────────────────
-
-  connect(): void {
-    void this.client.connect();
+  setServerRequestSink(sink: ((card: ServerRequestCard) => void) | null): void {
+    this.cardSink = sink;
   }
 
   /**
-   * Wait until the socket is usable, then open a session.
+   * Every RPC goes through here so the socket is guaranteed before the frame is
+   * sent.
    *
-   * The await is the point: `connect()` is fire-and-forget, so an immediate
-   * `openSession()` sends `session.create` before a socket exists and fails with
-   * "gateway not connected" — on a connection that succeeds moments later.
+   * Calling `client.request` directly is how the page shipped a
+   * "gateway not connected" banner: the call raced the async connect and failed
+   * on a socket that came up milliseconds later. Routing everything through one
+   * guarded helper makes that impossible to reintroduce by accident.
    */
-  async start(storedId?: string): Promise<void> {
+  private async rpc<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     await this.client.ensureOpen();
-    await this.openSession(storedId);
+    return this.client.request<T>(method, params);
   }
+
+  // ── lifecycle ────────────────────────────────────────────────────────────
 
   dispose(): void {
     this.client.dispose();
     this.listeners.clear();
   }
 
-  // ── session ──────────────────────────────────────────────────────────────
-
-  /**
-   * Start (or attach to) a session and load its transcript.
-   *
-   * `session.create` with no `session_id` mints a new one; `session.resume`
-   * attaches to an existing stored id. Both return the same snapshot shape.
-   */
-  async openSession(storedId?: string): Promise<void> {
-    const snapshot = storedId
-      ? await this.client.request<LiveSessionSnapshot>("session.resume", {
-          session_id: storedId,
-          omit_messages: false,
-        })
-      : await this.client.request<LiveSessionSnapshot>("session.create", { source: "desktop" });
-
-    this.dedupe.setEpoch(this.client.epoch);
-    this.setTimeline(timelineFromSnapshot(snapshot));
+  /** Connect (if needed) and make sure there is at least one open tab. */
+  async start(): Promise<void> {
+    await this.client.ensureOpen();
+    if (!this.state.tabs.length) {
+      this.setState(openDraft(this.state));
+      await this.ensureSession();
+    }
   }
 
-  async listSessions(limit = 30): Promise<{ id: string; title: string; preview: string; started_at: number }[]> {
-    const result = await this.client.request<{
-      sessions: { id: string; title: string; preview: string; started_at: number }[];
+  /** A fresh chat tab. */
+  async newSession(): Promise<void> {
+    this.setState(openDraft(this.state));
+    await this.ensureSession();
+  }
+
+  /**
+   * Attach to a stored session.
+   *
+   * `session.resume` reuses the live session when there is one, so reopening a
+   * tab you already have open is cheap; the store dedupes the tab either way.
+   */
+  async openStoredSession(storedId: string, title: string): Promise<void> {
+    await this.client.ensureOpen();
+    this.setState(openStored(this.state, storedId, title));
+    const key = `stored:${storedId}`;
+    try {
+      const snapshot = await this.client.request<Record<string, unknown>>("session.resume", {
+        session_id: storedId,
+        omit_messages: false,
+      });
+      this.setState(bindSnapshot(this.state, key, snapshot as never, { connected: this.connection === "open" }));
+    } catch (error) {
+      this.setState(this.markError(key, error));
+    }
+  }
+
+  focusSession(key: string): void {
+    this.setState(focus(this.state, key));
+  }
+
+  closeSession(key: string): void {
+    this.setState(closeTab(this.state, key));
+  }
+
+  /** Stored sessions for the sidebar. */
+  async listSessions(
+    limit = 40,
+  ): Promise<{ id: string; title: string; preview: string; started_at: number; message_count: number }[]> {
+    const result = await this.rpc<{
+      sessions: { id: string; title: string; preview: string; started_at: number; message_count: number }[];
     }>("session.list", { limit });
     return result.sessions ?? [];
   }
 
-  /** Re-read the durable transcript after a reconnect (replay covers the gap in theory; this is the backstop). */
+  /**
+   * Give the focused tab a backend session if it does not have one.
+   *
+   * A draft becomes real here rather than at page load, so opening a second tab
+   * does not mint a session the user never speaks into.
+   */
+  private async ensureSession(): Promise<string | null> {
+    const key = this.state.activeKey;
+    if (!key) return null;
+    const tab = this.state.tabs.find((t) => t.key === key);
+    if (!tab) return null;
+    if (tab.runtimeId) return tab.runtimeId;
+
+    const method = tab.storedId ? "session.resume" : "session.create";
+    const params = tab.storedId
+      ? { session_id: tab.storedId, omit_messages: false }
+      : { source: "desktop" };
+    const snapshot = await this.client.request<Record<string, unknown>>(method, params);
+    this.setState(bindSnapshot(this.state, key, snapshot as never, { connected: this.connection === "open" }));
+    return (snapshot as { session_id?: string }).session_id ?? null;
+  }
+
+  private markError(key: string, error: unknown): MultiState {
+    const message = error instanceof Error ? error.message : String(error);
+    const timeline = timelineOf(this.state, key);
+    const items: TimelineItem[] = [
+      ...timeline.items,
+      { kind: "notice", id: `err-${Date.now()}`, at: Date.now(), text: message, tone: "error" },
+    ];
+    return { ...this.state, sessions: { ...this.state.sessions, [key]: { items, meta: timeline.meta } } };
+  }
+
+  // ── sending ──────────────────────────────────────────────────────────────
+
+  /**
+   * Send a turn.
+   *
+   * A leading `/` is a command, not a message: it goes through
+   * `command.dispatch` and the reply's `type` decides what happens next.
+   */
+  async send(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const command = parseCommandInput(trimmed);
+    if (command) {
+      await this.dispatchCommand(command.name, command.arg);
+      return;
+    }
+
+    await this.submitMessage(trimmed, trimmed);
+  }
+
+  /**
+   * Run a slash command and apply its directive.
+   *
+   * The dispatch reply is a small instruction language (see the contract): most
+   * shapes either show text or turn into a normal message. Anything unrecognised
+   * becomes a visible notice rather than a silent no-op.
+   */
+  async dispatchCommand(name: string, arg: string): Promise<DispatchResult | null> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId ?? null;
+    let reply: unknown;
+    try {
+      reply = await this.client.request("command.dispatch", {
+        name,
+        arg: arg || undefined,
+        session_id: runtimeId ?? undefined,
+      });
+    } catch (error) {
+      this.notice(error instanceof Error ? error.message : String(error), "error");
+      return null;
+    }
+
+    const directive = parseDispatch(reply);
+    if (!directive) {
+      this.notice(`/${name} 返回了无法识别的结果`, "error");
+      return null;
+    }
+
+    switch (directive.type) {
+      case "alias":
+        // An alias names another command; run that rather than showing the target.
+        return this.dispatchCommand((directive.target ?? "").replace(/^\//, ""), arg);
+      case "exec":
+      case "plugin":
+        this.notice(directive.output || `/${name} 已执行`);
+        return directive;
+      case "prefill":
+        // The composer puts `message` in the box; the notice explains why.
+        if (directive.notice) this.notice(directive.notice);
+        return directive;
+      case "send":
+      case "skill":
+        // `display` is what the user sees; `message` is what the model gets.
+        await this.submitMessage(directive.message ?? "", directive.display || directive.message || "");
+        if (directive.notice) this.notice(directive.notice);
+        return directive;
+      default:
+        this.notice(`/${name} 的结果类型 ${String((directive as { type: string }).type)} 暂不支持`, "error");
+        return directive;
+    }
+  }
+
+  /** Submit a resolved message, with the text shown to the user when it differs. */
+  private async submitMessage(message: string, display: string): Promise<void> {
+    if (!message.trim()) return;
+    const runtimeId = await this.ensureSession();
+    if (!runtimeId) throw new Error("会话尚未建立");
+    this.setState(appendUserToActive(this.state, display || message));
+    const result = await this.client.request<{ user_row_id?: number }>("prompt.submit", {
+      session_id: runtimeId,
+      text: message,
+    });
+    this.setState(ackUserInActive(this.state, result?.user_row_id));
+  }
+
+  /** Append a local notice line to the focused transcript. */
+  notice(text: string, tone: "info" | "error" = "info"): void {
+    const key = this.state.activeKey;
+    if (!key) return;
+    const timeline = timelineOf(this.state, key);
+    const items: TimelineItem[] = [
+      ...timeline.items,
+      { kind: "notice", id: `n-${Date.now()}-${timeline.items.length}`, at: Date.now(), text, tone },
+    ];
+    this.setState({ ...this.state, sessions: { ...this.state.sessions, [key]: { items, meta: timeline.meta } } });
+  }
+
+  async interrupt(): Promise<void> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    if (!runtimeId) return;
+    try {
+      await this.client.request("session.interrupt", { session_id: runtimeId });
+    } catch {
+      // A failed stop RPC does not mean the turn is still running; the settle
+      // below is what the UI needs either way.
+    }
+    this.setState(settleActive(this.state));
+  }
+
+  // ── model & reasoning ────────────────────────────────────────────────────
+
+  /** Provider/model inventory for the picker. */
+  async listModels(): Promise<{ providers: ModelOptionProvider[]; model: string; provider: string }> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    const result = await this.rpc<{
+      providers: ModelOptionProvider[];
+      model: string;
+      provider: string;
+    }>("model.options", runtimeId ? { session_id: runtimeId } : {});
+    return { providers: result.providers ?? [], model: result.model ?? "", provider: result.provider ?? "" };
+  }
+
+  /**
+   * Switch the focused session's model.
+   *
+   * The value carries a `--provider` suffix because the backend parses the pair
+   * out of one string. ` --session` keeps a pick scoped to this tab instead of
+   * rewriting the profile default.
+   */
+  async setModel(
+    model: string,
+    provider: string,
+    options: { sessionOnly?: boolean; confirmExpensive?: boolean } = {},
+  ): Promise<{ deferred?: boolean; confirmRequired?: boolean; confirmMessage?: string }> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    const scope = options.sessionOnly === false ? "" : " --session";
+    const result = await this.rpc<{
+      confirm_required?: boolean;
+      confirm_message?: string;
+      deferred?: boolean;
+      warning?: string;
+    }>("config.set", {
+      session_id: runtimeId ?? undefined,
+      key: "model",
+      value: `${model} --provider ${provider}${scope}`,
+      ...(options.confirmExpensive ? { confirm_expensive_model: true } : {}),
+    });
+    if (result?.warning) this.notice(result.warning);
+    return {
+      deferred: result?.deferred,
+      confirmRequired: result?.confirm_required,
+      confirmMessage: result?.confirm_message,
+    };
+  }
+
+  /** Set the reasoning level for the focused session. */
+  async setReasoning(level: string): Promise<void> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    await this.rpc("config.set", {
+      session_id: runtimeId ?? undefined,
+      key: "reasoning",
+      value: level,
+      scope: "session",
+    });
+  }
+
+  // ── attachments ──────────────────────────────────────────────────────────
+
+  /**
+   * Stage one file.
+   *
+   * The browser can only supply bytes — there is no host path to hand over — so
+   * images and PDFs go through the base64 variants and everything else through
+   * `file.attach`'s `data_url`. The reply's `ref_text` is what the composer
+   * inserts.
+   */
+  async attachFile(
+    file: { name: string; type: string; size: number; dataUrl: () => Promise<string> },
+    id: string,
+  ): Promise<Attachment> {
+    const kind: AttachmentKind =
+      file.type === "application/pdf" || /\.pdf$/i.test(file.name)
+        ? "pdf"
+        : file.type.startsWith("image/")
+          ? "image"
+          : "file";
+
+    const runtimeId = await this.ensureSession();
+    if (!runtimeId) throw new Error("会话尚未建立");
+
+    const dataUrl = await file.dataUrl();
+    const params: Record<string, unknown> = { session_id: runtimeId };
+    if (kind === "file") {
+      params.data_url = dataUrl;
+      params.name = file.name;
+    } else {
+      params.content_base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
+      params.filename = file.name;
+    }
+
+    const result = await this.rpc<{
+      attached?: boolean;
+      ref_text?: string;
+      path?: string;
+      name?: string;
+    }>(attachMethodFor(kind), params);
+    if (!result?.attached) throw new Error("后端未接受该附件");
+
+    return {
+      id,
+      kind,
+      name: result.name || file.name,
+      size: file.size,
+      path: result.path,
+      refText: result.ref_text,
+      status: "ready",
+    };
+  }
+
+  /** Path / `@`-reference completions for the composer. */
+  async completePath(word: string): Promise<{ text: string; display: string; meta: string }[]> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    const result = await this.rpc<{ items: { text: string; display: string; meta: string }[] }>(
+      "complete.path",
+      { word, session_id: runtimeId ?? undefined },
+    );
+    return result.items ?? [];
+  }
+
+  /** Slash completions for a `/token`. */
+  async completeSlash(text: string): Promise<{
+    items: { text: string; display: string; meta: string; kind?: string }[];
+    replace_from?: number;
+  }> {
+    const runtimeId = this.state.tabs.find((t) => t.key === this.state.activeKey)?.runtimeId;
+    const result = await this.rpc<{
+      items: { text: string; display: string; meta: string; kind?: string }[];
+      replace_from?: number;
+    }>("complete.slash", { text, session_id: runtimeId ?? undefined });
+    return { items: result.items ?? [], replace_from: result.replace_from };
+  }
+
+  /** The full command catalog; fetched once and filtered locally for instant menus. */
+  async commandsCatalog(): Promise<unknown> {
+    return this.rpc("commands.catalog", {});
+  }
+
+  // ── resync ───────────────────────────────────────────────────────────────
+
+  /** Re-read the focused session's durable transcript after a reconnect. */
   async resync(): Promise<void> {
-    const id = this.timeline.meta.runtimeId ?? this.timeline.meta.storedId;
-    if (!id || this.resyncing) return;
+    const key = this.state.activeKey;
+    if (!key || this.resyncing) return;
+    const tab = this.state.tabs.find((t) => t.key === key);
+    const sessionId = tab?.runtimeId ?? tab?.storedId;
+    if (!sessionId) return;
     this.resyncing = true;
     try {
       await this.client.ensureOpen();
-      const result = await this.client.request<{ messages: TranscriptMessage[] }>("session.history", {
-        session_id: id,
+      const result = await this.rpc<{ messages: Parameters<typeof replaceHistory>[2] }>("session.history", {
+        session_id: sessionId,
       });
-      const restored = projectHistory(result.messages ?? []);
-      const live = this.timeline.meta.running ? this.unpersistedTail() : [];
-      this.setTimeline({ items: restored.concat(live), meta: this.timeline.meta });
+      this.setState(replaceHistory(this.state, key, result.messages ?? []));
     } catch {
       // Best effort: a failed resync leaves the streamed view in place.
     } finally {
@@ -158,81 +498,14 @@ export class ChatController {
     }
   }
 
-  /**
-   * The items a history read cannot contain: the bubble currently streaming and
-   * anything appended after it. Everything earlier is already in the store.
-   */
-  private unpersistedTail(): TimelineItem[] {
-    const items = this.timeline.items;
-    for (let i = items.length - 1; i >= 0; i -= 1) {
-      const item = items[i];
-      if (item && item.kind === "assistant" && item.streaming) return items.slice(i);
-    }
-    return [];
-  }
-
-  // ── sending ──────────────────────────────────────────────────────────────
-
-  async send(text: string): Promise<void> {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    if (!this.timeline.meta.runtimeId) {
-      await this.start();
-    }
-    const sessionId = this.timeline.meta.runtimeId;
-    if (!sessionId) throw new Error("会话尚未建立");
-
-    this.setTimeline(appendUser(this.timeline, trimmed));
-    const result = await this.client.request<{ status?: string; user_row_id?: number }>(
-      "prompt.submit",
-      { session_id: sessionId, text: trimmed },
-      // The RPC only acknowledges receipt; the reply arrives on the event
-      // stream. A short timeout here would report a false failure mid-turn.
-    );
-    this.setTimeline(ackUser(this.timeline, result?.user_row_id));
-  }
-
-  async interrupt(): Promise<void> {
-    const sessionId = this.timeline.meta.runtimeId;
-    if (!sessionId) return;
-    try {
-      await this.client.request("session.interrupt", { session_id: sessionId });
-    } catch {
-      // A failed stop RPC does not mean the turn is still running; the settle
-      // below is what the UI needs either way.
-    }
-    this.setTimeline(settleTimeline(this.timeline));
-  }
-
   // ── event intake ─────────────────────────────────────────────────────────
 
   private handleEvent(event: GatewayEvent): void {
-    if (event.type === "gateway.ready") {
-      this.dedupe.setEpoch(this.client.epoch);
-      // `gateway.ready` is the first frame and the proof the channel works.
-      // Reduce it (rather than returning early) so `meta.connected` flips true
-      // and the composer leaves its disabled "连接中…" state.
-      const next = reduceEvent(this.timeline, event);
-      if (next !== this.timeline) this.setTimeline(next);
-      return;
-    }
-
-    // One socket receives every session's events; only the active one belongs
-    // on screen.
-    const active = this.timeline.meta.runtimeId;
-    if (event.session_id && active && event.session_id !== active) return;
-    if (event.session_id && !active) {
-      // Before the first snapshot resolves there is nothing to filter against,
-      // and dropping the frames would lose the start of a turn.
-      return;
-    }
-
-    if (!this.dedupe.admit({ session_id: event.session_id, seq: event.seq, replayEpoch: event.replayEpoch })) {
-      return;
-    }
-
-    const next = reduceEvent(this.timeline, event);
-    if (next !== this.timeline) this.setTimeline(next);
+    if (event.type === "gateway.ready") this.dedupe.setEpoch(this.client.epoch);
+    // The store decides which timeline owns the event and drops what no tab
+    // owns; this method only does the connection-level bookkeeping.
+    const result = routeEvent(this.state, event, this.dedupe);
+    if (result.applied && result.state !== this.state) this.setState(result.state);
   }
 
   private handleServerRequest(request: ServerRequest): boolean {
@@ -248,13 +521,10 @@ export class ChatController {
     return true;
   }
 
-  /** Swap the card sink (page mount/unmount) without rebuilding the socket. */
-  setServerRequestSink(sink: ((card: ServerRequestCard) => void) | null): void {
-    this.cardSink = sink;
-  }
-
-  /** Send a card answer through the request the backend is blocking on. */
   answerRequest(card: ServerRequestCard, result: Record<string, unknown>): void {
     card.respond(result);
   }
 }
+
+/** Re-exported so the page can reduce a lone event without importing core. */
+export { reduceEvent };

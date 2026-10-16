@@ -139,6 +139,116 @@
 
 正常路径是回答服务端请求帧（§2.3），这条 RPC 只在丢帧后的补救路径上用。
 
+### 斜杠命令
+
+#### `complete.slash` — 补全
+
+参数 `{text, session_id?, profile?}` → `{items: CompletionItem[], replace_from?: number}`。
+
+`CompletionItem`: `{text, display, meta, kind?}`。`kind` 只在斜杠补全上出现，取值 `command` / `skill`。`replace_from` 是接受该项后从第几列开始替换。
+
+`text` 传光标前的整段文本（含 `/`）。带 `session_id` 时技能补全绑定该会话的 profile 与工作区（项目级技能）。
+
+#### `commands.catalog` — 全量目录
+
+参数 `{}` → `CommandsCatalogResult`：
+
+| 字段 | 说明 |
+|---|---|
+| `pairs` | `[name, description]` 列表 |
+| `sub` | 子命令表 `{父命令: [子命令...]}` |
+| `canon` | 别名 → 规范名 |
+| `commands` | `{name: {argument_mode, desktop, desktop_subcommands}}` |
+| `categories` | `[{name, pairs}]`，带分类的展示用 |
+| `skills` | `{name: {usage, origin}}` |
+| `skill_count` | 技能数量 |
+| `warning` | 目录不可用时的说明 |
+
+首屏渲染命令菜单用 `catalog`（一次拿全，本地过滤，输入 `/` 零延迟）；敲字后的精细排序用 `complete.slash`。
+
+#### `command.dispatch` — 执行
+
+参数 `{name, arg?, session_id?, profile?}` → `CommandDispatchResult`，`type` 决定客户端怎么处理：
+
+| `type` | 带什么 | 客户端行为 |
+|---|---|---|
+| `exec` / `plugin` | `output` | 把 `output` 当系统提示显示 |
+| `alias` | `target` | 用 `target` 当新命令再 dispatch 一次 |
+| `send` | `message` / `display` / `notice` | 把 `message` 作为普通用户消息提交（渲染 `display`，不要渲染 `message`） |
+| `prefill` | `message` / `notice` | 只填进输入框，不提交 |
+| `skill` | `name` / `message` / `display` | 技能调用，同 `send` 但带技能名 |
+
+### 模型与推理强度
+
+#### `model.options` — 可选模型清单
+
+参数 `{session_id?, explicit_only?, include_unconfigured?, refresh?}` → `{providers: ModelOptionProvider[], model, provider}`。
+
+`ModelOptionProvider`: `{slug, name, models: string[], is_current, authenticated, key_env, warning, capabilities, pricing, ...}`。
+
+#### `config.set` — 切换
+
+**模型**：
+
+```json
+{"session_id":"<runtime id>","key":"model","value":"<model> --provider <provider>"}
+```
+
+- 加 ` --session` 后缀只影响本会话；不加则同时写 profile 默认。
+- 返回 `confirm_required: true` 时表示这是个贵模型，要带 `confirm_expensive_model: true` 重发。
+- 返回 `deferred: true` 表示切换被排队到下一轮开始；**不要**立刻重查模型名（会读回旧值盖掉用户的选择），等 `session.info` 事件来同步。
+
+**推理强度**：
+
+```json
+{"session_id":"<runtime id>","key":"reasoning","value":"<level>","scope":"session"}
+```
+
+`level` 取值（`hermes_constants.py::VALID_REASONING_EFFORTS`）：
+`minimal` `low` `medium` `high` `xhigh` `max` `ultra`。`none` 不是档位而是「关闭」的哨兵值。
+
+### 附件
+
+| RPC | 参数 | 用途 |
+|---|---|---|
+| `file.attach` | `{session_id, path?}` 或 `{session_id, data_url?, name?}` | 把非图片文件放进会话工作区，返回 `@file:` 引用 |
+| `image.attach` | `{session_id, path}` | 主机上可见的图片路径 |
+| `image.attach_bytes` | `{session_id, content_base64?/data?, filename?, ext?}` | base64 上传（浏览器只能走这条，拿不到主机路径） |
+| `pdf.attach` | `{session_id, path?/content_base64?, first_page?, last_page?}` | PDF 逐页渲染成 PNG 排队 |
+| `clipboard.paste` | `{session_id}` | 取主机剪贴板里的图片 |
+| `image.detach` | `{session_id, path}` | 撤销一张排队中的图片 |
+| `complete.path` | `{word?, cwd?, session_id?}` | 路径 / `@` 引用补全 |
+
+`FileAttachResult`: `{attached, name, path, ref_path, ref_text, uploaded}` —— `ref_text` 是插进输入框的那段 `@file:` 文本。
+
+**浏览器侧的重要限制**：`file.attach` 的 `path` 形式要求文件在网关可见的主机上。网页只能读用户通过 `<input type=file>` / 拖放给的文件内容，所以必须走 `data_url` / `content_base64` 那条。`file.attach` 走的是 JSON-RPC，桌面端按 384 MiB 上限放行单帧，网页侧要自己设更小的上限。
+
+### 多会话
+
+- `session.list` → `{sessions: SessionListRow[]}`，`SessionListRow` 见 §4。
+- `session.resume {session_id}` / `session.activate {session_id}` → `LiveSessionSnapshot`。
+
+`resume` 是「切过去」（重建或复用），`activate` 是「挂上但别关掉之前聚焦的那个」——多开会话用后者。
+
+**一条 socket 上开多个会话是安全的**：后端把发过言的每个 socket 都加进对应会话的 fan-out（§2.2），事件带 `session_id`，按它分流即可。这也是去重闸门必须按会话分桶的原因。
+
+### 用量与实时指标
+
+`session.usage` → `Usage`（§7 同名字段）。桌面端状态栏读的就是这几个：
+
+| 字段 | 展示 | 说明 |
+|---|---|---|
+| `context_used` / `context_max` | `12.3k/200k` | 上下文占用；`context_estimated` 为真时前面加 `~` |
+| `context_percent` | `[▓▓░░] 6%` | 后端已 clamp 并取整 |
+| `cache_hit_pct` | `87%` | 缓存命中率；没有缓存读取时后端不给这个字段 |
+| `avg_tps` | `42 t/s` | 滚动输出速度；第一次调用完成前没有 |
+| `total` / `input` / `output` | token 计数 | |
+| `cost_usd` | 花费 | |
+
+两个来源：`session.usage` 事件（`{usage}`，回合中途也会推）与 `message.complete` 的 `usage` 字段（权威终值）。另外 `session.info` 的 `info.usage` 在 resume 时带回。
+
+**注意**：`session.usage` 是 `Usage` 的扩展（多一个 `credits_lines`），字段与事件里的一致。
+
 ## 5. 本插件用到的事件
 
 事件名与 payload 见 `tui_gateway/contracts/events.py`。下表是插件实际消费的子集。

@@ -31,9 +31,10 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 5. **事件按 `session_id` 过滤。** 一个 socket 会收到所有会话的事件；只有当前会话的才进时间线。
 6. **同一事件可能重复到达。** 后端把每个已连接的 socket 都加进会话的 fan-out，重连窗口内会重复投递。`message.delta` 重复会让气泡里出现两份同样的字。去重靠 `(replay_epoch, session_id, seq)`。
 7. **服务端请求（approval / clarify）必须应答，答不了就立刻回 `-32601`。** 不回的后端会当这个客户端是旧版本，一直等到自己的超时（clarify 是 3600s），等于把 agent 卡死。快速失败比沉默好。
-8. **发 RPC 前先 `await ensureOpen()`，不要 `connect()` 之后直接发。** `connect()` 是 fire-and-forget，URL provider 是异步的，紧跟其后的请求会在 socket 存在之前发出去并失败——而 socket 几毫秒后就绪。`Controller.start()` 已经这么做了。
+8. **所有 RPC 走 `Controller.rpc()`（内部 `await ensureOpen()`），不要直接 `client.request()`。** `connect()` 是 fire-and-forget，URL provider 是异步的，紧跟其后的请求会在 socket 存在之前发出去并失败——而 socket 几毫秒后就绪。这条踩过两次：一次是开会话，一次是拉命令目录。需要绕过 `rpc()` 的只有已经显式 `await ensureSession()` 的那几个。
 9. **`gateway.ready` 必须走归约，不能提前 return。** 它是 `meta.connected` 变 true 的唯一来源，跳过它输入框会一直禁用。
-10. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+10. **组件里的钩子不能出现在提前 `return` 之后。** 钩子数量在两次渲染间变化会抛 React #310，整页白屏，而逻辑单测和 `tsc` 都看不见。`tests/hook-order.test.ts` 会在源码层面拦住它。
+11. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 

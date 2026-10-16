@@ -58,38 +58,93 @@ function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
   );
 }
 
-function Reasoning({ sdk, text }: { sdk: HermesPluginSdk; text: string }) {
+/**
+ * Reasoning, shown semi-explicitly: while the model is thinking, the last line
+ * of its reasoning is visible as a live preview so a long pause reads as work
+ * rather than a hang. Once the turn ends the block collapses to a one-line
+ * summary and expands on demand.
+ *
+ * This is the middle ground between hiding reasoning entirely and dumping a wall
+ * of it into the transcript — the same shape most agent chats use.
+ */
+function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: string; streaming: boolean }) {
   const { React } = sdk;
-  const { useState } = sdk.hooks;
+  const { useState, useMemo } = sdk.hooks;
   const [open, setOpen] = useState(false);
-  if (!text.trim()) return null;
+  const trimmed = text.trim();
+
+  // Hooks must run unconditionally: this component returns null for empty
+  // reasoning, and a `useMemo` after that early return throws React #310
+  // ("rendered more hooks than during the previous render") the first time a
+  // turn has no reasoning and the next one does.
+  const tail = useMemo(() => {
+    const lines = trimmed.split("\n").filter((line) => line.trim());
+    return lines.at(-1) ?? trimmed;
+  }, [trimmed]);
+
+  if (!trimmed) return null;
+
+  const chars = trimmed.length;
+
   return React.createElement(
     "div",
-    { className: "mt-1.5" },
+    { className: "mt-1.5", style: { maxWidth: "min(72ch, 82%)" } },
     React.createElement(
       "button",
       {
         type: "button",
-        className: "cursor-pointer text-[0.6875rem] uppercase tracking-[0.06em] hover:underline",
+        className: "flex w-full cursor-pointer items-center gap-1.5 text-[0.6875rem]",
         style: { color: "var(--color-muted-foreground)" },
         onClick: () => setOpen((v: boolean) => !v),
       },
-      open ? "▾ 推理过程" : "▸ 推理过程",
+      React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "shrink-0 uppercase tracking-[0.06em]" }, "思考"),
+      streaming
+        ? React.createElement(
+            "span",
+            { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } },
+            "●",
+          )
+        : null,
+      React.createElement("span", { className: "shrink-0", style: { opacity: 0.7 } }, `${chars} 字`),
+      !open && !streaming
+        ? React.createElement(
+            "span",
+            { className: "min-w-0 flex-1 truncate text-left", style: { opacity: 0.8 } },
+            tail,
+          )
+        : null,
     ),
+    // While streaming the tail stays visible under the header even when the
+    // block is expanded, so the top of a long thought does not push it away.
+    streaming && !open
+      ? React.createElement(
+          "div",
+          {
+            className: "mt-1 truncate px-2 py-1 text-xs",
+            style: {
+              color: "var(--color-muted-foreground)",
+              borderLeft: "2px solid var(--color-border)",
+            },
+          },
+          tail,
+        )
+      : null,
     open
       ? React.createElement(
           "div",
           {
-            className: "mt-1 whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed",
+            className: "hb-pre mt-1 whitespace-pre-wrap break-words px-2 py-1.5 text-xs",
             style: {
-              maxWidth: "min(72ch, 82%)",
               background: "color-mix(in oklab, var(--color-muted) 45%, var(--color-card))",
               color: "var(--color-muted-foreground)",
               borderRadius: "var(--radius)",
               borderLeft: "2px solid var(--color-border)",
+              maxHeight: "22rem",
+              overflowY: "auto",
             },
           },
-          text,
+          trimmed,
         )
       : null,
   );
@@ -138,7 +193,7 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
           item.error,
         )
       : null,
-    React.createElement(Reasoning, { sdk, text: item.reasoning }),
+    React.createElement(Reasoning, { sdk, text: item.reasoning, streaming: item.streaming }),
     item.usage
       ? React.createElement(
           "div",

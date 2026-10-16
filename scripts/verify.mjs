@@ -290,6 +290,134 @@ async function main() {
     const shot = await session.screenshot("01-chat-bubbles.png");
     console.log(`\nscreenshot: ${shot}`);
 
+    // ── v0.2: slash menu ───────────────────────────────────────────────────
+    const slashMenu = await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '/');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      return 'ok';
+    })()`);
+    void slashMenu;
+    await sleep(700);
+    const slashVisible = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('button')].filter(b => (b.textContent || '').trim().startsWith('/'));
+      return rows.length;
+    })()`);
+    check("typing / opens the command menu", slashVisible > 0, `${slashVisible} rows`);
+
+    const slashFiltered = await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '/hel');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'ok';
+    })()`);
+    void slashFiltered;
+    await sleep(400);
+    const filtered = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('button')].filter(b => (b.textContent || '').trim().startsWith('/'));
+      return { count: rows.length, names: rows.slice(0, 3).map(r => (r.textContent || '').trim().split(/\s+/)[0]) };
+    })()`);
+    check("menu filters as you type", filtered.count > 0 && filtered.count <= 12, JSON.stringify(filtered));
+
+    // Click the row, then read on a LATER turn: React's state update is async, so
+    // reading synchronously in the same evaluate returns the pre-click value and
+    // the check would pass on the typed text without proving the accept worked.
+    await session.evaluate(`(() => {
+      const row = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim().startsWith('/help'));
+      if (!row) return 'no row';
+      row.click();
+      return 'clicked';
+    })()`);
+    await sleep(600);
+    const accepted = await session.evaluate(`document.querySelector('textarea').value`);
+    check(
+      "accepting a completion replaces the token with the full command",
+      String(accepted).trim() === "/help",
+      JSON.stringify(accepted),
+    );
+
+    // ── v0.2: sidebar ──────────────────────────────────────────────────────
+    const sidebar = await session.evaluate(`(() => ({
+      hasOpenSection: document.body.innerText.includes('会话'),
+      hasHistorySection: document.body.innerText.includes('历史'),
+      newButton: [...document.querySelectorAll('button')].some(b => b.title === '新对话'),
+    }))()`);
+    check("session sidebar renders with both sections", sidebar.hasOpenSection && sidebar.hasHistorySection, JSON.stringify(sidebar));
+
+    const tabCount = () => session.evaluate(`(() => {
+      // Tabs render a close button titled 关闭 inside the sidebar; the count of
+      // those is the number of open sessions.
+      return [...document.querySelectorAll('button')].filter(b => b.title === '关闭').length;
+    })()`);
+    const tabsBefore = await tabCount();
+    await session.evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => x.title === '新对话');
+      b?.click();
+      return 'clicked';
+    })()`);
+    await sleep(3000);
+    const tabsAfter = await tabCount();
+    check("new-session button opens another tab", tabsAfter > tabsBefore, `${tabsBefore} -> ${tabsAfter}`);
+
+    // ── v0.2: attachments ──────────────────────────────────────────────────
+    const attachUi = await session.evaluate(`(() => ({
+      plus: [...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+'),
+      fileInput: Boolean(document.querySelector('input[type=file]')),
+    }))()`);
+    check("composer has a + button backed by a file input", attachUi.plus && attachUi.fileInput, JSON.stringify(attachUi));
+
+    // ── v0.2: model / reasoning pickers ────────────────────────────────────
+    await session.evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find(x => (x.title || '').startsWith('模型：'));
+      b?.click();
+      return 'clicked';
+    })()`);
+    await sleep(2500);
+    const picker = await session.evaluate(`(() => {
+      const text = document.body.innerText;
+      const panel = document.querySelector('[class*="max-h-[70vh]"]');
+      const rows = panel ? panel.querySelectorAll('button').length : 0;
+      return {
+        open: text.includes('模型与思考强度'),
+        hasReasoning: text.includes('思考强度'),
+        // Provider headers plus model rows; a bare modal would be ~2 buttons.
+        modelRows: rows,
+        hasProvider: /Mixture of Agents|Qwen|DeepSeek|OpenAI|Anthropic|custom/i.test(text),
+      };
+    })()`);
+    check("model picker opens and lists providers/models", picker.open && picker.modelRows > 4 && picker.hasProvider, JSON.stringify(picker));
+    check("model picker exposes reasoning levels", picker.hasReasoning === true);
+
+    await session.evaluate(`(() => {
+      document.querySelector('div[class*="fixed"]')?.click();
+      return 'closed';
+    })()`);
+    await sleep(400);
+
+    // ── v0.2: metrics after a real turn ────────────────────────────────────
+    await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '只回复两个字：收到');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'sent';
+    })()`);
+
+    let metricsSeen = false;
+    const metricsDeadline = Date.now() + 90000;
+    while (Date.now() < metricsDeadline && !metricsSeen) {
+      await sleep(2000);
+      metricsSeen = await session.evaluate(`(() => {
+        const text = document.body.innerText;
+        return text.includes('t/s') || /\[▓░]+\]/.test(text);
+      })()`);
+    }
+    check("live metrics appear after a turn (context bar / t/s)", metricsSeen === true);
+
     const consoleErrors = session.consoleLines.filter(
       (line) => line.startsWith("[error]") || line.startsWith("[exception]"),
     );

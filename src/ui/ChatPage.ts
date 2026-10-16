@@ -1,123 +1,29 @@
 /**
- * The page: session header, transcript, composer, approval cards.
+ * The page: session sidebar, transcript, composer, approval cards.
  *
- * This is the component the registry mounts at `/chat`. It owns a
- * `ChatController` and re-renders from it through `useSyncExternalStore`, so a
- * streaming turn costs one render per event batch and nothing re-renders that
- * did not change.
+ * This is what the registry mounts at `/chat`. It owns a `ChatController` and
+ * re-renders from it through `useSyncExternalStore`, so a streaming turn costs
+ * one render per event batch and nothing re-renders that did not change.
+ *
+ * Everything with a decision in it lives in `core/` or the controller; this file
+ * is wiring, layout, and the two pieces of state that are genuinely view-local
+ * (the approval cards on screen and the model picker's open/closed flag).
  */
 
-import { ChatController, type ServerRequestCard } from "../app/controller";
-import type { Timeline } from "../core/types";
+import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
+import { entriesFromCatalog, type CommandEntry } from "../core/slash";
+import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
+import type { TimelineItem } from "../core/types";
+import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { Bubble } from "./Bubble";
+import { Composer, screenDroppedFiles } from "./Composer";
+import { ModelPicker } from "./ModelPicker";
+import { SessionSidebar, type StoredSession } from "./SessionSidebar";
 import { runningLabel } from "./format";
 import type { HermesPluginSdk } from "./sdk";
 
 interface ApprovalCardState extends ServerRequestCard {
   kind: "approval" | "clarify";
-}
-
-function Composer({
-  sdk,
-  running,
-  status,
-  onSend,
-  onStop,
-  disabled,
-}: {
-  sdk: HermesPluginSdk;
-  running: boolean;
-  status: string;
-  onSend: (text: string) => void;
-  onStop: () => void;
-  disabled: boolean;
-}) {
-  const { React } = sdk;
-  const { useState, useRef } = sdk.hooks;
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-
-  const submit = () => {
-    const value = text.trim();
-    if (!value || running) return;
-    setText("");
-    onSend(value);
-  };
-
-  const onKeyDown = (event: { key: string; shiftKey: boolean; preventDefault: () => void }) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
-  };
-
-  return React.createElement(
-    "div",
-    { className: "px-4 pb-4 pt-2" },
-    React.createElement(
-      "div",
-      {
-        className: "mx-auto flex items-end gap-2 px-2 py-1.5",
-        style: {
-          maxWidth: "860px",
-          background: "var(--color-card)",
-          borderRadius: "var(--radius)",
-          boxShadow: "inset 0 0 0 1px var(--color-border)",
-        },
-      },
-      React.createElement("textarea", {
-        ref,
-        value: text,
-        disabled,
-        rows: 1,
-        placeholder: disabled ? "连接中…" : "发消息给 Hermes（Enter 发送，Shift+Enter 换行）",
-        className: "max-h-40 min-h-[2rem] flex-1 resize-none bg-transparent py-1.5 text-sm outline-none",
-        style: { color: "var(--color-foreground)", fontFamily: "var(--font-sans)" },
-        onChange: (event: { target: { value: string } }) => setText(event.target.value),
-        onKeyDown,
-      }),
-      running
-        ? React.createElement(
-            "button",
-            {
-              type: "button",
-              className: "shrink-0 cursor-pointer px-3 py-1.5 text-xs",
-              style: {
-                background: "var(--color-destructive)",
-                color: "var(--color-destructive-foreground, #fff)",
-                borderRadius: "calc(var(--radius) * 0.6)",
-              },
-              onClick: onStop,
-            },
-            "停止",
-          )
-        : React.createElement(
-            "button",
-            {
-              type: "button",
-              disabled: !text.trim() || disabled,
-              className: "shrink-0 cursor-pointer px-3 py-1.5 text-xs disabled:opacity-40",
-              style: {
-                background: "var(--color-primary)",
-                color: "var(--color-primary-foreground)",
-                borderRadius: "calc(var(--radius) * 0.6)",
-              },
-              onClick: submit,
-            },
-            "发送",
-          ),
-    ),
-    status
-      ? React.createElement(
-          "div",
-          {
-            className: "mx-auto mt-1 px-2 text-[0.6875rem]",
-            style: { maxWidth: "860px", color: "var(--color-muted-foreground)" },
-          },
-          status,
-        )
-      : null,
-  );
 }
 
 function ApprovalCardView({
@@ -154,7 +60,7 @@ function ApprovalCardView({
       ? React.createElement(
           "pre",
           {
-            className: "mt-1 overflow-x-auto whitespace-pre-wrap break-words p-2",
+            className: "hb-pre mt-1 p-2",
             style: {
               fontFamily: "var(--font-mono)",
               fontSize: "0.8125rem",
@@ -199,7 +105,8 @@ function ClarifyCardView({
   onAnswer: (card: ApprovalCardState, answers: Record<string, string>) => void;
 }) {
   const { React } = sdk;
-  const questions = (card.params.questions as { qid: string; question: string; choices?: string[] }[] | undefined) ?? [];
+  const questions =
+    (card.params.questions as { qid: string; question: string; choices?: string[] }[] | undefined) ?? [];
   return React.createElement(
     "div",
     {
@@ -258,16 +165,25 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       }),
     [sdk],
   );
+
   const [cards, setCards] = useState<ApprovalCardState[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [catalog, setCatalog] = useState<CommandEntry[]>([]);
+  const [stored, setStored] = useState<StoredSession[]>([]);
+  const [loadingStored, setLoadingStored] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
+  const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
+  const [reasoning, setReasoning] = useState("medium");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const timeline = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot,
-  ) as Timeline;
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const timeline = activeTimeline(state);
+  const running = runningKeys(state);
 
+  // ── boot ────────────────────────────────────────────────────────────────
   useEffect(() => {
     controller.setServerRequestSink((card) => {
       setCards((prev) => [...prev, { ...card, kind: card.method === "approval" ? "approval" : "clarify" }]);
@@ -275,26 +191,52 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     // `start()` waits for the socket before opening the session. Calling
     // `connect()` then `openSession()` races and reports "gateway not connected"
     // on a connection that succeeds a moment later.
-    controller.start().catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : String(err));
-    });
+    controller
+      .start()
+      .then(() => refreshStored())
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+
+    // The command catalog is fetched once and filtered locally: typing `/` must
+    // not wait on a round trip.
+    controller
+      .commandsCatalog()
+      .then((raw) => setCatalog(entriesFromCatalog(raw as never)))
+      .catch(() => setCatalog([]));
+
     return () => {
       controller.setServerRequestSink(null);
       controller.dispose();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
 
+  // Seed the pickers from the live session's own model once it is known.
+  useEffect(() => {
+    const meta = timeline.meta;
+    if (meta.model) setModelChoice({ model: meta.model, provider: meta.provider });
+    if (meta.reasoningEffort) setReasoning(meta.reasoningEffort);
+  }, [timeline.meta.model, timeline.meta.provider, timeline.meta.reasoningEffort]);
+
+  const refreshStored = useCallback(() => {
+    setLoadingStored(true);
+    controller
+      .listSessions()
+      .then((rows) => setStored(rows))
+      .catch(() => setStored([]))
+      .finally(() => setLoadingStored(false));
+  }, [controller]);
+
+  // ── transcript scroll ───────────────────────────────────────────────────
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [timeline.items.length, timeline.items.at(-1)]);
 
-  const answer = useCallback(
-    (card: ApprovalCardState, choice: string) => {
-      card.respond(card.kind === "approval" ? { choice } : { answers: choice as unknown as Record<string, string> });
-      setCards((prev) => prev.filter((c) => c.id !== card.id));
-    },
-    [],
-  );
+  // ── actions ─────────────────────────────────────────────────────────────
+
+  const answer = useCallback((card: ApprovalCardState, choice: string) => {
+    card.respond(card.kind === "approval" ? { choice } : { answers: choice as unknown as Record<string, string> });
+    setCards((prev) => prev.filter((c) => c.id !== card.id));
+  }, []);
 
   const answerClarify = useCallback((card: ApprovalCardState, answers: Record<string, string>) => {
     card.respond({ answers });
@@ -304,7 +246,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onSend = useCallback(
     (text: string) => {
       setError(null);
-      controller.send(text).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+      controller
+        .send(text)
+        .then(() => setAttachments([]))
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     },
     [controller],
   );
@@ -313,53 +258,200 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.interrupt().catch(() => undefined);
   }, [controller]);
 
+  /**
+   * Stage picked/dropped files.
+   *
+   * Each file is read to a data URL and pushed to the backend, which hands back
+   * the `@file:` reference to insert. Rejections are surfaced as notices rather
+   * than silently dropped — a file that vanishes with no explanation is the
+   * worst outcome here.
+   */
+  const onPickFiles = useCallback(
+    (files: FileList | File[]) => {
+      const { accepted, rejected } = screenDroppedFiles(files);
+      for (const item of rejected) controller.notice(`${item.name}：${item.reason}`, "error");
+      for (const { file, id } of accepted) {
+        const pending: Attachment = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
+        setAttachments((prev) => addAttachment(prev, pending));
+        controller
+          .attachFile(
+            {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              dataUrl: () =>
+                new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(String(reader.result));
+                  reader.onerror = () => reject(new Error("读取文件失败"));
+                  reader.readAsDataURL(file);
+                }),
+            },
+            id,
+          )
+          .then((done) => setAttachments((prev) => updateAttachment(prev, id, done)))
+          .catch((err: unknown) =>
+            setAttachments((prev) =>
+              updateAttachment(prev, id, {
+                status: "error",
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            ),
+          );
+      }
+    },
+    [controller],
+  );
+
+  const onRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => removeAttachment(prev, id));
+  }, []);
+
+  const openModelPicker = useCallback(() => {
+    setPickerOpen(true);
+    setPickerLoading(true);
+    controller
+      .listModels()
+      .then((result) => {
+        setProviders(result.providers);
+        setModelChoice({ model: result.model, provider: result.provider });
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setPickerLoading(false));
+  }, [controller]);
+
+  const onPickModel = useCallback(
+    (model: string, provider: string) => {
+      setPickerOpen(false);
+      setModelChoice({ model, provider });
+      controller
+        .setModel(model, provider, { sessionOnly: true })
+        .then((result) => {
+          if (result.confirmRequired) {
+            controller.notice(result.confirmMessage || "这是一个较贵的模型，已取消切换", "error");
+          } else if (result.deferred) {
+            controller.notice("模型切换已排队，下一轮生效");
+          }
+        })
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
+
+  const onPickReasoning = useCallback(
+    (level: string) => {
+      setReasoning(level);
+      controller.setReasoning(level).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
+
+  const onCompletePath = useCallback((word: string) => controller.completePath(word), [controller]);
+
+  const onOpenStored = useCallback(
+    (id: string, title: string) => {
+      controller
+        .openStoredSession(id, title)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
+
+  const onNew = useCallback(() => {
+    controller.newSession().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+  }, [controller]);
+
+  const tabs: readonly SessionTab[] = state.tabs;
   const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
 
   return React.createElement(
     "div",
-    { className: "flex h-full min-h-0 flex-col" },
+    { className: "flex h-full min-h-0" },
+
+    React.createElement(SessionSidebar, {
+      sdk,
+      tabs,
+      activeKey: state.activeKey,
+      runningKeys: running,
+      stored,
+      loadingStored,
+      onFocus: (key: string) => controller.focusSession(key),
+      onClose: (key: string) => controller.closeSession(key),
+      onNew,
+      onOpenStored,
+      onRefresh: refreshStored,
+    }),
+
     React.createElement(
       "div",
-      { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4" },
+      { className: "flex h-full min-h-0 flex-1 flex-col" },
+
+      // ── transcript ──────────────────────────────────────────────────────
       React.createElement(
         "div",
-        { className: "mx-auto flex flex-col gap-3", style: { maxWidth: "860px" } },
-        timeline.items.length === 0
-          ? React.createElement(
+        { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll" },
+        React.createElement(
+          "div",
+          { className: "mx-auto flex flex-col gap-3", style: { maxWidth: "860px" } },
+          timeline.items.length === 0
+            ? React.createElement(
+                "div",
+                { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
+                "开始一段对话。输入 / 唤起命令。",
+              )
+            : timeline.items.map((item: TimelineItem) =>
+                React.createElement(Bubble, { key: item.id, sdk, item }),
+              ),
+          cards.map((card) =>
+            React.createElement(
               "div",
-              {
-                className: "py-16 text-center text-sm",
-                style: { color: "var(--color-muted-foreground)" },
-              },
-              "开始一段对话。",
-            )
-          : timeline.items.map((item) => React.createElement(Bubble, { key: item.id, sdk, item })),
-        cards.map((card) =>
-          React.createElement(
-            "div",
-            { key: card.id },
-            card.kind === "approval"
-              ? React.createElement(ApprovalCardView, { sdk, card, onAnswer: answer })
-              : React.createElement(ClarifyCardView, { sdk, card, onAnswer: answerClarify }),
+              { key: card.id },
+              card.kind === "approval"
+                ? React.createElement(ApprovalCardView, { sdk, card, onAnswer: answer })
+                : React.createElement(ClarifyCardView, { sdk, card, onAnswer: answerClarify }),
+            ),
           ),
+          error
+            ? React.createElement("div", { className: "text-xs", style: { color: "var(--color-destructive)" } }, error)
+            : null,
+          React.createElement("div", { ref: bottomRef }),
         ),
-        error
-          ? React.createElement(
-              "div",
-              { className: "text-xs", style: { color: "var(--color-destructive)" } },
-              error,
-            )
-          : null,
-        React.createElement("div", { ref: bottomRef }),
       ),
+
+      // ── composer ────────────────────────────────────────────────────────
+      React.createElement(Composer, {
+        sdk,
+        running: timeline.meta.running,
+        status,
+        connected: timeline.meta.connected,
+        usage: timeline.meta.usage,
+        model: modelChoice.model || timeline.meta.model,
+        provider: modelChoice.provider || timeline.meta.provider,
+        reasoning,
+        attachments,
+        catalog,
+        onSend,
+        onStop,
+        onPickFiles,
+        onRemoveAttachment,
+        onOpenModelPicker: openModelPicker,
+        onPickReasoning,
+        onCompletePath,
+        onError: setError,
+      }),
     ),
-    React.createElement(Composer, {
+
+    React.createElement(ModelPicker, {
       sdk,
-      running: timeline.meta.running,
-      status,
-      onSend,
-      onStop,
-      disabled: !timeline.meta.connected,
+      open: pickerOpen,
+      loading: pickerLoading,
+      providers,
+      currentModel: modelChoice.model || timeline.meta.model,
+      currentProvider: modelChoice.provider || timeline.meta.provider,
+      reasoning,
+      onPick: onPickModel,
+      onPickReasoning,
+      onClose: () => setPickerOpen(false),
     }),
   );
 }

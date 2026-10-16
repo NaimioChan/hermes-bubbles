@@ -8,6 +8,39 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 08:10 · hermes · 六条反馈返工（代码块宽度/颜色、间距、消息操作、卡片、语言、@）
+
+- 改：新增 `src/core/i18n.ts`、`src/core/requests.ts`、`src/ui/useLocale.ts`、`src/ui/RequestCards.ts`、`tests/i18n.test.ts`、`tests/requests.test.ts`、`scripts/verify-clarify.mjs`；改 `Bubble`/`Composer`/`ChatPage`/`TabStrip`/`HistoryPanel`/`ModelPicker`/`style.css`；`reduce.ts` 记 `completedAt` 并本地推算用时；`controller.ts` 加 `regenerateAssistant` / `branchSession` / `setLocale`
+- 验证：`npm test` 351 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 46/46；`node scripts/audit-classes.mjs` 0 缺失；`scripts/verify-clarify.mjs` 对真实 clarify 卡通过
+- 遗留：会话删除/重命名（issue #5）
+
+### 第 1 条是真问题，根因是宿主的全局 `code` 规则
+
+短代码块又窄又黑，两个症状同一个根因：宿主 CSS 里有一条**按标签名**匹配的规则 `code { display: inline; background: var(--selection-bg, var(--midground)); color: var(--background) }`。它同样命中 `<pre>` 里的 `<code>`，于是：
+
+- `display: inline` 让元素收缩到内容宽度，外层 `<pre>` 的底色就只有文字那么宽——短代码块显得很窄；
+- 配色变成宿主的行内代码芯片（当前主题下 `#cdd6f4` 底 + `#1e1e2e` 字），深色气泡里一片看不清。
+
+修法是按自己的类显式覆盖：`hb-md-pre code` 与 `hb-output code` 恢复 `display: block`、透明底、颜色继承。验收里加了两条断言：每个代码块宽度 ≥ 气泡内容宽的 95%，且 `<code>` 的 `display` 为 `block`、`color` 与气泡前景一致。表格同理，铺满宽度。
+
+（用户提到「另一个对话里好像没这个问题」——那是宿主自己的聊天页，它没有这层嵌套，所以确实不受影响。）
+
+### 其余五条
+
+2. 气泡间距：`.hb-bubble-gap { margin-top: 1.15rem }`，并去掉容器的 `gap`（两处叠加会变成 2rem）。验收量到 17.25px。
+3. 消息操作：气泡右下角时间戳（`HH:MM`，今天/昨天带名字）+ 分支 + 复制 + 重新生成，默认透明、悬停显现、**常驻占位**（不然显现时会把下面的内容顶走——桌面端源码里专门注释了这点）。分支走 `session.branch` 带 `idempotency_key`；重新生成走 `session.undo { intent: "retry" }` 再重发原用户文本，失败会把转写区恢复原样。朗读与反应表情按用户要求不做。
+4. 审批/选择题：原来卡片已经在跑，但**忽略了服务端下发的 `choices`**（写死了四个）也**没处理 `multi_select`**。解析逻辑提到 `src/core/requests.ts` 做纯函数并单测；`multi_select` 的多个值合并成一个字符串（`ClarifyResult.answers` 是 `Record<string, string>`），未答完不可提交。
+5. 语言：默认英语（Hermes 自身默认就是 `en`）。没有 RPC 能问当前语言，所以读 `localStorage['hermes-locale']` 与 `<html lang>`，靠 `storage` + `MutationObserver` 跟随切换，无需刷新。`SDK.useI18n` 在插件里拿不到值（只是对宿主 context 的 `useContext`，context 不可 import，且切换后不更新），故自带小目录。
+6. `@` 补全**移除**。上一轮我以为修好了，其实只是让菜单「有东西」——后端 `complete.path` 期望的 `word` **包含**开头的 `@`（`is_context = word.startswith("@")`），而客户端发的是去掉 `@` 的查询，所以永远走不到 `@` 分支。用户第二次反馈后查了后端源码才定位。现在 `@` 是普通字符，文件走 `+` 按钮的 `file.attach`。
+
+### 顺带：契约字段不能猜
+
+`message.complete` 没有时长字段（核对 `MessageCompletePayload`：text/usage/status/reasoning/…，没有计时），所以回复用时由本轮用户消息到完成的时间**本地推算**，并夹在 6 小时内——恢复的历史会话行时间戳单位可能不一致，印出「41000m」比不印更糟。
+
+### 测试脆性：文案不该进断言
+
+语言改成英语默认后，`verify.mjs` 里 9 条按中文文案找元素的断言集体失效（找「发送」「插入」「历史会话」）。功能是好的，脆的是测试。于是给每个可交互元素加了 `data-hb` 钩子，脚本只按钩子找。另外修了三处测试自身的问题：`send()` 未 await 导致的死锁、`evaluate(expr, true)` 传布尔而非 `{awaitPromise:true}`、以及把「运行中」判定在语言切换中途取样。这些都已写进 AGENTS.md 铁律 15。
+
 ## 2026-10-17 01:50 · hermes · 回复气泡支持 Markdown
 
 - 改：新增 `src/core/markdown.ts`（解析器）、`src/ui/Markdown.ts`（渲染器）、`tests/markdown.test.ts`（48 条）、`tests/theme-vars.test.ts`、`tests/architecture.test.ts`；改 `src/ui/Bubble.ts`（助手气泡走 Markdown）、`src/ui/style.css`（`.hb-md-*`）；修正 6 个 UI 文件里的 `--color-foreground` / `--color-background`

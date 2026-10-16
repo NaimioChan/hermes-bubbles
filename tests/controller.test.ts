@@ -624,3 +624,173 @@ describe("subscription", () => {
     expect(controller.getSnapshot()).toBe(controller.getSnapshot());
   });
 });
+
+describe("per-message actions", () => {
+  /** Seed a finished turn: one user row plus the reply that answered it. */
+  async function withFinishedTurn() {
+    const { controller, socket } = await connectAndOpen();
+    // Not awaited: `send` resolves only once prompt.submit is answered.
+    const sent = controller.send("原始问题");
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 7 });
+    await sent;
+    socket.event("message.delta", { text: "第一版回复" });
+    socket.event("message.complete", { status: "ok", text: "第一版回复" });
+    await tick();
+    return { controller, socket };
+  }
+
+  const assistantId = (controller: ChatController) =>
+    activeTimeline(controller.getSnapshot()).items.find((i) => i.kind === "assistant" && !i.streaming)?.id ?? "";
+
+  it("regenerate rewinds the turn and re-submits the ORIGINAL user text", async () => {
+    const { controller, socket } = await withFinishedTurn();
+    const target = assistantId(controller);
+
+    const done = controller.regenerateAssistant(target);
+    await tick();
+    // The undo must land before the resend, or the backend sees a second turn.
+    socket.replyTo("session.undo", { removed: 2 });
+    await tick();
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 8 });
+    await done;
+
+    const methods = socket.frames().map((f) => f.method);
+    expect(methods).toContain("session.undo");
+    expect(methods.indexOf("session.undo")).toBeLessThan(methods.lastIndexOf("prompt.submit"));
+
+    const undo = socket.frames().find((f) => f.method === "session.undo");
+    // `retry` is what makes this a regenerate rather than a destructive undo.
+    expect((undo?.params as Record<string, unknown>).intent).toBe("retry");
+
+    const resend = socket.frames().filter((f) => f.method === "prompt.submit").at(-1);
+    expect((resend?.params as Record<string, unknown>).text).toBe("原始问题");
+  });
+
+  it("regenerate drops the old reply from the transcript", async () => {
+    const { controller, socket } = await withFinishedTurn();
+    const target = assistantId(controller);
+    const before = activeTimeline(controller.getSnapshot()).items.length;
+
+    const done = controller.regenerateAssistant(target);
+    await tick();
+    socket.replyTo("session.undo", { removed: 2 });
+    await tick();
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 8 });
+    await done;
+
+    const after = activeTimeline(controller.getSnapshot());
+    expect(after.items.length).toBeLessThan(before);
+    expect(after.items.some((i) => i.kind === "assistant")).toBe(false);
+    expect(after.meta.running).toBe(true);
+  });
+
+  it("regenerate restores the transcript when the rewind fails", async () => {
+    const { controller, socket } = await withFinishedTurn();
+    const target = assistantId(controller);
+    const snapshot = activeTimeline(controller.getSnapshot()).items.map((i) => i.id);
+
+    const promise = controller.regenerateAssistant(target);
+    await tick();
+    // Reject the undo: nothing was rewound server-side, so nothing may be lost.
+    const frame = socket.frames().filter((f) => f.method === "session.undo").at(-1);
+    socket.deliver({ jsonrpc: "2.0", id: frame?.id, error: { code: -1, message: "no such turn" } });
+
+    await expect(promise).rejects.toBeTruthy();
+    expect(activeTimeline(controller.getSnapshot()).items.map((i) => i.id)).toEqual(snapshot);
+  });
+
+  it("regenerate refuses a turn with no user message to resend", async () => {
+    const { controller } = await connectAndOpen();
+    // An item id that does not exist cannot be traced back to a prompt.
+    await expect(controller.regenerateAssistant("assistant-does-not-exist")).rejects.toThrow();
+  });
+
+  it("branch forks the live session and opens the child as a new tab", async () => {
+    const { controller, socket } = await withFinishedTurn();
+    const target = assistantId(controller);
+    const tabsBefore = controller.getSnapshot().tabs.length;
+
+    const done = controller.branchSession(target);
+    await tick();
+    socket.replyTo("session.branch", {
+      session_id: "runtime-2",
+      stored_session_id: "20261017_000000_child",
+      title: "分叉",
+    });
+    await tick();
+    await tick();
+    // openStoredSession resumes the child, which mints its own live session.
+    if (socket.frames().some((f) => f.method === "session.resume")) {
+      socket.replyTo("session.resume", {
+        session_id: "runtime-2b",
+        stored_session_id: "20261017_000000_child",
+        messages: [],
+        info: { model: "m", provider: "p", running: false },
+      });
+    }
+    await tick();
+    await done;
+
+    const branch = socket.frames().find((f) => f.method === "session.branch");
+    expect(branch).toBeTruthy();
+    // A stable idempotency key is what stops a retried branch forking twice.
+    expect(typeof (branch?.params as Record<string, unknown>).idempotency_key).toBe("string");
+    expect(controller.getSnapshot().tabs.length).toBeGreaterThanOrEqual(tabsBefore);
+  });
+
+  it("branch carries a message count so the child stops at that reply", async () => {
+    const { controller, socket } = await withFinishedTurn();
+    const target = assistantId(controller);
+    const done = controller.branchSession(target);
+    await tick();
+    socket.replyTo("session.branch", { session_id: "r2", stored_session_id: "s2", title: "t" });
+    await tick();
+    await tick();
+    if (socket.frames().some((f) => f.method === "session.resume")) {
+      socket.replyTo("session.resume", {
+        session_id: "r2b",
+        stored_session_id: "s2",
+        messages: [],
+        info: { model: "m", provider: "p", running: false },
+      });
+    }
+    await tick();
+    await done;
+    const branch = socket.frames().find((f) => f.method === "session.branch");
+    expect((branch?.params as Record<string, unknown>).count).toBeGreaterThan(0);
+  });
+});
+
+describe("locale", () => {
+  it("localizes controller-emitted notices", async () => {
+    const { controller, socket } = await connectAndOpen();
+    controller.setLocale("en");
+    // The steering notice is about a MID-TURN send, so a turn must be running.
+    socket.event("message.start", {});
+    await tick();
+    const sent = controller.send("hi");
+    await tick();
+    socket.replyTo("prompt.submit", { status: "steered", user_row_id: 1 });
+    await sent;
+
+    const notice = activeTimeline(controller.getSnapshot()).items.filter((i) => i.kind === "notice").at(-1);
+    expect(notice?.kind === "notice" ? notice.text : "").toMatch(/Inserted/);
+  });
+
+  it("switches the notice language with the locale", async () => {
+    const { controller, socket } = await connectAndOpen();
+    controller.setLocale("zh");
+    socket.event("message.start", {});
+    await tick();
+    const sent = controller.send("你好");
+    await tick();
+    socket.replyTo("prompt.submit", { status: "steered", user_row_id: 1 });
+    await sent;
+
+    const notice = activeTimeline(controller.getSnapshot()).items.filter((i) => i.kind === "notice").at(-1);
+    expect(notice?.kind === "notice" ? notice.text : "").toMatch(/插入/);
+  });
+});

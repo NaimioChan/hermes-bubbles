@@ -117,6 +117,22 @@
   white-space: pre-wrap;
 }
 
+/* ── bubble spacing ───────────────────────────────────────────────────────── */
+
+/* The gap above a bubble: the single source of vertical spacing in the
+ * transcript (the container has no `gap`, or the two would stack). The previous
+ * 0.75rem made consecutive bubbles feel cramped; the desktop app gives a settled
+ * reply noticeably more air, and a wrapped reply is easier to scan when its
+ * bubble is clearly separated. */
+.hb-bubble-gap {
+  margin-top: 1.15rem;
+}
+
+/* The first bubble in a transcript keeps the container's own padding. */
+.hb-bubble-gap:first-child {
+  margin-top: 0;
+}
+
 .hb-md-h {
   margin: 0.9em 0 0.45em;
   font-weight: 600;
@@ -155,6 +171,45 @@
   line-height: 1.5;
   background: var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent));
   border-radius: calc(var(--radius) * 0.6);
+}
+
+/* A code block fills the bubble rather than shrinking to its content.
+ *
+ * The host stylesheet has a global `code { display: inline; background: ...;
+ * color: var(--background) }`. That rule is keyed on the TAG, not a class, so it
+ * applied to the <code> inside every <pre> too: the block picked up the host's
+ * inline-code chip colours (near-black #1e1e2e text on a #cdd6f4 chip, both from
+ * the theme's own background/midground pair) and the element stayed inline, so
+ * the <pre>'s surface was as wide as the text and nothing else.
+ *
+ * Fixing it here, keyed on our own class, resets the inherited chip styling and
+ * lets the block fill its container. Colour is inherited from the bubble so a
+ * short block stays legible against the block's own surface. */
+.hb-md-pre code {
+  display: block;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  color: inherit;
+}
+
+/* The same host rule also hit tool output, which had no background of its own
+ * (it used the now-undefined --color-background) — that combination is what made
+ * short code blocks unreadable. */
+.hb-output {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+.hb-output code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
 }
 
 .hb-md-ul,
@@ -241,6 +296,88 @@
 
 .hb-muted {
   color: var(--color-muted-foreground);
+}
+
+/* ── per-message actions ──────────────────────────────────────────────────── */
+
+/* Transparent until the message is hovered, and always occupying its height so
+ * revealing it cannot shift the conversation below. Mirrors the desktop app's
+ * footer, which is deliberately not unmounted while a turn streams. */
+.hb-actions {
+  padding-top: 0.25rem;
+  min-height: 1.25rem;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.hb-actions:hover,
+.hb-actions:focus-within {
+  opacity: 1;
+}
+
+/* Keyboard users get the row without needing a pointer. */
+.hb-bubble-gap:hover .hb-actions {
+  opacity: 1;
+}
+
+/* The icon group sits at the row's right edge; it exists as its own class so the
+ * timestamp and the buttons can be spaced independently. */
+.hb-actions-tools {
+  min-height: 0;
+}
+
+.hb-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hb-action-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+/* A copy confirmation is a momentary change of glyph, so it must not resize. */
+.hb-action-btn:active {
+  transform: translateY(0.5px);
+}
+
+/* A labelled button (approval choices, clarify submit). */
+.hb-action-btn-text {
+  padding: 0.25rem 0.6rem;
+  border: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.hb-action-btn-text:hover {
+  filter: brightness(1.12);
+}
+
+.hb-input {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-card-foreground);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) * 0.6);
+  outline: none;
+}
+
+.hb-input:focus {
+  border-color: var(--color-ring);
 }
 
 /* ── scrollbars ───────────────────────────────────────────────────────────── */

@@ -3,17 +3,25 @@
  * pickers, and the live metrics strip.
  *
  * All behavior that can be decided without a DOM lives in `core/slash.ts`,
- * `core/attachments.ts` and `core/metrics.ts`; this file wires it to elements.
+ * `core/attachments.ts`, `core/metrics.ts` and `core/i18n.ts`; this file wires
+ * it to elements.
+ *
+ * There is deliberately NO `@` path completion. The backend's `complete.path`
+ * takes the whole word INCLUDING the leading `@` (`is_context = word.startswith("@")`),
+ * and this client used to send the bare query, so the backend saw a plain word
+ * and every request missed. Rather than carrying a second completion channel for
+ * file references, `@` is not special here at all — the `+` button attaches files
+ * through `file.attach`, the same path the desktop app uses.
  */
 
 import type { Attachment } from "../core/attachments";
-import { applyAtCompletion, findAtToken, formatBytes, screenFiles } from "../core/attachments";
+import { formatBytes, screenFiles } from "../core/attachments";
 import { metricChips, pressureTone } from "../core/metrics";
+import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
 import {
   applyCompletion,
   filterCommands,
   findSlashToken,
-  reasoningLabel,
   REASONING_LEVELS,
   type CommandEntry,
 } from "../core/slash";
@@ -27,6 +35,7 @@ export interface ModelChoice {
 
 export interface ComposerProps {
   sdk: HermesPluginSdk;
+  locale: Locale;
   running: boolean;
   status: string;
   connected: boolean;
@@ -42,7 +51,6 @@ export interface ComposerProps {
   onRemoveAttachment: (id: string) => void;
   onOpenModelPicker: () => void;
   onPickReasoning: (level: string) => void;
-  onCompletePath: (word: string) => Promise<{ text: string; display: string; meta: string }[]>;
   onError: (message: string) => void;
 }
 
@@ -60,18 +68,17 @@ export function Composer(props: ComposerProps) {
   const { sdk } = props;
   const { React } = sdk;
   const { useCallback, useEffect, useMemo, useRef, useState } = sdk.hooks;
+  const t = messagesFor(props.locale);
 
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState(false);
-  const [pathItems, setPathItems] = useState<{ text: string; display: string; meta: string }[]>([]);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   // The slash token under the caret drives the popover.
   const slashToken = useMemo(() => findSlashToken(text, caret), [text, caret]);
-  const atToken = useMemo(() => findAtToken(text, caret), [text, caret]);
 
   const items = useMemo(
     () => (slashToken ? filterCommands(props.catalog, slashToken.query, MENU_LIMIT) : []),
@@ -79,32 +86,6 @@ export function Composer(props: ComposerProps) {
   );
 
   const menuVisible = Boolean(slashToken && items.length && !menuDismissed);
-  const pathVisible = Boolean(atToken && pathItems.length);
-
-  useEffect(() => {
-    // A bare "@" is the most useful case: the backend answers it with the
-    // reference roots (@diff / @file: / @folder: / @url:). Requiring at least one
-    // character here was why typing "@" showed nothing.
-    if (!atToken) {
-      setPathItems([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      props
-        .onCompletePath(atToken.query)
-        .then((result) => {
-          if (!cancelled) setPathItems(result.slice(0, MENU_LIMIT));
-        })
-        .catch(() => {
-          if (!cancelled) setPathItems([]);
-        });
-    }, 120);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [atToken?.query, props]);
 
   // Reset the highlight whenever the candidate list changes shape.
   useEffect(() => {
@@ -132,24 +113,6 @@ export function Composer(props: ComposerProps) {
       });
     },
     [slashToken, text],
-  );
-
-  const acceptPath = useCallback(
-    (item: { text: string; display: string }) => {
-      if (!atToken) return;
-      const next = applyAtCompletion(text, atToken, item.text);
-      setText(next.text);
-      setPathItems([]);
-      requestAnimationFrame(() => {
-        const el = inputRef.current;
-        if (el) {
-          el.focus();
-          el.setSelectionRange(next.caret, next.caret);
-          setCaret(next.caret);
-        }
-      });
-    },
-    [atToken, text],
   );
 
   const submit = useCallback(() => {
@@ -186,18 +149,12 @@ export function Composer(props: ComposerProps) {
           return;
         }
       }
-      if (pathVisible && (event.key === "Tab" || event.key === "Enter")) {
-        event.preventDefault();
-        const item = pathItems[menuIndex];
-        if (item) acceptPath(item);
-        return;
-      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         submit();
       }
     },
-    [menuVisible, pathVisible, items, menuIndex, pathItems, acceptCommand, acceptPath, submit],
+    [menuVisible, items, menuIndex, acceptCommand, submit],
   );
 
   const onPaste = useCallback(
@@ -253,14 +210,24 @@ export function Composer(props: ComposerProps) {
                     borderRadius: "calc(var(--radius) * 0.6)",
                   },
                 },
-                React.createElement("span", null, item.kind === "image" ? "🖼" : item.kind === "pdf" ? "📄" : "📎"),
+                React.createElement(
+                  "span",
+                  null,
+                  item.kind === "image" ? "🖼" : item.kind === "pdf" ? "📄" : "📎",
+                ),
                 React.createElement("span", { className: "hb-truncate hb-max-w-16ch" }, item.name),
-                item.size ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, formatBytes(item.size)) : null,
+                item.size
+                  ? React.createElement(
+                      "span",
+                      { style: { color: "var(--color-muted-foreground)" } },
+                      formatBytes(item.size),
+                    )
+                  : null,
                 item.status === "staging"
                   ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "…")
                   : null,
                 item.status === "error"
-                  ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, "失败")
+                  ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, "!")
                   : null,
                 React.createElement(
                   "button",
@@ -277,7 +244,7 @@ export function Composer(props: ComposerProps) {
           )
         : null,
 
-      // ── slash / path popover ─────────────────────────────────────────────
+      // ── slash popover ────────────────────────────────────────────────────
       menuVisible
         ? React.createElement(
             "div",
@@ -309,49 +276,20 @@ export function Composer(props: ComposerProps) {
                       "span",
                       {
                         className: "hb-text-tiny px-1",
-                        style: { background: "var(--color-muted)", borderRadius: "3px", color: "var(--color-muted-foreground)" },
+                        style: {
+                          background: "var(--color-muted)",
+                          borderRadius: "3px",
+                          color: "var(--color-muted-foreground)",
+                        },
                       },
-                      "技能",
+                      "skill",
                     )
                   : null,
                 React.createElement(
                   "span",
-                  { className: "truncate", style: { color: "var(--color-muted-foreground)" } },
+                  { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
                   entry.description,
                 ),
-              ),
-            ),
-          )
-        : null,
-
-      pathVisible
-        ? React.createElement(
-            "div",
-            {
-              className: "mb-1.5 max-h-48 overflow-y-auto py-1 hb-scroll",
-              style: {
-                background: "var(--color-popover, var(--color-card))",
-                borderRadius: "var(--radius)",
-                boxShadow: "inset 0 0 0 1px var(--color-border)",
-              },
-            },
-            pathItems.map((item, index) =>
-              React.createElement(
-                "button",
-                {
-                  key: item.text,
-                  type: "button",
-                  className: "flex w-full cursor-pointer items-baseline gap-2 px-3 py-1.5 text-left text-xs",
-                  style: {
-                    background: index === menuIndex ? "var(--color-accent, var(--color-muted))" : "transparent",
-                    color: "var(--color-card-foreground)",
-                  },
-                  onClick: () => acceptPath(item),
-                },
-                React.createElement("span", { className: "font-mono" }, item.display || item.text),
-                item.meta
-                  ? React.createElement("span", { className: "truncate", style: { color: "var(--color-muted-foreground)" } }, item.meta)
-                  : null,
               ),
             ),
           )
@@ -374,7 +312,8 @@ export function Composer(props: ComposerProps) {
           "button",
           {
             type: "button",
-            title: "添加文件或路径",
+            title: t.attachFiles,
+            "aria-label": t.attachFiles,
             className: "shrink-0 cursor-pointer px-2 py-1.5 text-base leading-none",
             style: { color: "var(--color-muted-foreground)" },
             onClick: () => fileRef.current?.click(),
@@ -398,9 +337,8 @@ export function Composer(props: ComposerProps) {
           value: text,
           rows: 1,
           disabled: !props.connected,
-          placeholder: props.connected
-            ? "发消息，或输入 / 唤起命令、@ 引用文件"
-            : "连接中…",
+          placeholder: props.connected ? t.composerPlaceholder : "…",
+          "aria-label": t.composerPlaceholder,
           className: "hb-resize-none hb-min-h-input max-h-48 flex-1 bg-transparent py-1.5 text-sm outline-none",
           style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
           onChange: (event: { target: { value: string; selectionStart: number } }) => {
@@ -422,18 +360,18 @@ export function Composer(props: ComposerProps) {
             "button",
             {
               type: "button",
-              title: `模型：${props.model || "默认"}（点击切换）`,
+              title: `${t.pickModel}: ${props.model || "default"}`,
               className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
               style: { color: "var(--color-muted-foreground)" },
               onClick: props.onOpenModelPicker,
             },
-            props.model || "模型",
+            props.model || "model",
           ),
           React.createElement(
             "button",
             {
               type: "button",
-              title: `思考强度：${reasoningLabel(props.reasoning || "medium")}`,
+              title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
               className: "hb-text-micro cursor-pointer px-2 py-1.5",
               style: { color: "var(--color-muted-foreground)" },
               onClick: () => {
@@ -443,9 +381,9 @@ export function Composer(props: ComposerProps) {
                 if (next) props.onPickReasoning(next);
               },
             },
-            `思考·${reasoningLabel(props.reasoning || "medium")}`,
+            reasoningLabel(props.reasoning || "medium", props.locale),
           ),
-          // While a turn runs the primary action becomes "插入": the message is
+          // While a turn runs the primary action becomes "insert": the message is
           // delivered mid-turn (queued / steered / redirected by the backend).
           // Stop is a separate control so correcting and cancelling do not
           // compete for the same button.
@@ -454,7 +392,8 @@ export function Composer(props: ComposerProps) {
                 "button",
                 {
                   type: "button",
-                  title: "停止当前任务",
+                  title: t.stopReasoningTitle,
+                  "data-hb": "stop-action",
                   className: "cursor-pointer px-2.5 py-1.5 text-xs",
                   style: {
                     background: "var(--color-muted)",
@@ -463,7 +402,7 @@ export function Composer(props: ComposerProps) {
                   },
                   onClick: props.onStop,
                 },
-                "停止",
+                t.stop,
               )
             : null,
           React.createElement(
@@ -471,7 +410,8 @@ export function Composer(props: ComposerProps) {
             {
               type: "button",
               disabled: !canSend,
-              title: props.running ? "插入到当前任务" : "发送",
+              title: props.running ? t.insert : t.send,
+              "data-hb": "primary-action",
               className: "cursor-pointer px-3 py-1.5 text-xs",
               style: {
                 background: props.running ? "var(--color-muted)" : "var(--color-primary)",
@@ -484,7 +424,7 @@ export function Composer(props: ComposerProps) {
               },
               onClick: submit,
             },
-            props.running ? "插入" : "发送",
+            props.running ? t.insert : t.send,
           ),
         ),
       ),
@@ -497,7 +437,7 @@ export function Composer(props: ComposerProps) {
           style: { color: "var(--color-muted-foreground)" },
         },
         props.status
-          ? React.createElement("span", { className: "truncate" }, props.status)
+          ? React.createElement("span", { className: "hb-truncate", title: props.status }, props.status)
           : null,
         React.createElement(
           "div",
@@ -512,9 +452,7 @@ export function Composer(props: ComposerProps) {
                   chip.key === "context" && contextChip
                     ? {
                         color:
-                          tone === "calm"
-                            ? "var(--color-muted-foreground)"
-                            : "var(--color-muted-foreground)",
+                          tone === "calm" ? "var(--color-muted-foreground)" : "var(--color-muted-foreground)",
                       }
                     : undefined,
               },

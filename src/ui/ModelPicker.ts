@@ -6,12 +6,14 @@
  * the current selection visible without navigating.
  */
 
-import { reasoningLabel, REASONING_LEVELS } from "../core/slash";
+import { REASONING_LEVELS } from "../core/slash";
+import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
 import type { ModelOptionProvider } from "../app/controller";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface ModelPickerProps {
   sdk: HermesPluginSdk;
+  locale: Locale;
   open: boolean;
   loading: boolean;
   providers: readonly ModelOptionProvider[];
@@ -26,6 +28,7 @@ export interface ModelPickerProps {
 export function ModelPicker(props: ModelPickerProps) {
   const { sdk } = props;
   const { React } = sdk;
+  const t = messagesFor(props.locale);
   const { useMemo, useState } = sdk.hooks;
 
   const [filter, setFilter] = useState("");
@@ -70,7 +73,7 @@ export function ModelPicker(props: ModelPickerProps) {
       React.createElement(
         "div",
         { className: "flex items-center gap-2 border-b p-3", style: { borderColor: "var(--color-border)" } },
-        React.createElement("span", { className: "text-xs font-medium" }, "模型与思考强度"),
+        React.createElement("span", { className: "text-xs font-medium" }, t.pickModel),
         React.createElement(
           "button",
           {
@@ -90,7 +93,7 @@ export function ModelPicker(props: ModelPickerProps) {
         React.createElement(
           "span",
           { className: "mr-1 text-[0.6875rem]", style: { color: "var(--color-muted-foreground)" } },
-          "思考强度",
+          t.reasoning,
         ),
         REASONING_LEVELS.map((level) =>
           React.createElement(
@@ -106,14 +109,14 @@ export function ModelPicker(props: ModelPickerProps) {
               },
               onClick: () => props.onPickReasoning(level),
             },
-            reasoningLabel(level),
+            reasoningLabel(level, props.locale),
           ),
         ),
       ),
 
       React.createElement("input", {
         value: filter,
-        placeholder: "筛选模型…",
+        placeholder: t.filterModels,
         className: "mb-1 bg-transparent px-2 py-1.5 text-xs outline-none",
         style: {
           margin: "0.75rem 0.75rem 0.25rem",
@@ -128,9 +131,9 @@ export function ModelPicker(props: ModelPickerProps) {
         "div",
         { className: "min-h-0 flex-1 overflow-y-auto p-3 pt-1 hb-scroll" },
         props.loading
-          ? React.createElement("div", { className: "py-4 text-center text-xs", style: { color: "var(--color-muted-foreground)" } }, "载入中…")
+          ? React.createElement("div", { className: "py-4 text-center text-xs", style: { color: "var(--color-muted-foreground)" } }, t.loading)
           : groups.length === 0
-            ? React.createElement("div", { className: "py-4 text-center text-xs", style: { color: "var(--color-muted-foreground)" } }, "没有匹配的模型")
+            ? React.createElement("div", { className: "py-4 text-center text-xs", style: { color: "var(--color-muted-foreground)" } }, t.noModels)
             : groups.map((group) =>
                 React.createElement(
                   "div",
@@ -143,10 +146,10 @@ export function ModelPicker(props: ModelPickerProps) {
                     },
                     group.provider.name || group.provider.slug,
                     group.provider.is_current
-                      ? React.createElement("span", { style: { color: "var(--color-primary)" } }, "当前")
+                      ? React.createElement("span", { style: { color: "var(--color-primary)" } }, t.current)
                       : null,
                     group.provider.authenticated === false
-                      ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, "未配置密钥")
+                      ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, t.noKey)
                       : null,
                   ),
                   group.models.map((model) => {

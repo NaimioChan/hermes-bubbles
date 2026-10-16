@@ -7,11 +7,13 @@
  * impossible to tell whether clicking a row switches to it or opens a copy.
  */
 
+import { messagesFor, type Locale } from "../core/i18n";
 import { tabLabel, type SessionTab } from "../core/sessions";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface TabStripProps {
   sdk: HermesPluginSdk;
+  locale: Locale;
   tabs: readonly SessionTab[];
   activeKey: string | null;
   runningKeys: readonly string[];
@@ -25,6 +27,7 @@ export interface TabStripProps {
 export function TabStrip(props: TabStripProps) {
   const { sdk } = props;
   const { React } = sdk;
+  const t = messagesFor(props.locale);
 
   return React.createElement(
     "div",
@@ -41,7 +44,7 @@ export function TabStrip(props: TabStripProps) {
         ? React.createElement(
             "span",
             { className: "hb-text-micro px-2", style: { color: "var(--color-muted-foreground)" } },
-            "没有打开的会话",
+            t.emptyTabs,
           )
         : props.tabs.map((tab) =>
             React.createElement(
@@ -49,6 +52,10 @@ export function TabStrip(props: TabStripProps) {
               {
                 key: tab.key,
                 type: "button",
+                // Stable hook for the end-to-end script: tests must not depend on
+                // the visible label, which is localized.
+                "data-hb": "tab",
+                "data-hb-key": tab.key,
                 title: tabLabel(tab),
                 className: "group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
                 style: {
@@ -70,7 +77,8 @@ export function TabStrip(props: TabStripProps) {
                 "span",
                 {
                   role: "button",
-                  title: "关闭",
+                  title: t.closeTab,
+              "data-hb": "tab-close",
                   className: "hb-tab-close shrink-0 cursor-pointer px-0.5",
                   style: { color: "var(--color-muted-foreground)" },
                   onClick: (event: { stopPropagation: () => void }) => {
@@ -92,7 +100,8 @@ export function TabStrip(props: TabStripProps) {
         "button",
         {
           type: "button",
-          title: "新对话",
+          title: t.newChat,
+          "data-hb": "tab-new",
           className: "cursor-pointer px-2 py-1 text-sm leading-none",
           style: { color: "var(--color-muted-foreground)" },
           onClick: props.onNew,
@@ -103,7 +112,8 @@ export function TabStrip(props: TabStripProps) {
         "button",
         {
           type: "button",
-          title: props.historyOpen ? "收起历史会话" : "展开历史会话",
+          title: props.historyOpen ? t.collapse : t.history,
+          "data-hb": "history-toggle",
           className: "cursor-pointer px-2 py-1 text-xs",
           style: {
             color: props.historyOpen ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
@@ -112,7 +122,7 @@ export function TabStrip(props: TabStripProps) {
           },
           onClick: props.onToggleHistory,
         },
-        "历史",
+        t.history,
       ),
     ),
   );

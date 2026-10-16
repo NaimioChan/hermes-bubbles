@@ -38,7 +38,10 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 12. **运行中也要允许发消息。** Hermes 的行为是中途输入 = 打断修正，后端 `prompt.submit` 的 busy 路径会决定排队 / 插入 / 改向并在 `status` 里回报。别再把输入框禁用掉。
 13. **`src/core/markdown.ts` 是回复渲染的唯一来源。** 助手气泡的文本先解析成节点树（`src/core/markdown.ts`），再由 `src/ui/Markdown.ts` 用 `React.createElement` 渲染。**不许出现 `innerHTML` / `dangerouslySetInnerHTML`**——节点树让 React 负责转义，等于从根上删掉注入这一类问题，而不是在周边做净化。`tests/architecture.test.ts` 会拦。链接仍要过 `safeHref()`（React 不会替你拦 `javascript:` 协议）。
 14. **引 CSS 变量必须确认宿主真的定义了它，否则给 fallback。** 宿主从不定义 `--color-foreground` 与 `--color-background`（0.22.2 实测：23 个 `--color-*`，两个都不在其中）。`var(--undefined)` **不报错**，整条声明在计算值阶段被丢掉，元素静默继承或透出背景——`--color-background` 曾让代码块与审批卡变成全透明。`tests/theme-vars.test.ts` 对照真实编译产物查，离线时回退白名单。
-15. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+15. **文案不进测试断言。** 每个可点/可测的元素带一个 `data-hb="…"` 钩子（`tab` / `tab-new` / `history-toggle` / `history-panel` / `primary-action` / `stop-action` / `reasoning-toggle` / `message-actions` / `request-card` / `clarify-submit`），`scripts/verify.mjs` 只按钩子找元素。踩过一次：整套验收按中文文案选择器写，页面默认语言改成英语后 9 条断言集体失效——那是测试脆，不是功能坏。新增可交互元素时补一个钩子。
+16. **默认语言是英语，并跟随仪表盘。** `display.language` 默认就是 `en`；插件从 `localStorage['hermes-locale']` 与 `<html lang>` 两个信号读当前语言（无 RPC 可问），并用 `storage` + `MutationObserver` 跟着切。文案集中在 `src/core/i18n.ts`，任何组件里不许再写裸字符串。
+17. **`@` 不是补全入口。** 后端 `complete.path` 期望的 `word` **包含**开头的 `@`（`is_context = word.startswith("@")`），早期客户端发的是去掉 `@` 的查询，所以永远匹配不上。功能已按用户要求移除，`@` 当普通字符；文件用 `+` 按钮走 `file.attach`。别再加回来，除非同时把 `@` 带上。
+18. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 
@@ -57,9 +60,13 @@ npm run install-plugin
 
 动了 UI 之后，还要在真实仪表盘里点一遍：发一条消息、看流式气泡、展开一个工具卡片、刷新页面看历史恢复。
 
-`node scripts/verify.mjs` 把这套点检自动化了（38 项，跑真模型真往返），需要仪表盘在 9119 上跑着。
+`node scripts/verify.mjs` 把这套点检自动化了（46 项，跑真模型真往返），需要仪表盘在 9119 上跑着。
 
-两套「静默失效」守卫值得单独说，因为它们的失败方式都不报错：`scripts/audit-classes.mjs` 查「用了但宿主 CSS 里没有的类」，`tests/theme-vars.test.ts` 查「引了但宿主没定义的 CSS 变量」。加新样式或新颜色时先跑它们。
+另有 `node scripts/verify-clarify.mjs`：审批/选择题卡片只在**模型主动调用 clarify** 时才出现，所以它单独放，不进主验收（依赖模型行为的断言会随机失败）。卡片逻辑的单测在 `tests/requests.test.ts`。
+
+三套「静默失效」守卫值得单独说，因为它们的失败方式都不报错：`scripts/audit-classes.mjs` 查「用了但宿主 CSS 里没有的类」，`tests/theme-vars.test.ts` 查「引了但宿主没定义的 CSS 变量」，`tests/layout-classes.test.ts` 查「hb- 类没在自己样式表里定义」。加新样式或新颜色时先跑它们。
+
+还有一类更隐蔽的：宿主用**标签名**（不是类名）定的全局规则会钻进我们的组件。宿主的 `code { display: inline; color: var(--background) }` 就把每个 `<pre>` 里的 `<code>` 变成了内联的浅底黑字小块——代码块因此既不铺满气泡又看不清。`hb-md-pre code` / `hb-output code` 显式覆盖它。写新组件时，如果元素是 `code` / `pre` / `a` / `table` 这类会被全局选中的标签，先假设宿主会插手。
 
 ## Agent skills
 

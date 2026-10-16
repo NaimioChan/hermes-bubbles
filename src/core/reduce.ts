@@ -185,6 +185,10 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       // a previous turn when this one produced no text at all. Seal and finish
       // in ONE pass — sealing first would replace the object and break identity.
       const target = openAssistant(items);
+      // The turn ended: stamp it for the timestamp and duration lines. `at` is
+      // the turn's start and is the wrong number to print under a reply.
+      const completedAt = Date.now();
+      const durationS = turnDuration(items, completedAt);
 
       let nextItems: TimelineItem[];
       if (target) {
@@ -198,6 +202,8 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
           error: status === "error" ? error || "turn failed" : undefined,
           partial: Boolean(p.partial),
           usage: usage ?? item.usage,
+          completedAt,
+          durationS,
         }));
       } else if (finalText) {
         nextItems = [
@@ -212,6 +218,8 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
             error: status === "error" ? error || "turn failed" : undefined,
             partial: Boolean(p.partial),
             usage: usage ?? undefined,
+            completedAt,
+            durationS,
           },
         ];
       } else if (status === "error" && error) {
@@ -225,6 +233,8 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
             reasoning: "",
             streaming: false,
             error,
+            completedAt,
+            durationS,
           },
         ];
       } else {
@@ -383,6 +393,25 @@ export function ackUser(timeline: Timeline, rowId: number | undefined): Timeline
     }
   }
   return timeline;
+}
+
+/**
+ * How long the turn took, from its own user row to now.
+ *
+ * `message.complete` reports no timing, so this is measured locally. Clamped to
+ * a plausible window: a resumed session's rows can carry timestamps that are not
+ * comparable to `Date.now()` (epoch units differ across sources), and printing
+ * "41000m" under a reply is worse than printing nothing.
+ */
+function turnDuration(items: readonly TimelineItem[], completedAt: number): number | undefined {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (!item || item.kind !== "user") continue;
+    const elapsed = (completedAt - item.at) / 1000;
+    if (!Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 6 * 3600) return undefined;
+    return elapsed;
+  }
+  return undefined;
 }
 
 /** Stop pressed, or the turn ended without a `message.complete`. */

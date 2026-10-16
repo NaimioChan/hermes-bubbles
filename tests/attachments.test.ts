@@ -3,10 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   addAttachment,
   allSettled,
-  applyAtCompletion,
   attachMethodFor,
   classifyFile,
-  findAtToken,
   formatBytes,
   hasFailed,
   MAX_ATTACHMENT_BYTES,
@@ -120,33 +118,10 @@ describe("gating a send", () => {
   });
 });
 
-describe("findAtToken", () => {
-  it("finds an @ reference at the start", () => {
-    expect(findAtToken("@src/ma", 7)).toEqual({ raw: "@src/ma", query: "src/ma", start: 0, end: 7 });
-  });
-
-  it("finds one after whitespace", () => {
-    const text = "看看 @docs/";
-    expect(findAtToken(text, text.length)).toMatchObject({ query: "docs/" });
-  });
-
-  it("ignores an @ inside a word (an email address)", () => {
-    expect(findAtToken("me@example.com", 14)).toBeNull();
-  });
-
-  it("returns null when there is no @", () => {
-    expect(findAtToken("plain text", 10)).toBeNull();
-  });
-});
-
-describe("applyAtCompletion", () => {
-  it("replaces the token and adds a space", () => {
-    const token = findAtToken("@sr", 3);
-    const result = applyAtCompletion("@sr", token!, "@file:src/main.ts");
-    expect(result.text).toBe("@file:src/main.ts ");
-  });
-});
-
+// `findAtToken` / `applyAtCompletion` are gone with the `@` completion feature:
+// the backend keys `complete.path` on a word that INCLUDES the leading `@`, and
+// this client sent the bare query, so it never matched. Files are attached with
+// the `+` button now, so there is no `@` token to find.
 describe("formatBytes", () => {
   it("formats each magnitude", () => {
     expect(formatBytes(512)).toBe("512 B");

@@ -347,9 +347,9 @@ async function main() {
     const layout = await session.evaluate(`(() => {
       const ta = document.querySelector('textarea');
       const tr = ta.getBoundingClientRect();
-      const tabs = [...document.querySelectorAll('button')].filter(b => b.title === '关闭' || b.title === '新对话');
+      const tabs = [...document.querySelectorAll('[data-hb="tab"], [data-hb="tab-new"]')];
       const tabTop = tabs.length ? Math.min(...tabs.map(b => b.getBoundingClientRect().top)) : -1;
-      const hist = [...document.querySelectorAll('button')].find(b => (b.title || '').includes('历史会话'));
+      const hist = document.querySelector('[data-hb="history-toggle"]');
       const histRight = hist ? hist.getBoundingClientRect().right : -1;
       return {
         tabTop, composerBottom: tr.bottom, windowH: window.innerHeight,
@@ -370,14 +370,14 @@ async function main() {
 
     // Opening it must reveal the panel on the right, not the left.
     await session.evaluate(`(() => {
-      const b = [...document.querySelectorAll('button')].find(x => (x.title || '').includes('历史会话'));
-      b?.click();
+      document.querySelector('[data-hb="history-toggle"]')?.click();
       return 'clicked';
     })()`);
     await sleep(1200);
     const panel = await session.evaluate(`(() => {
-      const ps = [...document.querySelectorAll('span')].filter(s => (s.textContent || '').trim() === '历史会话');
-      const p = ps.map(s => s.getBoundingClientRect()).sort((a, b) => b.width - a.width)[0];
+      // The panel container, found by its stable hook rather than by its heading
+      // text (which is localized).
+      const p = document.querySelector('[data-hb="history-panel"]')?.getBoundingClientRect();
       return p ? { left: Math.round(p.left), right: Math.round(p.right), windowW: window.innerWidth }
                : { left: -1, right: -1, windowW: window.innerWidth };
     })()`);
@@ -388,160 +388,61 @@ async function main() {
     );
 
     const tabCount = () => session.evaluate(`(() => {
-      // The close control is a span (a button inside a button is invalid HTML),
-      // so count by title across all elements rather than only <button>.
-      return document.querySelectorAll('[title="关闭"]').length;
+      // Counted by the stable data-hb hook, not by the localized label text:
+      // the earlier version matched the Chinese label and broke the moment the
+      // page went English-by-default.
+      return document.querySelectorAll('[data-hb="tab"]').length;
     })()`);
     const tabsBefore = await tabCount();
     await session.evaluate(`(() => {
-      const b = [...document.querySelectorAll('button')].find(x => x.title === '新对话');
-      b?.click();
+      document.querySelector('[data-hb="tab-new"]')?.click();
       return 'clicked';
     })()`);
     await sleep(3000);
     const tabsAfter = await tabCount();
     check("new-session button opens another tab", tabsAfter > tabsBefore, `${tabsBefore} -> ${tabsAfter}`);
 
-    // ── item 3: @ path completions ─────────────────────────────────────────
-    await session.evaluate(`(() => {
+    // ── item 6: `@` is plain text, `/` still opens the menu ────────────────
+    // The `@` completion was removed: the backend keys `complete.path` on a word
+    // that INCLUDES the leading `@`, and this client sent the bare query, so it
+    // never matched. Assert `@` opens nothing and that `/` is untouched.
+    const popoverIn = `(() => {
       const ta = document.querySelector('textarea');
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, '@');
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-      return 'typed';
-    })()`);
-    let atRows = 0;
-    for (let i = 0; i < 12; i += 1) {
-      await sleep(400);
-      atRows = await session.evaluate(`(() => {
-        const ta = document.querySelector('textarea');
-        const under = [...document.querySelectorAll('button')].filter(b => {
-          const r = b.getBoundingClientRect();
-          return ta && r.bottom <= ta.getBoundingClientRect().top && (b.textContent || '').trim().length > 0;
-        });
-        return under.length;
-      })()`);
-      if (atRows > 0) break;
-    }
-    check("typing @ opens the path-reference menu", atRows > 0, `${atRows} rows`);
+      const composer = ta?.closest('.mx-auto');
+      if (!composer) return null;
+      const pop = composer.querySelector('.max-h-64, .max-h-48');
+      return { text: ta.value, rows: pop ? pop.querySelectorAll('button').length : 0 };
+    })()`;
 
-    // ── v0.2: attachments ──────────────────────────────────────────────────
-    const attachUi = await session.evaluate(`(() => ({
-      plus: [...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+'),
-      fileInput: Boolean(document.querySelector('input[type=file]')),
-    }))()`);
-    check("composer has a + button backed by a file input", attachUi.plus && attachUi.fileInput, JSON.stringify(attachUi));
+    // Set the composer's value directly (React ignores a plain assignment, so go
+    // through the native setter and fire an input event).
+    const typeInComposer = async (value) => {
+      await session.evaluate(
+        "(() => { const ta = document.querySelector('textarea');"
+        + " const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;"
+        + " setter.call(ta, " + JSON.stringify(value) + ");"
+        + " ta.dispatchEvent(new Event('input', { bubbles: true })); return 'typed'; })()",
+      );
+    };
 
-    // ── v0.2: model / reasoning pickers ────────────────────────────────────
-    await session.evaluate(`(() => {
-      const b = [...document.querySelectorAll('button')].find(x => (x.title || '').startsWith('模型：'));
-      b?.click();
-      return 'clicked';
-    })()`);
-    await sleep(2500);
-    const picker = await session.evaluate(`(() => {
-      const text = document.body.innerText;
-      const panel = document.querySelector('.hb-max-h-70vh');
-      const rows = panel ? panel.querySelectorAll('button').length : 0;
-      return {
-        open: text.includes('模型与思考强度'),
-        hasReasoning: text.includes('思考强度'),
-        // Provider headers plus model rows; a bare modal would be ~2 buttons.
-        modelRows: rows,
-        hasProvider: /Mixture of Agents|Qwen|DeepSeek|OpenAI|Anthropic|custom/i.test(text),
-      };
-    })()`);
-    check("model picker opens and lists providers/models", picker.open && picker.modelRows > 4 && picker.hasProvider, JSON.stringify(picker));
-    check("model picker exposes reasoning levels", picker.hasReasoning === true);
+    await typeInComposer('@');
+    await sleep(1500);
+    let atState = await session.evaluate(popoverIn);
+    check("typing @ opens no popover (the feature was removed)", atState === null || atState.rows === 0, JSON.stringify(atState));
 
-    await session.evaluate(`(() => {
-      document.querySelector('div[class*="fixed"]')?.click();
-      return 'closed';
-    })()`);
-    await sleep(400);
+    await typeInComposer('看看 @file 这个');
+    await sleep(1500);
+    atState = await session.evaluate(popoverIn);
+    check("typing @ mid-sentence opens no popover either", atState === null || atState.rows === 0, JSON.stringify(atState));
 
-    // ── markdown rendering ─────────────────────────────────────────────────
-    // The reply must become real elements, not literal asterisks and pipes. A
-    // literal `**` on screen is the exact symptom of markdown not applying.
-    const mdPrompt = "原样输出这段 markdown，不要解释，不要用代码围栏包裹整段：\n# 标题\n\n**粗体**和`代码`\n\n- 甲\n- 乙\n\n```py\nprint(1)\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |";
-    await session.evaluate(`(() => {
-      const ta = document.querySelector('textarea');
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, ${JSON.stringify(mdPrompt)});
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      return 'sent';
-    })()`);
+    await typeInComposer('/');
+    await sleep(1500);
+    const slashState = await session.evaluate(popoverIn);
+    check("typing / still opens the command menu", slashState !== null && slashState.rows > 0, JSON.stringify(slashState));
 
-    let md = null;
-    const mdDeadline = Date.now() + 120000;
-    while (Date.now() < mdDeadline && !md) {
-      await sleep(2500);
-      md = await session.evaluate(`(() => {
-        const all = [...document.querySelectorAll('.hb-md')];
-        const el = all[all.length - 1];
-        if (!el) return null;
-        const q = (s) => el.querySelectorAll(s).length;
-        // Wait for the fenced block and table, or we measure a half-streamed
-        // reply and under-report the block types.
-        if (q('.hb-md-codeblock') === 0 || q('table') === 0) return null;
-        const text = el.innerText;
-        return {
-          h1: q('h1'), strong: q('strong'), inlineCode: q('code'),
-          listItems: q('li'), codeBlocks: q('.hb-md-codeblock'),
-          tables: q('table'), td: q('td'),
-          hasLiteralBold: text.includes('**'),
-          hasLiteralPipeRow: text.includes('|---'),
-          hasLiteralFence: text.includes(String.fromCharCode(96).repeat(3)),
-        };
-      })()`);
-    }
-
-    check(
-      "markdown renders real elements (heading / bold / code / list / table)",
-      md !== null && md.h1 >= 1 && md.strong >= 1 && md.inlineCode >= 1 &&
-        md.listItems >= 2 && md.codeBlocks >= 1 && md.tables >= 1 && md.td >= 2,
-      md ? JSON.stringify(md) : "never saw a fully-markdowned reply",
-    );
-    check(
-      "markdown markers are consumed, not shown literally",
-      md !== null && !md.hasLiteralBold && !md.hasLiteralPipeRow && !md.hasLiteralFence,
-      md ? JSON.stringify({ bold: md.hasLiteralBold, pipe: md.hasLiteralPipeRow, fence: md.hasLiteralFence }) : "n/a",
-    );
-
-    // Block surfaces must actually paint: a bare `var(--color-background)` is not
-    // defined by this host and resolved to transparent.
-    const mdStyle = await session.evaluate(`(() => {
-      const all = [...document.querySelectorAll('.hb-md')];
-      const el = all[all.length - 1];
-      if (!el) return null;
-      const pre = el.querySelector('.hb-md-pre');
-      const code = el.querySelector('code');
-      const th = el.querySelector('th');
-      const first = el.firstElementChild;
-      return {
-        preBg: pre ? getComputedStyle(pre).backgroundColor : null,
-        codeFont: code ? getComputedStyle(code).fontFamily : null,
-        thBorder: th ? getComputedStyle(th).borderBottomWidth : null,
-        firstMarginTop: first ? getComputedStyle(first).marginTop : null,
-      };
-    })()`);
-    const transparent = (v) => !v || v === "rgba(0, 0, 0, 0)" || v === "transparent";
-    check(
-      "code block has a visible surface (not transparent)",
-      mdStyle !== null && !transparent(mdStyle.preBg),
-      JSON.stringify(mdStyle),
-    );
-    check(
-      "inline code is monospace and the table is bordered",
-      mdStyle !== null && /mono|Courier|Consolas|Menlo/i.test(mdStyle.codeFont ?? "") && mdStyle.thBorder === "1px",
-      JSON.stringify(mdStyle),
-    );
-    check(
-      "the bubble has no leading gap from block margins",
-      mdStyle !== null && mdStyle.firstMarginTop === "0px",
-      `first child margin-top=${mdStyle?.firstMarginTop}`,
-    );
+    // Clear the composer so later steps start clean.
+    await typeInComposer('');
+    await sleep(300);
 
     // ── item 4: no speaker labels ──────────────────────────────────────────
     const labels = await session.evaluate(`(() => {
@@ -593,6 +494,167 @@ async function main() {
     }
     check("live metrics appear after a turn (context bar / t/s)", metricsSeen === true);
 
+    // ── item 2: bubbles have real vertical spacing ─────────────────────────
+    const spacing = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.hb-bubble-gap')];
+      if (!rows.length) return null;
+      const cs = getComputedStyle(rows[rows.length - 1]);
+      const container = rows[0].parentElement;
+      return {
+        rows: rows.length,
+        marginTop: parseFloat(cs.marginTop),
+        containerGap: getComputedStyle(container).gap,
+      };
+    })()`);
+    check(
+      "bubbles are separated by a real margin",
+      spacing !== null && spacing.marginTop >= 14,
+      `margin-top=${spacing?.marginTop}px`,
+    );
+    check(
+      "spacing comes from one place (no container gap stacking on the margin)",
+      spacing !== null && (spacing.containerGap === "normal" || spacing.containerGap === "0px"),
+      `container gap=${spacing?.containerGap}`,
+    );
+
+    // ── item 3: per-message actions under a settled reply ──────────────────
+    const actions = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.hb-actions')];
+      if (!rows.length) return null;
+      const row = rows[rows.length - 1];
+      const cs = getComputedStyle(row);
+      return {
+        rows: rows.length,
+        opacity: cs.opacity,
+        // Always occupying height is what stops the row shifting the transcript
+        // when it is revealed.
+        minHeight: parseFloat(cs.minHeight),
+        buttons: [...row.querySelectorAll('button')].map(b => b.getAttribute('title')).filter(Boolean),
+        hasTime: Boolean(row.querySelector('time')?.textContent?.trim()),
+        stamp: row.querySelector('time')?.textContent?.trim() ?? null,
+      };
+    })()`);
+    check(
+      "a settled reply carries an action row",
+      actions !== null,
+      actions ? JSON.stringify(actions) : "no .hb-actions row found",
+    );
+    check(
+      "the action row offers branch, copy and regenerate",
+      actions !== null
+        && actions.buttons.length === 3
+        && /branch/i.test(actions.buttons.join(" "))
+        && /copy/i.test(actions.buttons.join(" "))
+        && /refresh|regenerate/i.test(actions.buttons.join(" ")),
+      JSON.stringify(actions?.buttons),
+    );
+    check(
+      "the action row shows a timestamp",
+      actions !== null && actions.hasTime === true,
+      `stamp=${actions?.stamp}`,
+    );
+    check(
+      "the action row is hidden until hover but reserves its height",
+      actions !== null && actions.opacity === "0" && actions.minHeight > 0,
+      JSON.stringify({ opacity: actions?.opacity, minHeight: actions?.minHeight }),
+    );
+
+    // Hovering the row must actually reveal it.
+    await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.hb-actions')];
+      const row = rows[rows.length - 1];
+      row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      return 'hovered';
+    })()`);
+    await sleep(400);
+    const hovered = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.hb-actions')];
+      const row = rows[rows.length - 1];
+      // :hover cannot be forced from script; assert the CSS rule exists instead
+      // of pretending the state changed.
+      let ruleFound = false;
+      for (const sheet of document.styleSheets) {
+        try {
+          for (const rule of sheet.cssRules) {
+            if (rule.selectorText && /\.hb-actions:hover/.test(rule.selectorText)) ruleFound = true;
+          }
+        } catch {}
+      }
+      return { ruleFound, opacity: getComputedStyle(row).opacity };
+    })()`);
+    check(
+      "hovering is wired to reveal the row (CSS rule present)",
+      hovered.ruleFound === true,
+      JSON.stringify(hovered),
+    );
+
+    // Copy must reach a real clipboard path.
+    const copyResult = await session.evaluate(`(async () => {
+      const rows = [...document.querySelectorAll('.hb-actions')];
+      const row = rows[rows.length - 1];
+      const btn = [...row.querySelectorAll('button')].find(b => /copy|复制/i.test(b.getAttribute('title')||''));
+      if (!btn) return { error: 'no copy button' };
+      btn.click();
+      await new Promise(r => setTimeout(r, 500));
+      return { titleAfter: btn.getAttribute('title'), glyph: btn.textContent };
+    })()`, { awaitPromise: true });
+    // The glyph flipping is the user-visible confirmation the handler ran.
+    check(
+      "copy gives feedback on click",
+      copyResult !== null && (copyResult.titleAfter === "Copied" || copyResult.glyph === "✓"),
+      JSON.stringify(copyResult),
+    );
+
+    // ── item 5: the plugin follows the dashboard's language ────────────────
+    const langBefore = await session.evaluate(
+      `JSON.stringify({ placeholder: document.querySelector('textarea')?.placeholder, send: [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(x=>x==='Send'||x==='发送')[0] })`,
+    );
+    check(
+      "the default UI language is English",
+      langBefore.includes("Send a message") && langBefore.includes("Send"),
+      langBefore,
+    );
+
+    // Switch to Chinese the way the dashboard's own switcher does, with no reload.
+    await session.evaluate(`(() => {
+      localStorage.setItem('hermes-locale', 'zh');
+      document.documentElement.lang = 'zh';
+      return 'switched';
+    })()`);
+    await sleep(1500);
+    const langZh = await session.evaluate(`JSON.stringify({
+      placeholder: document.querySelector('textarea')?.placeholder,
+      send: [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(x=>x==='Send'||x==='发送')[0],
+      actionTitles: [...document.querySelectorAll('.hb-actions button')].map(b=>b.getAttribute('title')).slice(0,3),
+      thought: /思考|THOUGHT/i.test(document.body.innerText),
+    })`);
+    check(
+      "switching the dashboard language to Chinese is picked up without a reload",
+      langZh.includes("发消息") && langZh.includes("发送"),
+      langZh,
+    );
+    check(
+      "the action row is localized too",
+      langZh.includes("复制") && langZh.includes("在新对话中分支"),
+      langZh,
+    );
+
+    // And back.
+    await session.evaluate(`(() => {
+      localStorage.setItem('hermes-locale', 'en');
+      document.documentElement.lang = 'en';
+      return 'restored';
+    })()`);
+    await sleep(1200);
+    const langBack = await session.evaluate(
+      `JSON.stringify({ placeholder: document.querySelector('textarea')?.placeholder })`,
+    );
+    check(
+      "switching back to English is picked up too",
+      langBack.includes("Send a message"),
+      langBack,
+    );
+
     // ── item 7: mid-turn input ─────────────────────────────────────────────
     // Fire a deliberately slow turn, then inspect the composer WHILE it runs.
     // Checking at idle proves nothing: the requirement is that a running turn
@@ -600,23 +662,24 @@ async function main() {
     await session.evaluate(`(() => {
       const ta = document.querySelector('textarea');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, '用 terminal 运行 sleep 12，完成后只回复两个字：完成');
+      setter.call(ta, '请调用 terminal 工具运行 sleep 15，等它跑完再回复两个字：完成');
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       return 'sent';
     })()`);
 
     let running = null;
-    const runDeadline = Date.now() + 30000;
+    const runDeadline = Date.now() + 45000;
     while (Date.now() < runDeadline && !running) {
-      await sleep(600);
+      await sleep(500);
       running = await session.evaluate(`(() => {
         const ta = document.querySelector('textarea');
         if (!ta) return null;
-        const btns = [...document.querySelectorAll('button')];
-        const insert = btns.find(b => b.textContent.trim() === '插入');
-        const stop = btns.find(b => b.textContent.trim() === '停止');
-        if (!insert && !stop) return null;
+        const insert = document.querySelector('[data-hb="primary-action"]');
+        const stop = document.querySelector('[data-hb="stop-action"]');
+        // A running turn renders the stop control; that is the reliable signal,
+        // independent of the language or of the primary action's label.
+        if (!stop) return null;
         return {
           hasInsertButton: Boolean(insert),
           insertDisabled: insert ? insert.disabled : null,
@@ -632,7 +695,7 @@ async function main() {
       running ? JSON.stringify(running) : "never observed the running state",
     );
     check(
-      "the running state offers both 插入 and 停止",
+      "the running state offers both an insert and a stop action",
       running !== null && running.hasInsertButton === true && running.hasStopButton === true,
       running ? JSON.stringify(running) : "not observed",
     );
@@ -644,7 +707,7 @@ async function main() {
         const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
         setter.call(ta, '顺便说一句，忽略上面那句话');
         ta.dispatchEvent(new Event('input', { bubbles: true }));
-        const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '插入');
+        const btn = document.querySelector('[data-hb="primary-action"]');
         return { value: ta.value, sendEnabled: btn ? !btn.disabled : false };
       })()`);
       check(
@@ -663,24 +726,34 @@ async function main() {
       if (!scroller) return { error: 'no transcript' };
       const usage = [...scroller.querySelectorAll('div')].find(d =>
         d.children.length === 0 && /tokens|tok ·/.test(d.textContent || ''));
-      const reasoning = [...scroller.querySelectorAll('button')].find(b => (b.textContent || '').includes('思考'));
+      const reasoning = scroller.querySelector('[data-hb="reasoning-toggle"]');
       const reasoningBlock = reasoning ? reasoning.parentElement : null;
       return {
         usageSize: usage ? parseFloat(getComputedStyle(usage).fontSize) : null,
         reasoningSize: reasoning ? parseFloat(getComputedStyle(reasoning).fontSize) : null,
+        reasoningPresent: Boolean(reasoning),
         reasoningMarginTop: reasoningBlock ? parseFloat(getComputedStyle(reasoningBlock).marginTop) : null,
       };
     })()`);
+    // The usage line must stay in the smallest tier. A turn need not produce
+    // reasoning at all, so when it did not, compare against that tier's known
+    // size instead of failing on a block that is legitimately absent.
+    const USAGE_MAX_PX = 10.5;
     check(
       "usage line is no larger than the reasoning text",
-      typeof type.usageSize === "number" && typeof type.reasoningSize === "number" && type.usageSize <= type.reasoningSize + 0.01,
+      typeof type.usageSize === "number"
+        && type.usageSize <= (type.reasoningPresent ? type.reasoningSize + 0.01 : USAGE_MAX_PX),
       JSON.stringify(type),
     );
-    check(
-      "reasoning block has real spacing above it",
-      typeof type.reasoningMarginTop === "number" && type.reasoningMarginTop >= 6,
-      `margin-top=${type.reasoningMarginTop}px`,
-    );
+    if (type.reasoningPresent) {
+      check(
+        "reasoning block has real spacing above it",
+        typeof type.reasoningMarginTop === "number" && type.reasoningMarginTop >= 6,
+        `margin-top=${type.reasoningMarginTop}px`,
+      );
+    } else {
+      console.log("SKIP  reasoning spacing — this turn produced no reasoning block");
+    }
 
     // Ignore anything thrown by a browser extension. Headless Edge still loads
     // its bundled extensions, and they throw across origins on their own

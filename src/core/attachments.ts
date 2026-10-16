@@ -110,45 +110,6 @@ export function hasFailed(queue: readonly Attachment[]): boolean {
   return queue.some((item) => item.status === "error");
 }
 
-/**
- * The `@` reference token under the caret.
- *
- * Same shape as the slash token but triggered by `@`, and it may contain path
- * characters. Kept separate from `findSlashToken` because the two never apply
- * at once and merging them would make both harder to read.
- */
-export interface AtToken {
-  raw: string;
-  query: string;
-  start: number;
-  end: number;
-}
-
-export function findAtToken(text: string, caret: number): AtToken | null {
-  const pos = Math.max(0, Math.min(caret, text.length));
-  let start = -1;
-  for (let i = pos - 1; i >= 0; i -= 1) {
-    const ch = text[i];
-    if (ch === "@") {
-      start = i;
-      break;
-    }
-    if (ch === undefined || /\s/.test(ch)) break;
-  }
-  if (start === -1) return null;
-  if (start > 0) {
-    const before = text[start - 1];
-    if (before !== undefined && !/\s/.test(before)) return null;
-  }
-  return { raw: text.slice(start, pos), query: text.slice(start + 1, pos), start, end: pos };
-}
-
-export function applyAtCompletion(text: string, token: AtToken, replacement: string): { text: string; caret: number } {
-  const inserted = `${replacement} `;
-  const next = text.slice(0, token.start) + inserted + text.slice(token.end);
-  return { text: next, caret: token.start + inserted.length };
-}
-
 export function formatBytes(bytes: number | undefined): string {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} B`;

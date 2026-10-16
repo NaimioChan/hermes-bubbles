@@ -9,7 +9,6 @@ import {
   isReasoningLevel,
   parseCommandInput,
   parseDispatch,
-  reasoningLabel,
   REASONING_LEVELS,
   type CommandEntry,
 } from "../src/core/slash";
@@ -258,9 +257,6 @@ describe("reasoning levels", () => {
     expect(isReasoningLevel("")).toBe(false);
   });
 
-  it("labels known levels in Chinese and passes unknown ones through", () => {
-    expect(reasoningLabel("medium")).toBe("中");
-    expect(reasoningLabel("ultra")).toBe("极限");
-    expect(reasoningLabel("mystery")).toBe("mystery");
-  });
+  // The labels live in `core/i18n.ts` now (they are locale-dependent); see
+  // tests/i18n.test.ts.
 });

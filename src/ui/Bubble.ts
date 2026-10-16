@@ -10,14 +10,19 @@
  */
 
 import type { AssistantItem, NoticeItem, ToolItem, UserItem } from "../core/types";
+import { formatElapsed, messageStamp, messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
-import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
 import { Markdown } from "./Markdown";
+import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
 
 interface BubbleProps {
   sdk: HermesPluginSdk;
   item: UserItem | AssistantItem | ToolItem | NoticeItem;
-  onAnswerRequest?: (choice: string) => void;
+  locale: Locale;
+  /** Per-message actions. Absent on a transcript that cannot act (a read-only view). */
+  onBranch?: (itemId: string) => void;
+  onRegenerate?: (itemId: string) => void;
+  onCopy?: (text: string) => void;
 }
 
 /** The shared corner treatment: large radius on three corners, small on the speaker's own side. */
@@ -32,7 +37,7 @@ function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
     React.createElement(
       "div",
       {
-        className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed",
+        className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
         style: {
           maxWidth: "min(72ch, 82%)",
           background: "color-mix(in oklab, var(--color-primary) 16%, var(--color-card))",
@@ -55,11 +60,22 @@ function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
  * This is the middle ground between hiding reasoning entirely and dumping a wall
  * of it into the transcript — the same shape most agent chats use.
  */
-function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: string; streaming: boolean }) {
+function Reasoning({
+  sdk,
+  text,
+  streaming,
+  locale,
+}: {
+  sdk: HermesPluginSdk;
+  text: string;
+  streaming: boolean;
+  locale: Locale;
+}) {
   const { React } = sdk;
   const { useState, useMemo } = sdk.hooks;
   const [open, setOpen] = useState(false);
   const trimmed = text.trim();
+  const t = messagesFor(locale);
 
   // Hooks must run unconditionally: this component returns null for empty
   // reasoning, and a `useMemo` after that early return throws React #310
@@ -82,11 +98,12 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
       {
         type: "button",
         className: "flex w-full cursor-pointer items-center gap-1.5 text-[0.6875rem]",
+        "data-hb": "reasoning-toggle",
         style: { color: "var(--color-muted-foreground)" },
         onClick: () => setOpen((v: boolean) => !v),
       },
       React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, open ? "▾" : "▸"),
-      React.createElement("span", { className: "shrink-0 uppercase tracking-[0.06em]" }, "思考"),
+      React.createElement("span", { className: "shrink-0 uppercase tracking-[0.06em]" }, t.thought),
       streaming
         ? React.createElement(
             "span",
@@ -94,11 +111,11 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
             "●",
           )
         : null,
-      React.createElement("span", { className: "shrink-0", style: { opacity: 0.7 } }, `${chars} 字`),
+      React.createElement("span", { className: "shrink-0", style: { opacity: 0.7 } }, t.chars(chars)),
       !open && !streaming
         ? React.createElement(
             "span",
-            { className: "min-w-0 flex-1 truncate text-left", style: { opacity: 0.8 } },
+            { className: "hb-truncate hb-flex-fill text-left", style: { opacity: 0.8 } },
             tail,
           )
         : null,
@@ -122,7 +139,7 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
       ? React.createElement(
           "div",
           {
-            className: "hb-pre hb-mt-sm whitespace-pre-wrap break-words px-2 py-1.5 text-xs",
+            className: "hb-pre hb-mt-sm break-words px-2 py-1.5 text-xs",
             style: {
               background: "color-mix(in oklab, var(--color-muted) 45%, var(--color-card))",
               color: "var(--color-muted-foreground)",
@@ -138,7 +155,104 @@ function Reasoning({ sdk, text, streaming }: { sdk: HermesPluginSdk; text: strin
   );
 }
 
-function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantItem }) {
+/**
+ * The action row under a settled reply, mirroring the desktop app's footer:
+ * timestamp, branch in new chat, copy, regenerate.
+ *
+ * Always mounted but transparent until the row is hovered, so revealing it does
+ * not shift the conversation (the desktop app calls this out explicitly — it is
+ * why the bar is never unmounted while streaming). Read-aloud and reactions are
+ * deliberately absent: both need voice/reaction plumbing this plugin has none of.
+ */
+function MessageActions({
+  sdk,
+  item,
+  locale,
+  onBranch,
+  onRegenerate,
+  onCopy,
+}: {
+  sdk: HermesPluginSdk;
+  item: AssistantItem;
+  locale: Locale;
+  onBranch?: (itemId: string) => void;
+  onRegenerate?: (itemId: string) => void;
+  onCopy?: (text: string) => void;
+}) {
+  const { React } = sdk;
+  const { useState } = sdk.hooks;
+  const [copied, setCopied] = useState(false);
+  const t = messagesFor(locale);
+
+  const stamp = messageStamp(item.completedAt ?? item.at, locale);
+
+  const iconButton = (key: string, title: string, glyph: string, action: () => void) =>
+    React.createElement(
+      "button",
+      {
+        key,
+        type: "button",
+        title,
+        "aria-label": title,
+        className: "hb-action-btn",
+        onClick: (event: { stopPropagation: () => void }) => {
+          event.stopPropagation();
+          action();
+        },
+      },
+      glyph,
+    );
+
+  return React.createElement(
+    "div",
+    {
+      className: "hb-actions flex items-center gap-1.5",
+      "data-hb": "message-actions",
+      style: { maxWidth: "min(72ch, 82%)" },
+    },
+    stamp
+      ? React.createElement(
+          "time",
+          {
+            className: "hb-text-micro tabular-nums",
+            style: { color: "var(--color-muted-foreground)" },
+            // The tooltip carries the turn's duration when the backend implied one.
+            title: item.durationS ? t.turnDuration(formatElapsed(item.durationS)) : undefined,
+          },
+          stamp,
+        )
+      : null,
+    React.createElement(
+      "div",
+      { className: "hb-actions-tools ml-auto flex items-center gap-1" },
+      onBranch ? iconButton("branch", t.branchNewChat, "⑂", () => onBranch(item.id)) : null,
+      onCopy
+        ? iconButton("copy", copied ? t.copied : t.copy, copied ? "✓" : "⧉", () => {
+            onCopy(item.text);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          })
+        : null,
+      onRegenerate ? iconButton("regen", t.refresh, "↻", () => onRegenerate(item.id)) : null,
+    ),
+  );
+}
+
+function AssistantBubble({
+  sdk,
+  item,
+  locale,
+  onBranch,
+  onRegenerate,
+  onCopy,
+}: {
+  sdk: HermesPluginSdk;
+  item: AssistantItem;
+  locale: Locale;
+  onBranch?: (itemId: string) => void;
+  onRegenerate?: (itemId: string) => void;
+  onCopy?: (text: string) => void;
+}) {
   const { React } = sdk;
   const errorColor = "var(--color-destructive)";
   return React.createElement(
@@ -170,7 +284,7 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
           item.error,
         )
       : null,
-    React.createElement(Reasoning, { sdk, text: item.reasoning, streaming: item.streaming }),
+    React.createElement(Reasoning, { sdk, text: item.reasoning, streaming: item.streaming, locale }),
     item.usage
       ? React.createElement(
           "div",
@@ -178,10 +292,18 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
             className: "hb-text-tiny hb-mt-sm tabular-nums",
             style: { color: "var(--color-muted-foreground)" },
           },
-          [item.usage.total ? `${formatCount(item.usage.total)} tokens` : "", item.usage.context_percent ? `上下文 ${item.usage.context_percent}%` : ""]
+          [
+            item.usage.total ? `${formatCount(item.usage.total)} tokens` : "",
+            item.usage.context_percent ? `上下文 ${item.usage.context_percent}%` : "",
+          ]
             .filter(Boolean)
             .join(" · "),
         )
+      : null,
+    // Actions only on a settled reply: mid-stream there is nothing to copy or
+    // regenerate yet, and the desktop app's own bar is transient for the same reason.
+    !item.streaming && (onBranch || onRegenerate || onCopy)
+      ? React.createElement(MessageActions, { sdk, item, locale, onBranch, onRegenerate, onCopy })
       : null,
   );
 }
@@ -194,9 +316,20 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
   const [open, setOpen] = useState(item.status === "running");
   const preview = toolPreview(item.resultText);
   const stripe =
-    item.status === "error" ? "var(--color-destructive)" : item.status === "running" ? "var(--color-ring)" : "var(--color-border)";
+    item.status === "error"
+      ? "var(--color-destructive)"
+      : item.status === "running"
+        ? "var(--color-ring)"
+        : "var(--color-border)";
   const argsText = item.argsText ?? (item.args ? JSON.stringify(item.args, null, 2) : "");
   const duration = formatDuration(item.durationS);
+  const outputStyle = {
+    padding: "0.5rem",
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.8125rem",
+    background: "color-mix(in oklab, var(--color-muted) 70%, transparent)",
+    borderRadius: "calc(var(--radius) * 0.6)",
+  };
 
   return React.createElement(
     "div",
@@ -225,10 +358,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
       item.summary
         ? React.createElement(
             "span",
-            {
-              className: "truncate",
-              style: { color: "var(--color-muted-foreground)" },
-            },
+            { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
             item.summary,
           )
         : null,
@@ -244,7 +374,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
       ? React.createElement(
           "div",
           { className: "mt-1", style: { color: "var(--color-destructive)" } },
-          `⚠ 输出被标记为 ${item.risk}`,
+          `输出被标记为 ${item.risk}`,
         )
       : null,
     open
@@ -252,32 +382,12 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
           "div",
           { className: "hb-stack-gap space-y-1.5" },
           argsText
-            ? React.createElement(
-                "pre",
-                {
-                  className: "overflow-x-auto whitespace-pre-wrap break-words p-2",
-                  style: {
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.8125rem",
-                    background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                  },
-                },
-                argsText,
-              )
+            ? React.createElement("pre", { className: "hb-output", style: outputStyle }, argsText)
             : null,
           preview.text
             ? React.createElement(
                 "pre",
-                {
-                  className: "overflow-x-auto whitespace-pre-wrap break-words p-2",
-                  style: {
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.8125rem",
-                    background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                  },
-                },
+                { className: "hb-output", style: outputStyle },
                 preview.text + (preview.truncated ? "\n…" : ""),
               )
             : null,
@@ -285,7 +395,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
       : preview.text
         ? React.createElement(
             "div",
-            { className: "mt-1 truncate", style: { color: "var(--color-muted-foreground)" } },
+            { className: "mt-1 hb-truncate", style: { color: "var(--color-muted-foreground)" } },
             preview.text.split("\n")[0],
           )
         : null,
@@ -308,12 +418,19 @@ function NoticeRow({ sdk, item }: { sdk: HermesPluginSdk; item: NoticeItem }) {
 }
 
 export function Bubble(props: BubbleProps) {
-  const { sdk, item } = props;
+  const { sdk, item, locale } = props;
   switch (item.kind) {
     case "user":
       return UserBubble({ sdk, item });
     case "assistant":
-      return AssistantBubble({ sdk, item });
+      return AssistantBubble({
+        sdk,
+        item,
+        locale,
+        onBranch: props.onBranch,
+        onRegenerate: props.onRegenerate,
+        onCopy: props.onCopy,
+      });
     case "tool":
       return ToolCard({ sdk, item });
     case "notice":

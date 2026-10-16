@@ -11,6 +11,7 @@
 
 import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
 import { EventDedupe } from "../core/dedupe";
+import { messagesFor, normalizeLocale, type Locale } from "../core/i18n";
 import { reduceEvent, type GatewayEvent } from "../core/reduce";
 import {
   ackUserInActive,
@@ -68,6 +69,12 @@ export class ChatController {
   private detail = "";
   private resyncing = false;
   private cardSink: ((card: ServerRequestCard) => void) | null = null;
+  /** Locale for controller-emitted strings (notices, errors). The page keeps it current. */
+  private locale: Locale = normalizeLocale(null);
+
+  setLocale(locale: Locale): void {
+    this.locale = locale;
+  }
 
   constructor(options: ControllerOptions) {
     this.cardSink = options.onServerRequest ?? null;
@@ -312,7 +319,7 @@ export class ChatController {
   private async submitMessage(message: string, display: string): Promise<void> {
     if (!message.trim()) return;
     const runtimeId = await this.ensureSession();
-    if (!runtimeId) throw new Error("会话尚未建立");
+    if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
     const wasRunning = activeTimeline(this.state).meta.running;
 
     this.setState(appendUserToActive(this.state, display || message));
@@ -326,14 +333,128 @@ export class ChatController {
     // the text just sits in the transcript and looks ignored until the turn ends.
     if (wasRunning) {
       const status = result?.status;
-      if (status === "steered") {
-        this.notice("已插入当前任务，模型会在下一步看到它", "info");
-      } else if (status === "redirected") {
-        this.notice("已改为新方向", "info");
-      } else if (status === "queued") {
-        this.notice("已排队，当前任务结束后发送", "info");
+      const t = messagesFor(this.locale);
+      if (status === "steered") this.notice(t.steered, "info");
+      else if (status === "redirected") this.notice(t.redirected, "info");
+      else if (status === "queued") this.notice(t.queued, "info");
+    }
+  }
+
+  // ── per-message actions ──────────────────────────────────────────────────
+
+  /**
+   * Replace the focused turn's reply with a fresh one.
+   *
+   * The backend's own retry shape: a plain `session.undo` rewinds the last turn
+   * WITHOUT resending it, so the caller re-submits to get a new reply. Two
+   * differences from the initial send matter here:
+   *
+   *   - `session.undo` is destructive, so a failure is surfaced rather than
+   *     swallowed; the transcript is untouched when it throws.
+   *   - the re-submitted text is the ORIGINAL user text, which is what makes
+   *     this a regenerate rather than a new message.
+   */
+  async regenerateAssistant(itemId: string): Promise<void> {
+    const key = this.state.activeKey;
+    if (!key) return;
+    const runtimeId = await this.ensureSession();
+    if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
+
+    const timeline = timelineOf(this.state, key);
+    const index = timeline.items.findIndex((entry) => entry.id === itemId);
+    if (index < 0) throw new Error("找不到该回复");
+
+    // The turn's own user row is the nearest user item above the reply.
+    let prompt: string | null = null;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      const entry = timeline.items[i];
+      if (entry && entry.kind === "user") {
+        prompt = entry.text;
+        break;
       }
     }
+    if (prompt === null) throw new Error("找不到对应的用户消息");
+
+    // Drop the reply and everything after it, then rewind server-side.
+    const kept = timeline.items.slice(0, index);
+    this.setState({
+      ...this.state,
+      sessions: {
+        ...this.state.sessions,
+        [key]: { items: kept, meta: { ...timeline.meta, running: true, status: "" } },
+      },
+    });
+
+    try {
+      await this.client.request("session.undo", { session_id: runtimeId, intent: "retry" });
+    } catch (error) {
+      // Put the transcript back exactly as it was: the server kept its copy.
+      this.setState({
+        ...this.state,
+        sessions: { ...this.state.sessions, [key]: { items: timeline.items, meta: timeline.meta } },
+      });
+      throw error;
+    }
+
+    const result = await this.client.request<{ status?: string; user_row_id?: number }>("prompt.submit", {
+      session_id: runtimeId,
+      text: prompt,
+    });
+    this.setState(ackUserInActive(this.state, result?.user_row_id));
+  }
+
+  /**
+   * Fork the session into a new stored child, opened as a second tab.
+   *
+   * `count` and the idempotency key exist so a retried call returns the SAME
+   * child instead of forking twice — the backend documents that as the desktop
+   * client's contract, and a lost response is exactly when this is called again.
+   */
+  async branchSession(itemId?: string): Promise<void> {
+    const key = this.state.activeKey;
+    const tab = this.state.tabs.find((t) => t.key === key);
+    if (!tab) return;
+
+    const runtimeId = tab.runtimeId;
+    if (!runtimeId) {
+      // A draft with no live session has nothing to fork; branch the stored row.
+      if (!tab.storedId) throw new Error(messagesFor(this.locale).sessionNotReady);
+      const forked = await this.rpc<{ session_id: string; stored_session_id: string; title: string }>(
+        "session.branch_stored",
+        { parent_session_id: tab.storedId },
+      );
+      await this.openStoredSession(forked.stored_session_id, forked.title || tab.title);
+      return;
+    }
+
+    // Branch at the assistant reply's own row when we can identify it, so the
+    // child carries the history up to that message rather than the whole session.
+    const items = timelineOf(this.state, key).items;
+    const index = itemId ? items.findIndex((entry) => entry.id === itemId) : -1;
+    let count: number | undefined;
+    if (index >= 0) {
+      // Count the durable rows at or before this item; the backend projects
+      // `count` onto its stored history, and local-only rows have no row id.
+      let rows = 0;
+      for (let i = 0; i <= index; i += 1) {
+        const entry = items[i];
+        if (entry && "rowId" in entry && typeof entry.rowId === "number") rows += 1;
+      }
+      if (rows > 0) count = rows;
+    }
+
+    const forked = await this.rpc<{
+      session_id: string;
+      stored_session_id: string;
+      title: string;
+    }>("session.branch", {
+      session_id: runtimeId,
+      count,
+      idempotency_key: `hb-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    });
+
+    // Open the child beside the parent rather than replacing it.
+    await this.openStoredSession(forked.stored_session_id, forked.title || tab.title);
   }
 
   /** Append a local notice line to the focused transcript. */
@@ -439,7 +560,7 @@ export class ChatController {
           : "file";
 
     const runtimeId = await this.ensureSession();
-    if (!runtimeId) throw new Error("会话尚未建立");
+    if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
 
     const dataUrl = await file.dataUrl();
     const params: Record<string, unknown> = { session_id: runtimeId };

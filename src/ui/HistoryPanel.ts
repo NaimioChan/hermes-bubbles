@@ -5,6 +5,7 @@
  * most of a session is spent not looking at it.
  */
 
+import { messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface StoredSession {
@@ -17,6 +18,7 @@ export interface StoredSession {
 
 export interface HistoryPanelProps {
   sdk: HermesPluginSdk;
+  locale: Locale;
   open: boolean;
   sessions: readonly StoredSession[];
   loading: boolean;
@@ -26,25 +28,28 @@ export interface HistoryPanelProps {
   onClose: () => void;
 }
 
-function relativeTime(seconds: number, sdk: HermesPluginSdk): string {
+function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Locale): string {
   if (!seconds) return "";
   const ms = seconds * 1000;
   try {
+    // The host's own formatter is already in the dashboard's language.
     const formatted = sdk.utils.timeAgo(ms);
     if (formatted) return formatted;
   } catch {
-    // fall through to the coarse bucket
+    // fall through to the localized bucket
   }
+  const t = messagesFor(locale);
   const minutes = Math.round((Date.now() - ms) / 60000);
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 60) return t.minutesAgo(minutes);
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.round(hours / 24)} 天前`;
+  if (hours < 24) return t.hoursAgo(hours);
+  return t.daysAgo(Math.round(hours / 24));
 }
 
 export function HistoryPanel(props: HistoryPanelProps) {
   const { sdk } = props;
   const { React } = sdk;
+  const t = messagesFor(props.locale);
 
   if (!props.open) return null;
 
@@ -52,6 +57,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
     "div",
     {
       className: "flex h-full min-h-0 flex-col",
+      "data-hb": "history-panel",
       style: { width: "17rem", borderLeft: "1px solid var(--color-border)" },
     },
 
@@ -64,7 +70,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
           className: "hb-text-micro uppercase tracking-[0.06em]",
           style: { color: "var(--color-muted-foreground)" },
         },
-        "历史会话",
+        t.history,
       ),
       React.createElement(
         "div",
@@ -73,7 +79,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
           "button",
           {
             type: "button",
-            title: "刷新",
+            title: t.refreshTitle,
             className: "cursor-pointer px-1.5 text-xs",
             style: { color: "var(--color-muted-foreground)" },
             onClick: props.onRefresh,
@@ -84,7 +90,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
           "button",
           {
             type: "button",
-            title: "收起",
+            title: t.collapse,
             className: "cursor-pointer px-1.5 text-xs",
             style: { color: "var(--color-muted-foreground)" },
             onClick: props.onClose,
@@ -101,13 +107,13 @@ export function HistoryPanel(props: HistoryPanelProps) {
         ? React.createElement(
             "div",
             { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
-            "载入中…",
+            t.historyLoading,
           )
         : props.sessions.length === 0
           ? React.createElement(
               "div",
               { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
-              "没有历史会话",
+              t.historyEmpty,
             )
           : props.sessions.map((session) => {
               const isActive = session.id === props.activeStoredId;
@@ -133,14 +139,14 @@ export function HistoryPanel(props: HistoryPanelProps) {
                 React.createElement(
                   "div",
                   { className: "flex items-baseline gap-1.5" },
-                  React.createElement("span", { className: "hb-flex-fill hb-truncate" }, session.title || "未命名"),
+                  React.createElement("span", { className: "hb-flex-fill hb-truncate" }, session.title || t.untitled),
                   React.createElement(
                     "span",
                     {
                       className: "hb-text-tiny shrink-0",
                       style: { color: "var(--color-muted-foreground)" },
                     },
-                    relativeTime(session.started_at, sdk),
+                    relativeTime(session.started_at, sdk, props.locale),
                   ),
                 ),
                 session.preview

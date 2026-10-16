@@ -45,6 +45,14 @@ export interface UserItem {
   text: string;
   /** Durable row id, when the backend has told us one. */
   rowId?: number;
+  /**
+   * How many assistant replies this turn has produced.
+   *
+   * Retry rewinds the turn and asks for a new reply. The bubble is keyed on the
+   * turn plus this counter, so a retry replaces the reply in place instead of
+   * appending a second one beside it.
+   */
+  generation?: number;
   /** True until the backend acknowledges the turn (prompt.submit reply). */
   pending?: boolean;
 }
@@ -62,6 +70,16 @@ export interface AssistantItem {
   /** `status: "error"` with `partial: true`: `text` is real output, keep it. */
   partial?: boolean;
   usage?: Usage;
+  /**
+   * Wall-clock end of the turn, for the per-message timestamp.
+   *
+   * `at` is when the bubble was created (the turn's start), which is the wrong
+   * number to print under a reply that streamed for a minute. Absent while
+   * streaming.
+   */
+  completedAt?: number;
+  /** Seconds the turn took, when the backend reported it. */
+  durationS?: number;
 }
 
 export type ToolStatus = "running" | "ok" | "error";

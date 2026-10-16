@@ -246,17 +246,5 @@ export function isReasoningLevel(value: string): value is ReasoningLevel {
   return (REASONING_LEVELS as readonly string[]).includes(value);
 }
 
-const REASONING_LABELS: Record<string, string> = {
-  none: "关闭",
-  minimal: "最少",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "很高",
-  max: "最大",
-  ultra: "极限",
-};
-
-export function reasoningLabel(value: string): string {
-  return REASONING_LABELS[value] ?? value;
-}
+// The labels moved to `core/i18n.ts` when the page became bilingual; this file
+// stays protocol-only (the legal values and their ranking).

@@ -7,11 +7,12 @@
  * one render per event batch and nothing re-renders that did not change.
  *
  * Everything with a decision in it lives in `core/` or the controller; this file
- * is wiring and the state that is genuinely view-local (approval cards on
- * screen, the model picker's open flag, the history panel's collapsed state).
+ * is wiring and the state that is genuinely view-local (request cards on screen,
+ * the model picker's open flag, the history panel's collapsed state).
  */
 
 import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
+import { messagesFor, type Locale } from "../core/i18n";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
 import type { TimelineItem } from "../core/types";
@@ -20,138 +21,11 @@ import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
 import { HistoryPanel, type StoredSession } from "./HistoryPanel";
 import { ModelPicker } from "./ModelPicker";
+import { ApprovalCard, ClarifyCard, approvalResult } from "./RequestCards";
 import { TabStrip } from "./TabStrip";
 import { runningLabel } from "./format";
+import { useLocale } from "./useLocale";
 import type { HermesPluginSdk } from "./sdk";
-
-interface ApprovalCardState extends ServerRequestCard {
-  kind: "approval" | "clarify";
-}
-
-function ApprovalCardView({
-  sdk,
-  card,
-  onAnswer,
-}: {
-  sdk: HermesPluginSdk;
-  card: ApprovalCardState;
-  onAnswer: (card: ApprovalCardState, choice: string) => void;
-}) {
-  const { React } = sdk;
-  const choices = (card.params.choices as string[] | undefined) ?? ["once", "session", "always", "deny"];
-  const labels: Record<string, string> = {
-    once: "允许一次",
-    session: "本次会话允许",
-    always: "总是允许",
-    deny: "拒绝",
-  };
-
-  return React.createElement(
-    "div",
-    {
-      className: "px-3 py-2 text-xs",
-      style: {
-        maxWidth: "min(72ch, 82%)",
-        background: "color-mix(in oklab, var(--color-destructive) 10%, var(--color-card))",
-        borderRadius: "var(--radius)",
-        borderLeft: "2px solid var(--color-destructive)",
-      },
-    },
-    React.createElement("div", { className: "font-medium" }, "需要你确认"),
-    card.params.command
-      ? React.createElement(
-          "pre",
-          {
-            className: "hb-pre hb-mt-sm p-2",
-            style: {
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.8125rem",
-              background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
-              borderRadius: "calc(var(--radius) * 0.6)",
-            },
-          },
-          String(card.params.command),
-        )
-      : null,
-    React.createElement(
-      "div",
-      { className: "hb-stack-gap flex flex-wrap gap-2" },
-      choices.map((choice) =>
-        React.createElement(
-          "button",
-          {
-            key: choice,
-            type: "button",
-            className: "cursor-pointer px-2.5 py-1",
-            style: {
-              background: choice === "deny" ? "var(--color-muted)" : "var(--color-primary)",
-              color: choice === "deny" ? "var(--color-muted-foreground)" : "var(--color-primary-foreground)",
-              borderRadius: "calc(var(--radius) * 0.6)",
-            },
-            onClick: () => onAnswer(card, choice),
-          },
-          labels[choice] ?? choice,
-        ),
-      ),
-    ),
-  );
-}
-
-function ClarifyCardView({
-  sdk,
-  card,
-  onAnswer,
-}: {
-  sdk: HermesPluginSdk;
-  card: ApprovalCardState;
-  onAnswer: (card: ApprovalCardState, answers: Record<string, string>) => void;
-}) {
-  const { React } = sdk;
-  const questions =
-    (card.params.questions as { qid: string; question: string; choices?: string[] }[] | undefined) ?? [];
-  return React.createElement(
-    "div",
-    {
-      className: "space-y-2 px-3 py-2 text-xs",
-      style: {
-        maxWidth: "min(72ch, 82%)",
-        background: "color-mix(in oklab, var(--color-primary) 8%, var(--color-card))",
-        borderRadius: "var(--radius)",
-        borderLeft: "2px solid var(--color-ring)",
-      },
-    },
-    questions.map((question) =>
-      React.createElement(
-        "div",
-        { key: question.qid },
-        React.createElement("div", { className: "font-medium" }, question.question),
-        question.choices
-          ? React.createElement(
-              "div",
-              { className: "hb-mt-sm flex flex-wrap gap-2" },
-              question.choices.map((choice) =>
-                React.createElement(
-                  "button",
-                  {
-                    key: choice,
-                    type: "button",
-                    className: "cursor-pointer px-2.5 py-1",
-                    style: {
-                      background: "var(--color-muted)",
-                      color: "var(--color-card-foreground)",
-                      borderRadius: "calc(var(--radius) * 0.6)",
-                    },
-                    onClick: () => onAnswer(card, { [question.qid]: choice }),
-                  },
-                  choice,
-                ),
-              ),
-            )
-          : null,
-      ),
-    ),
-  );
-}
 
 export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const { React } = sdk;
@@ -159,6 +33,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // `useSyncExternalStore` is NOT in the SDK's curated hooks map — take it off
   // the React instance itself. Verified against SDK_CONTRACT_VERSION 1.1.0.
   const useSyncExternalStore = React.useSyncExternalStore;
+
+  const locale: Locale = useLocale(sdk);
+  const t = messagesFor(locale);
 
   const controller = useMemo(
     () =>
@@ -168,7 +45,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     [sdk],
   );
 
-  const [cards, setCards] = useState<ApprovalCardState[]>([]);
+  const [cards, setCards] = useState<ServerRequestCard[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [catalog, setCatalog] = useState<CommandEntry[]>([]);
@@ -186,10 +63,16 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const timeline = activeTimeline(state);
   const running = runningKeys(state);
 
+  // The controller emits a few strings of its own (notices, errors); keep its
+  // locale in step with what is on screen.
+  useEffect(() => {
+    controller.setLocale(locale);
+  }, [controller, locale]);
+
   // ── boot ────────────────────────────────────────────────────────────────
   useEffect(() => {
     controller.setServerRequestSink((card) => {
-      setCards((prev) => [...prev, { ...card, kind: card.method === "approval" ? "approval" : "clarify" }]);
+      setCards((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
     });
     // `start()` waits for the socket before opening the session. Calling
     // `connect()` then `openSession()` races and reports "gateway not connected"
@@ -236,14 +119,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
   // ── actions ─────────────────────────────────────────────────────────────
 
-  const answer = useCallback((card: ApprovalCardState, choice: string) => {
-    card.respond(card.kind === "approval" ? { choice } : { answers: choice as unknown as Record<string, string> });
-    setCards((prev) => prev.filter((c) => c.id !== card.id));
-  }, []);
-
-  const answerClarify = useCallback((card: ApprovalCardState, answers: Record<string, string>) => {
-    card.respond({ answers });
-    setCards((prev) => prev.filter((c) => c.id !== card.id));
+  /** Drop a card once it is answered; the backend has it from here. */
+  const retire = useCallback((id: string) => {
+    setCards((prev) => prev.filter((card) => card.id !== id));
   }, []);
 
   const onSend = useCallback(
@@ -264,15 +142,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   /**
    * Stage picked/dropped files.
    *
-   * Each file is read to a data URL and pushed to the backend, which hands back
-   * the `@file:` reference to insert. Rejections are surfaced as notices rather
-   * than silently dropped — a file that vanishes with no explanation is the
-   * worst outcome here.
+   * Each file is read to a data URL and pushed to the backend, which queues it
+   * for the next turn. Rejections are surfaced as notices rather than silently
+   * dropped — a file that vanishes with no explanation is the worst outcome here.
    */
   const onPickFiles = useCallback(
     (files: FileList | File[]) => {
       const { accepted, rejected } = screenDroppedFiles(files);
-      for (const item of rejected) controller.notice(`${item.name}：${item.reason}`, "error");
+      for (const item of rejected) controller.notice(`${item.name}: ${item.reason}`, "error");
       for (const { file, id } of accepted) {
         const pending: Attachment = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
         setAttachments((prev) => addAttachment(prev, pending));
@@ -286,7 +163,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                 new Promise<string>((resolve, reject) => {
                   const reader = new FileReader();
                   reader.onload = () => resolve(String(reader.result));
-                  reader.onerror = () => reject(new Error("读取文件失败"));
+                  reader.onerror = () => reject(new Error(t.fileReadFailed));
                   reader.readAsDataURL(file);
                 }),
             },
@@ -303,7 +180,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           );
       }
     },
-    [controller],
+    [controller, t],
   );
 
   const onRemoveAttachment = useCallback((id: string) => {
@@ -330,26 +207,23 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       controller
         .setModel(model, provider, { sessionOnly: true })
         .then((result) => {
-          if (result.confirmRequired) {
-            controller.notice(result.confirmMessage || "这是一个较贵的模型，已取消切换", "error");
-          } else if (result.deferred) {
-            controller.notice("模型切换已排队，下一轮生效");
-          }
+          if (result.confirmRequired) controller.notice(result.confirmMessage || t.cheapModelConfirm, "error");
+          else if (result.deferred) controller.notice(t.modelQueued);
         })
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     },
-    [controller],
+    [controller, t],
   );
 
   const onPickReasoning = useCallback(
     (level: string) => {
       setReasoning(level);
-      controller.setReasoning(level).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+      controller
+        .setReasoning(level)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     },
     [controller],
   );
-
-  const onCompletePath = useCallback((word: string) => controller.completePath(word), [controller]);
 
   const onOpenStored = useCallback(
     (id: string, title: string) => {
@@ -364,8 +238,38 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.newSession().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, [controller]);
 
+  // ── per-message actions ─────────────────────────────────────────────────
+
+  const onCopy = useCallback((text: string) => {
+    // `navigator.clipboard` needs a secure context; the dashboard is http on
+    // localhost, which counts, but a sandboxed frame can still refuse. Fall back
+    // to a throwaway textarea so copy keeps working rather than reporting failure.
+    const write = navigator.clipboard?.writeText(text);
+    if (write) write.catch(() => fallbackCopy(text));
+    else fallbackCopy(text);
+  }, []);
+
+  const onRegenerate = useCallback(
+    (itemId: string) => {
+      controller
+        .regenerateAssistant(itemId)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
+
+  const onBranch = useCallback(
+    (itemId: string) => {
+      controller
+        .branchSession(itemId)
+        .then(() => refreshStored())
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller, refreshStored],
+  );
+
   const tabs: readonly SessionTab[] = state.tabs;
-  const activeStoredId = tabs.find((t) => t.key === state.activeKey)?.storedId ?? null;
+  const activeStoredId = tabs.find((t2) => t2.key === state.activeKey)?.storedId ?? null;
   const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
 
   return React.createElement(
@@ -375,6 +279,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     // ── tabs ────────────────────────────────────────────────────────────
     React.createElement(TabStrip, {
       sdk,
+      locale,
       tabs,
       activeKey: state.activeKey,
       runningKeys: running,
@@ -398,27 +303,56 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll" },
           React.createElement(
             "div",
-            { className: "mx-auto flex flex-col gap-3", style: { maxWidth: "860px" } },
+            { className: "mx-auto flex flex-col", style: { maxWidth: "860px" } },
             timeline.items.length === 0
               ? React.createElement(
                   "div",
                   { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
-                  "开始一段对话。输入 / 唤起命令。",
+                  t.empty,
                 )
               : timeline.items.map((item: TimelineItem) =>
-                  React.createElement(Bubble, { key: item.id, sdk, item }),
+                  React.createElement("div", { key: item.id, className: "hb-bubble-gap" },
+                    React.createElement(Bubble, {
+                      sdk,
+                      item,
+                      locale,
+                      onBranch,
+                      onRegenerate,
+                      onCopy,
+                    }),
+                  ),
                 ),
             cards.map((card) =>
               React.createElement(
                 "div",
-                { key: card.id },
-                card.kind === "approval"
-                  ? React.createElement(ApprovalCardView, { sdk, card, onAnswer: answer })
-                  : React.createElement(ClarifyCardView, { sdk, card, onAnswer: answerClarify }),
+                { key: card.id, className: "hb-bubble-gap" },
+                card.method === "approval"
+                  ? React.createElement(ApprovalCard, {
+                      sdk,
+                      card,
+                      locale,
+                      onAnswer: (choice) => {
+                        card.respond(approvalResult(choice));
+                        retire(card.id);
+                      },
+                    })
+                  : React.createElement(ClarifyCard, {
+                      sdk,
+                      card,
+                      locale,
+                      onSubmit: (result) => {
+                        card.respond(result);
+                        retire(card.id);
+                      },
+                    }),
               ),
             ),
             error
-              ? React.createElement("div", { className: "text-xs", style: { color: "var(--color-destructive)" } }, error)
+              ? React.createElement(
+                  "div",
+                  { className: "text-xs", style: { color: "var(--color-destructive)" } },
+                  error,
+                )
               : null,
             React.createElement("div", { ref: bottomRef }),
           ),
@@ -426,6 +360,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
         React.createElement(Composer, {
           sdk,
+          locale,
           running: timeline.meta.running,
           status,
           connected: timeline.meta.connected,
@@ -441,13 +376,13 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           onRemoveAttachment,
           onOpenModelPicker: openModelPicker,
           onPickReasoning,
-          onCompletePath,
           onError: setError,
         }),
       ),
 
       React.createElement(HistoryPanel, {
         sdk,
+        locale,
         open: historyOpen,
         sessions: stored,
         loading: loadingStored,
@@ -460,6 +395,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
     React.createElement(ModelPicker, {
       sdk,
+      locale,
       open: pickerOpen,
       loading: pickerLoading,
       providers,
@@ -471,4 +407,27 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       onClose: () => setPickerOpen(false),
     }),
   );
+}
+
+/**
+ * Copy without the Clipboard API.
+ *
+ * `document.execCommand("copy")` is deprecated but is the only path left in a
+ * frame that denies `navigator.clipboard`, and a message that cannot be copied
+ * at all is worse than one copied through a deprecated call.
+ */
+function fallbackCopy(text: string): void {
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  } catch {
+    // Nothing else to try; the text is still selectable by hand.
+  }
 }

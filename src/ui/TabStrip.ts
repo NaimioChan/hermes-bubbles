@@ -55,7 +55,7 @@ export function TabStrip(props: TabStripProps) {
                   background: tab.key === props.activeKey ? "var(--color-muted)" : "transparent",
                   color:
                     tab.key === props.activeKey
-                      ? "var(--color-foreground)"
+                      ? "var(--color-card-foreground)"
                       : "var(--color-muted-foreground)",
                   borderRadius: "calc(var(--radius) * 0.6)",
                   boxShadow: tab.key === props.activeKey ? "inset 0 0 0 1px var(--color-border)" : "none",
@@ -106,7 +106,7 @@ export function TabStrip(props: TabStripProps) {
           title: props.historyOpen ? "收起历史会话" : "展开历史会话",
           className: "cursor-pointer px-2 py-1 text-xs",
           style: {
-            color: props.historyOpen ? "var(--color-foreground)" : "var(--color-muted-foreground)",
+            color: props.historyOpen ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
             background: props.historyOpen ? "var(--color-muted)" : "transparent",
             borderRadius: "calc(var(--radius) * 0.6)",
           },

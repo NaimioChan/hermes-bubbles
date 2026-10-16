@@ -249,7 +249,7 @@ export function Composer(props: ComposerProps) {
                   className: "hb-text-micro inline-flex items-center gap-1.5 px-2 py-1",
                   style: {
                     background: "var(--color-muted)",
-                    color: "var(--color-foreground)",
+                    color: "var(--color-card-foreground)",
                     borderRadius: "calc(var(--radius) * 0.6)",
                   },
                 },
@@ -298,7 +298,7 @@ export function Composer(props: ComposerProps) {
                   className: "flex w-full cursor-pointer items-baseline gap-2 px-3 py-1.5 text-left text-xs",
                   style: {
                     background: index === menuIndex ? "var(--color-accent, var(--color-muted))" : "transparent",
-                    color: "var(--color-foreground)",
+                    color: "var(--color-card-foreground)",
                   },
                   onMouseEnter: () => setMenuIndex(index),
                   onClick: () => acceptCommand(entry),
@@ -344,7 +344,7 @@ export function Composer(props: ComposerProps) {
                   className: "flex w-full cursor-pointer items-baseline gap-2 px-3 py-1.5 text-left text-xs",
                   style: {
                     background: index === menuIndex ? "var(--color-accent, var(--color-muted))" : "transparent",
-                    color: "var(--color-foreground)",
+                    color: "var(--color-card-foreground)",
                   },
                   onClick: () => acceptPath(item),
                 },
@@ -402,7 +402,7 @@ export function Composer(props: ComposerProps) {
             ? "发消息，或输入 / 唤起命令、@ 引用文件"
             : "连接中…",
           className: "hb-resize-none hb-min-h-input max-h-48 flex-1 bg-transparent py-1.5 text-sm outline-none",
-          style: { color: "var(--color-foreground)", fontFamily: "var(--font-sans)" },
+          style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
           onChange: (event: { target: { value: string; selectionStart: number } }) => {
             setText(event.target.value);
             setCaret(event.target.selectionStart ?? event.target.value.length);
@@ -475,7 +475,7 @@ export function Composer(props: ComposerProps) {
               className: "cursor-pointer px-3 py-1.5 text-xs",
               style: {
                 background: props.running ? "var(--color-muted)" : "var(--color-primary)",
-                color: props.running ? "var(--color-foreground)" : "var(--color-primary-foreground)",
+                color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",
                 borderRadius: "calc(var(--radius) * 0.6)",
                 // `disabled:opacity-40` is absent from the host bundle, so the
                 // dimming is done here rather than hoped for.

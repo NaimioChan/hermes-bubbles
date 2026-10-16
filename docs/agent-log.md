@@ -8,6 +8,37 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 01:50 · hermes · 回复气泡支持 Markdown
+
+- 改：新增 `src/core/markdown.ts`（解析器）、`src/ui/Markdown.ts`（渲染器）、`tests/markdown.test.ts`（48 条）、`tests/theme-vars.test.ts`、`tests/architecture.test.ts`；改 `src/ui/Bubble.ts`（助手气泡走 Markdown）、`src/ui/style.css`（`.hb-md-*`）；修正 6 个 UI 文件里的 `--color-foreground` / `--color-background`
+- 验证：`npm test` 315 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 40/40；`node scripts/audit-classes.mjs` 0 缺失
+- 遗留：会话删除/重命名（issue #5）；其余服务端请求（issue #4）
+
+### 为什么手写解析器
+
+先确认过没有现成的可用：0.22.2 的 `SDK.components` 里没有任何 markdown / prose 组件，`window` 上也没有 `marked` / `markdown-it` / `DOMPurify`。项目铁律不引运行时依赖，所以要么手写一个子集，要么把解析器加净化器一起塞进 IIFE。选前者，规模也就 500 行。
+
+### 两个设计决定
+
+**不产出 HTML。** 解析器输出节点树，`src/ui/Markdown.ts` 用 `React.createElement` 渲染。文本由 React 转义，全流程没有 `innerHTML`，注入这一类问题是被删掉而不是被净化掉。`tests/architecture.test.ts` 会拦住 `innerHTML` / `dangerouslySetInnerHTML`。链接仍过 `safeHref()`——React 不会替你拦 `javascript:` 协议。
+
+**必须能跑半句话。** 每个流式增量都重解整条消息，所以未闭合的围栏、单独的 `**`、还没等到分隔行的表格都是**正常输入**而不是错误。测试里专门有一条性质检查：对一条完整消息的每个前缀都跑一遍，不允许抛异常。
+
+刻意不支持 setext 标题（`标题` 下面一行 `---`）：模型都写 `##`，把裸 `---` 当标题惹的麻烦比帮上的多，按分隔线处理，和 CommonMark 一致。
+
+### 顺带查出两个一直存在的真 bug
+
+写渲染器时要给代码块一个深色底，才发现 `--color-background` 在这个主题里解析成 **transparent**。查宿主编译产物：它**从不定义** `--color-foreground` 和 `--color-background`（23 个 `--color-*` 变量里没有这两个）。`var(--undefined)` 不报错，整条声明在计算值阶段被丢掉，元素静默继承或透出背景。也就是说：
+
+- 工具卡片的 `<pre>` 和审批卡的代码块从 v0.1 起**一直没有可见底色**（用户没提，因为不影响功能）；
+- 6 个 UI 文件里的 `color: var(--color-foreground)` 一直在做无用功（表现上恰好等于继承色，所以看不出来）。
+
+改用真实存在的 token（`--color-card-foreground`）并给背景加 fallback。新增 `tests/theme-vars.test.ts`：逐个把 `var(--x)` 对照真实编译产物核对，没 fallback 又不存在就报错，离线回退白名单。守卫本身也验过——植入一行 `var(--color-background)` 确认两条断言都会失败。
+
+### 又一次「守卫要验它真的会响」
+
+`layout-classes.test.ts` 最初我写成「禁止任意值语法」，结果 8 个实际生效的类（`text-[0.6875rem]` 等）被误报。判据是**这个类在不在宿主产物里**，不是它长什么样，改成对照真实 CSS 逐个核对。这个教训值得记：守卫的判据要贴着根因，不能贴着表象。
+
 ## 2026-10-17 00:40 · hermes · v0.3 按七条反馈返工
 
 - 改：新增 `src/ui/{TabStrip,HistoryPanel}.ts`、`tests/layout-classes.test.ts`、`scripts/audit-classes.mjs`；删 `src/ui/SessionSidebar.ts`；重写 `src/ui/{ChatPage,Composer,style.css}`；`src/app/controller.ts` 支持中途发送

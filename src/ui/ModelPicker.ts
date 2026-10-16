@@ -101,7 +101,7 @@ export function ModelPicker(props: ModelPickerProps) {
               className: "cursor-pointer px-2 py-0.5 text-[0.6875rem]",
               style: {
                 background: level === props.reasoning ? "var(--color-primary)" : "var(--color-muted)",
-                color: level === props.reasoning ? "var(--color-primary-foreground)" : "var(--color-foreground)",
+                color: level === props.reasoning ? "var(--color-primary-foreground)" : "var(--color-card-foreground)",
                 borderRadius: "calc(var(--radius) * 0.6)",
               },
               onClick: () => props.onPickReasoning(level),
@@ -117,7 +117,7 @@ export function ModelPicker(props: ModelPickerProps) {
         className: "mb-1 bg-transparent px-2 py-1.5 text-xs outline-none",
         style: {
           margin: "0.75rem 0.75rem 0.25rem",
-          color: "var(--color-foreground)",
+          color: "var(--color-card-foreground)",
           borderRadius: "calc(var(--radius) * 0.6)",
           boxShadow: "inset 0 0 0 1px var(--color-border)",
         },
@@ -159,7 +159,7 @@ export function ModelPicker(props: ModelPickerProps) {
                         className: "flex w-full cursor-pointer items-baseline gap-2 px-2 py-1 text-left text-xs",
                         style: {
                           background: isCurrent ? "var(--color-accent, var(--color-muted))" : "transparent",
-                          color: "var(--color-foreground)",
+                          color: "var(--color-card-foreground)",
                           borderRadius: "calc(var(--radius) * 0.6)",
                         },
                         onClick: () => props.onPick(model, group.provider.slug),

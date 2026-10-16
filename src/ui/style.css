@@ -100,6 +100,149 @@
   margin-top: 0.375rem;
 }
 
+/* ── markdown in assistant bubbles ────────────────────────────────────────── */
+
+/* The container resets the paragraph margins the bubble would otherwise stack
+ * up, so a one-paragraph reply looks identical to plain text. */
+.hb-md > :first-child {
+  margin-top: 0;
+}
+
+.hb-md > :last-child {
+  margin-bottom: 0;
+}
+
+.hb-md-p {
+  margin: 0.5em 0;
+  white-space: pre-wrap;
+}
+
+.hb-md-h {
+  margin: 0.9em 0 0.45em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.hb-inline-code {
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in oklab, var(--color-muted) 70%, transparent);
+  border-radius: calc(var(--radius) * 0.4);
+}
+
+/* A fenced block with an optional language label pinned to its corner. */
+.hb-md-codeblock {
+  position: relative;
+  margin: 0.6em 0;
+}
+
+.hb-md-code-lang {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.hb-md-pre {
+  padding: 0.6rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  background: var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent));
+  border-radius: calc(var(--radius) * 0.6);
+}
+
+.hb-md-ul,
+.hb-md-ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.hb-md-ul .hb-md-ul,
+.hb-md-ol .hb-md-ol,
+.hb-md-ul .hb-md-ol,
+.hb-md-ol .hb-md-ul {
+  margin: 0.15em 0;
+}
+
+.hb-md-ul > li,
+.hb-md-ol > li {
+  margin: 0.15em 0;
+}
+
+.hb-md-ul > li::marker,
+.hb-md-ol > li::marker {
+  color: var(--color-muted-foreground);
+}
+
+/* Loose items carry their own paragraphs, so consecutive ones need a gap. */
+.hb-md-li-loose {
+  margin: 0.4em 0;
+}
+
+.hb-md-quote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 0.75em;
+}
+
+.hb-md-hr {
+  margin: 0.9em 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* A wide table scrolls inside its own box rather than stretching the bubble. */
+.hb-md-table-wrap {
+  margin: 0.6em 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+}
+
+.hb-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.hb-md-table th,
+.hb-md-table td {
+  padding: 0.35em 0.6em;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.hb-md-table th {
+  font-weight: 600;
+}
+
+.hb-md-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.hb-link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  overflow-wrap: anywhere;
+}
+
+.hb-md-image {
+  max-width: 100%;
+  height: auto;
+  margin: 0.4em 0;
+  border-radius: calc(var(--radius) * 0.6);
+}
+
+.hb-muted {
+  color: var(--color-muted-foreground);
+}
+
 /* ── scrollbars ───────────────────────────────────────────────────────────── */
 
 .hb-scroll {

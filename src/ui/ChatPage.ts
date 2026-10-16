@@ -66,7 +66,7 @@ function ApprovalCardView({
             style: {
               fontFamily: "var(--font-mono)",
               fontSize: "0.8125rem",
-              background: "var(--color-background)",
+              background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
               borderRadius: "calc(var(--radius) * 0.6)",
             },
           },
@@ -138,7 +138,7 @@ function ClarifyCardView({
                     className: "cursor-pointer px-2.5 py-1",
                     style: {
                       background: "var(--color-muted)",
-                      color: "var(--color-foreground)",
+                      color: "var(--color-card-foreground)",
                       borderRadius: "calc(var(--radius) * 0.6)",
                     },
                     onClick: () => onAnswer(card, { [question.qid]: choice }),

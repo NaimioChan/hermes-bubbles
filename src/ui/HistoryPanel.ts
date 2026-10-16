@@ -118,7 +118,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   className: "cursor-pointer px-2 py-1.5 text-xs",
                   style: {
                     borderRadius: "calc(var(--radius) * 0.6)",
-                    color: "var(--color-foreground)",
+                    color: "var(--color-card-foreground)",
                     background: isActive ? "var(--color-muted)" : "transparent",
                   },
                   title: session.preview || session.title,

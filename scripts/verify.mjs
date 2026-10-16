@@ -460,6 +460,89 @@ async function main() {
     })()`);
     await sleep(400);
 
+    // ── markdown rendering ─────────────────────────────────────────────────
+    // The reply must become real elements, not literal asterisks and pipes. A
+    // literal `**` on screen is the exact symptom of markdown not applying.
+    const mdPrompt = "原样输出这段 markdown，不要解释，不要用代码围栏包裹整段：\n# 标题\n\n**粗体**和`代码`\n\n- 甲\n- 乙\n\n```py\nprint(1)\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+    await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, ${JSON.stringify(mdPrompt)});
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'sent';
+    })()`);
+
+    let md = null;
+    const mdDeadline = Date.now() + 120000;
+    while (Date.now() < mdDeadline && !md) {
+      await sleep(2500);
+      md = await session.evaluate(`(() => {
+        const all = [...document.querySelectorAll('.hb-md')];
+        const el = all[all.length - 1];
+        if (!el) return null;
+        const q = (s) => el.querySelectorAll(s).length;
+        // Wait for the fenced block and table, or we measure a half-streamed
+        // reply and under-report the block types.
+        if (q('.hb-md-codeblock') === 0 || q('table') === 0) return null;
+        const text = el.innerText;
+        return {
+          h1: q('h1'), strong: q('strong'), inlineCode: q('code'),
+          listItems: q('li'), codeBlocks: q('.hb-md-codeblock'),
+          tables: q('table'), td: q('td'),
+          hasLiteralBold: text.includes('**'),
+          hasLiteralPipeRow: text.includes('|---'),
+          hasLiteralFence: text.includes(String.fromCharCode(96).repeat(3)),
+        };
+      })()`);
+    }
+
+    check(
+      "markdown renders real elements (heading / bold / code / list / table)",
+      md !== null && md.h1 >= 1 && md.strong >= 1 && md.inlineCode >= 1 &&
+        md.listItems >= 2 && md.codeBlocks >= 1 && md.tables >= 1 && md.td >= 2,
+      md ? JSON.stringify(md) : "never saw a fully-markdowned reply",
+    );
+    check(
+      "markdown markers are consumed, not shown literally",
+      md !== null && !md.hasLiteralBold && !md.hasLiteralPipeRow && !md.hasLiteralFence,
+      md ? JSON.stringify({ bold: md.hasLiteralBold, pipe: md.hasLiteralPipeRow, fence: md.hasLiteralFence }) : "n/a",
+    );
+
+    // Block surfaces must actually paint: a bare `var(--color-background)` is not
+    // defined by this host and resolved to transparent.
+    const mdStyle = await session.evaluate(`(() => {
+      const all = [...document.querySelectorAll('.hb-md')];
+      const el = all[all.length - 1];
+      if (!el) return null;
+      const pre = el.querySelector('.hb-md-pre');
+      const code = el.querySelector('code');
+      const th = el.querySelector('th');
+      const first = el.firstElementChild;
+      return {
+        preBg: pre ? getComputedStyle(pre).backgroundColor : null,
+        codeFont: code ? getComputedStyle(code).fontFamily : null,
+        thBorder: th ? getComputedStyle(th).borderBottomWidth : null,
+        firstMarginTop: first ? getComputedStyle(first).marginTop : null,
+      };
+    })()`);
+    const transparent = (v) => !v || v === "rgba(0, 0, 0, 0)" || v === "transparent";
+    check(
+      "code block has a visible surface (not transparent)",
+      mdStyle !== null && !transparent(mdStyle.preBg),
+      JSON.stringify(mdStyle),
+    );
+    check(
+      "inline code is monospace and the table is bordered",
+      mdStyle !== null && /mono|Courier|Consolas|Menlo/i.test(mdStyle.codeFont ?? "") && mdStyle.thBorder === "1px",
+      JSON.stringify(mdStyle),
+    );
+    check(
+      "the bubble has no leading gap from block margins",
+      mdStyle !== null && mdStyle.firstMarginTop === "0px",
+      `first child margin-top=${mdStyle?.firstMarginTop}`,
+    );
+
     // ── item 4: no speaker labels ──────────────────────────────────────────
     const labels = await session.evaluate(`(() => {
       // Scope to the transcript: the dashboard's own sidebar logo is also a line

@@ -12,6 +12,7 @@
 import type { AssistantItem, NoticeItem, ToolItem, UserItem } from "../core/types";
 import type { HermesPluginSdk } from "./sdk";
 import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
+import { Markdown } from "./Markdown";
 
 interface BubbleProps {
   sdk: HermesPluginSdk;
@@ -146,7 +147,7 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
     React.createElement(
       "div",
       {
-        className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed",
+        className: "break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
         style: {
           maxWidth: "min(72ch, 82%)",
           background: "var(--color-card)",
@@ -155,19 +156,9 @@ function AssistantBubble({ sdk, item }: { sdk: HermesPluginSdk; item: AssistantI
           boxShadow: "inset 0 0 0 1px var(--color-border)",
         },
       },
-      item.text,
-      // A caret is the only "still working" signal on the bubble itself; without
-      // it a slow first token reads as a hang.
-      item.streaming
-        ? React.createElement(
-            "span",
-            {
-              className: "ml-0.5 inline-block w-[0.5em] animate-pulse",
-              style: { color: "var(--color-primary)" },
-            },
-            "▌",
-          )
-        : null,
+      // The reply is Markdown. The caret rides inside the last block so a slow
+      // first token reads as work rather than a hang, without pushing a line.
+      React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming) }),
     ),
     item.error
       ? React.createElement(
@@ -268,7 +259,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
                   style: {
                     fontFamily: "var(--font-mono)",
                     fontSize: "0.8125rem",
-                    background: "var(--color-background)",
+                    background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
                     borderRadius: "calc(var(--radius) * 0.6)",
                   },
                 },
@@ -283,7 +274,7 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
                   style: {
                     fontFamily: "var(--font-mono)",
                     fontSize: "0.8125rem",
-                    background: "var(--color-background)",
+                    background: "var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent))",
                     borderRadius: "calc(var(--radius) * 0.6)",
                   },
                 },

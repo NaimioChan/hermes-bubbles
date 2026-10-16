@@ -36,7 +36,9 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 10. **组件里的钩子不能出现在提前 `return` 之后。** 钩子数量在两次渲染间变化会抛 React #310，整页白屏，而逻辑单测和 `tsc` 都看不见。`tests/hook-order.test.ts` 会在源码层面拦住它。
 11. **新样式写进 `src/ui/style.css`，别用宿主可能没有的 Tailwind 类。** 插件跑在仪表盘**预编译**的 CSS 上，那份产物只含它自己用过的类；我们造的类若不在其中，**静默失效**（不报错、不警告，属性就是不生效）。踩过三个：`resize-none`、`max-h-[70vh]`、`text-[0.625rem]`。改完跑 `node scripts/audit-classes.mjs`，`tests/layout-classes.test.ts` 会在 CI 层拦住。
 12. **运行中也要允许发消息。** Hermes 的行为是中途输入 = 打断修正，后端 `prompt.submit` 的 busy 路径会决定排队 / 插入 / 改向并在 `status` 里回报。别再把输入框禁用掉。
-13. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+13. **`src/core/markdown.ts` 是回复渲染的唯一来源。** 助手气泡的文本先解析成节点树（`src/core/markdown.ts`），再由 `src/ui/Markdown.ts` 用 `React.createElement` 渲染。**不许出现 `innerHTML` / `dangerouslySetInnerHTML`**——节点树让 React 负责转义，等于从根上删掉注入这一类问题，而不是在周边做净化。`tests/architecture.test.ts` 会拦。链接仍要过 `safeHref()`（React 不会替你拦 `javascript:` 协议）。
+14. **引 CSS 变量必须确认宿主真的定义了它，否则给 fallback。** 宿主从不定义 `--color-foreground` 与 `--color-background`（0.22.2 实测：23 个 `--color-*`，两个都不在其中）。`var(--undefined)` **不报错**，整条声明在计算值阶段被丢掉，元素静默继承或透出背景——`--color-background` 曾让代码块与审批卡变成全透明。`tests/theme-vars.test.ts` 对照真实编译产物查，离线时回退白名单。
+15. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 
@@ -55,7 +57,9 @@ npm run install-plugin
 
 动了 UI 之后，还要在真实仪表盘里点一遍：发一条消息、看流式气泡、展开一个工具卡片、刷新页面看历史恢复。
 
-`node scripts/verify.mjs` 把这套点检自动化了（15 项，跑真模型真往返），需要仪表盘在 9119 上跑着。
+`node scripts/verify.mjs` 把这套点检自动化了（38 项，跑真模型真往返），需要仪表盘在 9119 上跑着。
+
+两套「静默失效」守卫值得单独说，因为它们的失败方式都不报错：`scripts/audit-classes.mjs` 查「用了但宿主 CSS 里没有的类」，`tests/theme-vars.test.ts` 查「引了但宿主没定义的 CSS 变量」。加新样式或新颜色时先跑它们。
 
 ## Agent skills
 

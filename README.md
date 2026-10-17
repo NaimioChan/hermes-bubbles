@@ -39,22 +39,42 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 
 ## Install
 
+The plugin ships as a dashboard plugin, which is a directory layout rather than
+a package. There are two paths.
+
+**From a clone** (for development, or if you want the tests):
+
 ```bash
 git clone https://github.com/NaimioChan/hermes-bubbles
 cd hermes-bubbles
 npm install --include=dev      # on Windows, NODE_ENV=production silently skips devDependencies
 npm test
 npm run install-plugin         # builds and copies into $HERMES_HOME/plugins/hermes-bubbles/dashboard/
+hermes plugins enable hermes-bubbles
 ```
 
-Then register it — a user plugin is discovered but **not loaded** until it is named in `plugins.enabled`:
+**With Hermes' own installer** (needs no Node — the built bundle is committed):
+
+```bash
+hermes plugins install https://github.com/NaimioChan/hermes-bubbles
+hermes plugins enable hermes-bubbles
+```
+
+Either way a user plugin is discovered but **not loaded** until it is named in
+`plugins.enabled`. With `hermes plugins enable` that is done for you; otherwise:
 
 ```bash
 hermes config set plugins.enabled '["hermes-bubbles"]'
 curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/plugins/rescan
 ```
 
-`<token>` is `window.__HERMES_SESSION_TOKEN__` from the dashboard page. No restart needed. Open `http://127.0.0.1:9119/chat`.
+`<token>` is `window.__HERMES_SESSION_TOKEN__` from the dashboard page. No restart
+needed. Open `http://127.0.0.1:9119/chat`.
+
+The bundle lives in `dashboard/dist/` and is committed, because the dashboard
+scanner only walks `<plugins root>/<name>/dashboard/manifest.json` and a pinned
+install runs no build step. After changing the source, `npm run install-plugin`
+rewrites both that copy and the installed one, so they never drift.
 
 ## How it works
 
@@ -91,6 +111,10 @@ src/
 │   ├── ModelPicker.ts  model and reasoning picker
 │   └── style.css       the small amount of hand-written CSS
 └── index.ts       registration entry
+
+plugin.yaml         manifest Hermes' plugin loader reads (and the catalogue requires)
+__init__.py         registers nothing; makes the plugin loadable
+dashboard/          the layout the dashboard scanner walks — built, committed
 ```
 
 Nothing in `core/` may reference `window`, `document`, `WebSocket` or `fetch` — that is what makes the edge cases testable. The transport takes an injected socket factory, so tests drive the whole chain with a fake socket.
@@ -138,6 +162,8 @@ Tag-level host rules intrude too: a global `code { display: inline; color: var(-
 | Node | 24.21.0 (developed) |
 | Bundle | ~180 KiB, React not included |
 | Backend route | `/api/plugins/hermes-bubbles/capabilities` |
+| `hermes plugins validate` | 14/14 checks pass |
+| Catalogue rule 9 | one warning: `plugin_api.py` imports `tui_gateway.contracts.registry` read-only |
 
 The backend route asks once, before the page renders, whether every method and event it needs still exists. When the protocol drifts it fails loudly with the missing names instead of rendering an empty conversation.
 

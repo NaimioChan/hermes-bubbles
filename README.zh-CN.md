@@ -16,20 +16,38 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页。
 
 ## 快速开始
 
+插件是仪表盘的**目录型插件**，不是 npm 包。两条路：
+
+**从仓库克隆**（要改源码、跑测试时用这条）：
+
 ```bash
+git clone https://github.com/NaimioChan/hermes-bubbles
+cd hermes-bubbles
 npm install --include=dev      # Windows 上 NODE_ENV=production 会静默跳过 devDependencies
 npm test                       # 397 项，纯逻辑，不起浏览器
 npm run install-plugin         # 构建 + 装进 $HERMES_HOME/plugins/hermes-bubbles/dashboard/
+hermes plugins enable hermes-bubbles
 ```
 
-装完打开 `http://127.0.0.1:9119/chat`。仪表盘不用重启，但插件是**用户插件**，得先在 `config.yaml` 的 `plugins.enabled` 里登记：
+**用 Hermes 自己的安装命令**（不需要 Node，构建产物已入库）：
 
 ```bash
-hermes config set plugins.enabled '["homeassistant","hermes-bubbles"]'
+hermes plugins install https://github.com/NaimioChan/hermes-bubbles
+hermes plugins enable hermes-bubbles
+```
+
+两条路都得让插件进 `plugins.enabled`（`hermes plugins enable` 会替你写）；手动登记的话：
+
+```bash
+hermes config set plugins.enabled '["hermes-bubbles"]'
 curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/plugins/rescan
 ```
 
 （`<token>` 从仪表盘页面源码里的 `window.__HERMES_SESSION_TOKEN__` 取。）
+
+装完打开 `http://127.0.0.1:9119/chat`，仪表盘不用重启。
+
+构建产物放在 `dashboard/dist/` 并**入库**：仪表盘扫描器只认 `<plugins root>/<name>/dashboard/manifest.json`，而按 SHA 检出的安装不会跑构建。改了源码之后 `npm run install-plugin` 会同时重写仓库里那份和已安装那份，两边不会漂移。
 
 ## 能力
 

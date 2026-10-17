@@ -13,6 +13,9 @@ export type NotificationPermissionKind = "default" | "granted" | "denied";
 
 export type NotifyKind = "approval" | "clarify" | "done" | "failed";
 
+/** What the tab-strip switch should show. */
+export type NotifySwitch = "on" | "needs-permission" | "blocked" | "off";
+
 export interface NotifySpec {
   kind: NotifyKind;
   title: string;
@@ -24,6 +27,14 @@ export interface NotifySpec {
    * re-rendering a pending request must not ring the desktop twice.
    */
   tag: string;
+  /**
+   * Keep the toast on screen until the human dismisses it.
+   *
+   * A pending approval/clarify request blocks the turn for up to an hour; a
+   * toast that fades on its own after five seconds reads as optional and gets
+   * missed, which leaves the agent waiting on nobody.
+   */
+  sticky: boolean;
 }
 
 export interface TurnNotice {
@@ -55,6 +66,20 @@ export function shouldNotify(gate: NotifyGate): boolean {
 }
 
 export const NOTIFY_STORAGE_KEY = "hb-notify";
+
+/**
+ * The switch's honest label.
+ *
+ * The stored preference defaults to "on", so a switch that only read the
+ * preference claimed notifications were working in a browser that had never
+ * granted permission — which is exactly the state where nothing can ever fire.
+ * The permission is the second half of the state, and the panel says so.
+ */
+export function notifySwitch(enabled: boolean, permission: NotificationPermissionKind): NotifySwitch {
+  if (!enabled) return "off";
+  if (permission === "granted") return "on";
+  return permission === "denied" ? "blocked" : "needs-permission";
+}
 
 /** Stored preference. Anything other than an explicit "off" keeps it on. */
 export function storedEnabled(raw: string | null | undefined): boolean {
@@ -100,6 +125,7 @@ export function requestNotice(
       title: t.notifyApprovalTitle,
       body: flatten(detail, 160) || firstString(params.tool_name) || t.approvalTitle,
       tag,
+      sticky: true,
     };
   }
   const questions = Array.isArray(params.questions) ? params.questions : [];
@@ -111,6 +137,7 @@ export function requestNotice(
     title: t.notifyClarifyTitle,
     body: question ? `${flatten(question, 140)}${extra}` : t.clarifyTitle,
     tag,
+    sticky: true,
   };
 }
 
@@ -132,6 +159,7 @@ export function completionNotice(
       title: t.notifyFailedTitle,
       body: flatten(error, 160) || t.notifyFailedTitle,
       tag,
+      sticky: false,
     };
   }
   const body = flatten(result.text ?? "", 160);
@@ -141,5 +169,23 @@ export function completionNotice(
     title: name ? `${t.notifyDoneTitle} · ${name}` : t.notifyDoneTitle,
     body: body || t.notifyDoneTitle,
     tag,
+    sticky: false,
+  };
+}
+
+/**
+ * The confirmation toast, fired the moment the switch becomes effective.
+ *
+ * Without it "did I set this up right?" is unanswerable until a turn happens to
+ * finish while the window is in the background — the one moment the user cannot
+ * be watching. Proving the path works should not wait for that.
+ */
+export function testNotice(t: Messages): NotifySpec {
+  return {
+    kind: "done",
+    title: t.notifyTestTitle,
+    body: t.notifyTestBody,
+    tag: "hb-test",
+    sticky: false,
   };
 }

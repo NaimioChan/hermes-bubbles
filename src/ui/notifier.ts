@@ -17,6 +17,7 @@ import {
   requestNotice,
   shouldNotify,
   storedEnabled,
+  testNotice,
   type NotificationPermissionKind,
   type NotifySpec,
   type TurnNotice,
@@ -94,8 +95,9 @@ export function raiseNotification(spec: NotifySpec): void {
     const notification = new window.Notification(spec.title, {
       body: spec.body,
       tag: spec.tag,
-      // Clicking the notification should land on the chat, not just dismiss it.
-      requireInteraction: false,
+      // A request the agent is blocked on stays put; a finished turn does not
+      // need to be dismissed by hand.
+      requireInteraction: spec.sticky,
     });
     notification.onclick = () => {
       try {
@@ -108,6 +110,16 @@ export function raiseNotification(spec: NotifySpec): void {
     // Some environments refuse construction without a service worker; silence is
     // the correct failure here, since the in-page card still shows the request.
   }
+}
+
+/**
+ * Prove the path works, on demand.
+ *
+ * Called the moment the switch becomes effective, so "notifications are on"
+ * is something the user has seen rather than something the panel claims.
+ */
+export function raiseTestNotification(locale: Locale): void {
+  raiseNotification(testNotice(messagesFor(locale)));
 }
 
 /** The whole decision, in one place for the page's sink. */

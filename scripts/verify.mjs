@@ -1387,13 +1387,38 @@ async function main() {
     // ── task list, subagents, notification switch ──────────────────────────
     const notifyState = await session.evaluate(`(() => {
       const btn = document.querySelector('[data-hb="notify-toggle"]');
-      return btn ? btn.getAttribute('data-on') : null;
+      if (!btn) return null;
+      return JSON.stringify({
+        state: btn.getAttribute('data-state'),
+        on: btn.getAttribute('data-on'),
+        permission: window.Notification ? window.Notification.permission : 'unsupported',
+      });
     })()`);
     check(
       "notification switch is in the tab strip",
-      notifyState === "true" || notifyState === "false",
-      `data-on=${String(notifyState)}`,
+      typeof notifyState === "string",
+      String(notifyState),
     );
+
+    // The switch is the only place the user learns whether notifications can
+    // fire, so it must not claim "on" while the browser has not granted
+    // permission — that is the state in which nothing ever arrives.
+    const notify = JSON.parse(notifyState ?? "{}");
+    check(
+      "notification switch does not claim on without permission",
+      notify.permission === "granted" ? notify.state === "on" : notify.state !== "on",
+      `state=${notify.state} permission=${notify.permission}`,
+    );
+
+    // Grant it the way a user does, then confirm the switch follows — the flip
+    // test below is only meaningful once the switch is genuinely "on".
+    await session.send("Browser.grantPermissions", { origin: DASHBOARD, permissions: ["notifications"] });
+    await session.evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await sleep(400);
+    const grantedState = await session.evaluate(
+      `document.querySelector('[data-hb="notify-toggle"]').getAttribute('data-state')`,
+    );
+    check("notification switch turns on once the browser grants permission", grantedState === "on", String(grantedState));
 
     // The switch must round-trip through storage, not merely repaint.
     await session.evaluate(`document.querySelector('[data-hb="notify-toggle"]').click()`);

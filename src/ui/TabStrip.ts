@@ -8,8 +8,54 @@
  */
 
 import { messagesFor, type Locale } from "../core/i18n";
+import type { NotifySwitch } from "../core/notify";
 import { tabLabel, type SessionTab } from "../core/sessions";
 import type { HermesPluginSdk } from "./sdk";
+
+/**
+ * The switch's face, per state.
+ *
+ * The permission is half of the state, so the glyph has to carry it: a switch
+ * that reads "on" while the browser has never been asked is a lie the user only
+ * discovers when a notification they were waiting for never arrives.
+ */
+function notifyFace(state: NotifySwitch): {
+  glyph: string;
+  color: string;
+  opacity: number;
+  title: (t: ReturnType<typeof messagesFor>) => string;
+} {
+  switch (state) {
+    case "on":
+      return {
+        glyph: "\u25C9",
+        color: "var(--color-card-foreground)",
+        opacity: 1,
+        title: (t) => t.notifyOnTitle,
+      };
+    case "needs-permission":
+      return {
+        glyph: "\u25D1",
+        color: "var(--color-muted-foreground)",
+        opacity: 0.8,
+        title: (t) => t.notifyPendingTitle,
+      };
+    case "blocked":
+      return {
+        glyph: "\u2298",
+        color: "var(--color-muted-foreground)",
+        opacity: 0.45,
+        title: (t) => t.notifyBlockedTitle,
+      };
+    default:
+      return {
+        glyph: "\u25CC",
+        color: "var(--color-muted-foreground)",
+        opacity: 1,
+        title: (t) => t.notifyOffTitle,
+      };
+  }
+}
 
 export interface TabStripProps {
   sdk: HermesPluginSdk;
@@ -18,9 +64,8 @@ export interface TabStripProps {
   activeKey: string | null;
   runningKeys: readonly string[];
   historyOpen: boolean;
-  /** Desktop notifications: on/off switch, and whether the browser blocks them. */
-  notifyOn: boolean;
-  notifyBlocked: boolean;
+  /** Desktop notifications: the switch, and the state the user can actually act on. */
+  notifyState: NotifySwitch;
   onToggleNotify: () => void;
   onFocus: (key: string) => void;
   onClose: (key: string) => void;
@@ -32,6 +77,7 @@ export function TabStrip(props: TabStripProps) {
   const { sdk } = props;
   const { React } = sdk;
   const t = messagesFor(props.locale);
+  const notify = notifyFace(props.notifyState);
 
   return React.createElement(
     "div",
@@ -104,17 +150,15 @@ export function TabStrip(props: TabStripProps) {
         "button",
         {
           type: "button",
-          title: props.notifyBlocked ? t.notifyBlockedTitle : props.notifyOn ? t.notifyOnTitle : t.notifyOffTitle,
+          title: notify.title(t),
           "data-hb": "notify-toggle",
-          "data-on": props.notifyOn ? "true" : "false",
+          "data-on": props.notifyState === "on" ? "true" : "false",
+          "data-state": props.notifyState,
           className: "cursor-pointer px-2 py-1 text-xs leading-none",
-          style: {
-            color: props.notifyOn ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
-            opacity: props.notifyBlocked ? 0.45 : 1,
-          },
+          style: { color: notify.color, opacity: notify.opacity },
           onClick: props.onToggleNotify,
         },
-        props.notifyOn ? "◉" : "◌",
+        notify.glyph,
       ),
       React.createElement(
         "button",

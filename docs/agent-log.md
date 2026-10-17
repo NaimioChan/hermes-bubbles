@@ -8,7 +8,24 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 00:40 · hermes · 桌面通知返工（开关撒谎、离开页面即静音）
+
+- 改：`core/notify.ts`（新增 `notifySwitch()` 把「开关偏好 + 浏览器权限」合成四态；`NotifySpec.sticky`；`testNotice()`）；`core/i18n.ts`（`notifyPendingTitle` / `notifyTestTitle` / `notifyTestBody`，中英各一套）；`ui/notifier.ts`（`requireInteraction` 跟 `sticky` 走，新增 `raiseTestNotification()`）；`ui/TabStrip.ts`（`notifyOn`/`notifyBlocked` 两个布尔换成 `notifyState` 四态，字形 ◉/◑/⊘/◌，加 `data-state`）；`ui/ChatPage.ts`（开关按状态决定点击含义；授权探明后弹一条确认通知；`focus`/`visibilitychange` 回读权限；卸载时不再 `setNoticeSink(null)`）；`tests/architecture.test.ts` + `tests/notify.test.ts` 加护栏；`scripts/verify.mjs` 加两条开关诚实性断言；新增 `scripts/probe-notify.mjs`
+- 验证：`npx vitest run` 442 passed（21 文件）；`npx tsc --noEmit` 干净；`node scripts/audit-classes.mjs` 153/153；`node scripts/verify.mjs` 74/74；`node scripts/probe-notify.mjs` 8/8（真 Dashboard + headless Edge，权限桩捕获到 `Hermes finished / 收到 / hb-turn-…`，前台时 0 条）
+- 遗留：点通知只把窗口拿到前台，不会切到对应的那个页签（approval 通知里的 `sessionKey` 还是后端 runtime id，要切页签得先做一次映射）；Windows 侧「专注助手 / Edge 站点通知」被关掉的情况代码无法自检，只给了确认通知让用户当场看见
+
+### 通知开关为什么会撒谎
+
+`storedEnabled()` 把「没存过」当开启，而权限是另一回事。新用户打开页面：`localStorage` 里没有 `hb-notify`（读作开），浏览器权限是 `default`（读作永远不响）——开关亮着 ◉，标题写着「已开启」，实际一条都不会来。第一次发送时才申请权限，而那个 prompt 很小、很容易被忽略或误点拒绝，之后就彻底静音，也没有任何入口说明。
+
+修法是把「偏好」和「权限」合成一个四态，UI 只能显示合成结果：`on` / `needs-permission` / `blocked` / `off`。点击语义跟着状态走——`on` 关掉，`off` 打开并申请，`needs-permission` 直接申请（授权成功当场弹一条确认通知，等于自己证明链路通），`blocked` 关掉（浏览器不会再弹权限，留着只会继续撒谎）。
+
+### 离开 /chat 就没通知
+
+controller 是模块级单例（`persistent.ts`），切到仪表盘别的页面时它照样收事件、照样把回复写进时间线；但 `ChatPage` 的 cleanup 里调了 `setNoticeSink(null)`，把通知出口一起摘了。于是「用户不在聊天页」——恰好是通知最该响的场景——一声不响。sink 的回调是模块级的 `maybeNotify`，只碰 `window`/`document`，不持有 React 状态，所以让它跨卸载存活是安全的；重挂载时新 sink 直接覆盖。`tests/architecture.test.ts` 现在会拦住「cleanup 里再摘 sink」这个改法。
+
 ## 2026-10-17 21:10 · hermes · 文本气泡归位、任务清单、子代理、桌面通知
+
 
 - 改：`core/reduce.ts`（`tool.start` 封口当前气泡、`todo.updated` 归一化 + revision 单调、六个 `subagent.*` 聚合成一张批次卡）；`core/types.ts`（`TodoState` / `SubagentChild` / `SubagentsItem` / `SessionMeta.todo`）；`core/history.ts` + `core/sessions.ts` 投影 resume 的 `todo_state`，且没有快照的 resume 不清空实时清单；新增 `core/notify.ts`、`ui/notifier.ts`、`ui/TodoPanel.ts`；`ui/Bubble.ts` 加 `SubagentsCard`；`ui/ChatPage.ts` 在 Composer 上方挂面板 + 通知 sink + 发送时申请权限；`ui/TabStrip.ts` 加通知开关；`app/controller.ts` 加 `setNoticeSink` 与 `TurnNotice`
 - 验证：`npm test` 431 passed（21 文件）；`npx tsc --noEmit` 干净；`node scripts/audit-classes.mjs` 153/153；`node scripts/verify.mjs` 72/72（真模型跑出 2 条 todo、1 个子代理，折叠往返实测）

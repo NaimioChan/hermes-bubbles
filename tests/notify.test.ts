@@ -4,9 +4,11 @@ import { messagesFor } from "../src/core/i18n";
 import {
   completionNotice,
   flatten,
+  notifySwitch,
   requestNotice,
   shouldNotify,
   storedEnabled,
+  testNotice,
   type NotifyGate,
 } from "../src/core/notify";
 
@@ -40,6 +42,23 @@ describe("notify gate", () => {
     expect(storedEnabled(null)).toBe(true);
     expect(storedEnabled("on")).toBe(true);
     expect(storedEnabled("off")).toBe(false);
+  });
+});
+
+describe("notify switch", () => {
+  it("only reads on when the browser has actually granted permission", () => {
+    // The regression this guards: the stored preference defaults to on, so the
+    // switch used to read "on" in a browser that had never been asked and could
+    // never fire.
+    expect(notifySwitch(true, "granted")).toBe("on");
+    expect(notifySwitch(true, "default")).toBe("needs-permission");
+    expect(notifySwitch(true, "denied")).toBe("blocked");
+  });
+
+  it("shows off when the user turned it off, whatever the permission says", () => {
+    expect(notifySwitch(false, "granted")).toBe("off");
+    expect(notifySwitch(false, "default")).toBe("off");
+    expect(notifySwitch(false, "denied")).toBe("off");
   });
 });
 
@@ -94,6 +113,11 @@ describe("request notices", () => {
     const spec = requestNotice("clarify", {}, t, "tag");
     expect(spec.body).toBe(t.clarifyTitle);
   });
+
+  it("stays on screen, because the agent is blocked until it is answered", () => {
+    expect(requestNotice("approval", {}, t, "tag").sticky).toBe(true);
+    expect(requestNotice("clarify", {}, t, "tag").sticky).toBe(true);
+  });
 });
 
 describe("completion notices", () => {
@@ -114,5 +138,18 @@ describe("completion notices", () => {
   it("never leaves the body empty", () => {
     const spec = completionNotice({ title: "", text: "", error: "" }, t, "tag");
     expect(spec.body).toBe(t.notifyDoneTitle);
+  });
+
+  it("lets a finished turn fade out on its own", () => {
+    expect(completionNotice({ text: "x" }, t, "tag").sticky).toBe(false);
+  });
+});
+
+describe("test notice", () => {
+  it("proves the path with its own tag, not the turn tag", () => {
+    const spec = testNotice(t);
+    expect(spec.tag).toBe("hb-test");
+    expect(spec.title).toBe(t.notifyTestTitle);
+    expect(spec.body).toBe(t.notifyTestBody);
   });
 });

@@ -139,6 +139,10 @@ export interface Messages {
   notifyOnTitle: string;
   notifyOffTitle: string;
   notifyBlockedTitle: string;
+  /** Switch is on in storage, but the browser has not been asked yet. */
+  notifyPendingTitle: string;
+  notifyTestTitle: string;
+  notifyTestBody: string;
 }
 
 const EN: Messages = {
@@ -238,6 +242,9 @@ const EN: Messages = {
   notifyOnTitle: "Desktop notifications on (only while this window is in the background)",
   notifyOffTitle: "Desktop notifications off",
   notifyBlockedTitle: "Notifications are blocked in the browser settings",
+  notifyPendingTitle: "Desktop notifications are not allowed yet — click to ask this browser",
+  notifyTestTitle: "Desktop notifications are on",
+  notifyTestBody: "This is what a finished turn looks like.",
 };
 
 const ZH: Messages = {
@@ -336,7 +343,10 @@ const ZH: Messages = {
   notifyFailedTitle: "Hermes 出错停止",
   notifyOnTitle: "桌面通知已开启（仅窗口不在前台时弹出）",
   notifyOffTitle: "桌面通知已关闭",
-  notifyBlockedTitle: "浏览器里已阻止通知权限",
+  notifyBlockedTitle: "浏览器里已阻止通知权限，需在站点设置里重新允许",
+  notifyPendingTitle: "桌面通知还没生效——浏览器尚未授权，点这里授权",
+  notifyTestTitle: "桌面通知已开启",
+  notifyTestBody: "一轮结束时的通知就长这样。",
 };
 
 const CATALOG: Record<Locale, Messages> = { en: EN, zh: ZH };

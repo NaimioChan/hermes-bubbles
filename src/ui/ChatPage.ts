@@ -30,10 +30,11 @@ import {
   maybeNotify,
   notificationPermission,
   notifyEnabled,
+  raiseTestNotification,
   requestNotificationPermission,
   setNotifyEnabled,
 } from "./notifier";
-import type { NotificationPermissionKind } from "../core/notify";
+import { notifySwitch, type NotificationPermissionKind } from "../core/notify";
 import { runningLabel } from "./format";
 import { useLocale } from "./useLocale";
 import type { HermesPluginSdk } from "./sdk";
@@ -94,6 +95,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [notifyPermission, setNotifyPermission] = useState<NotificationPermissionKind>(() =>
     notificationPermission(),
   );
+  // Preference AND permission: the switch must not read "on" in a browser that
+  // has never granted permission, which is the state where nothing can fire.
+  const notifyState = notifySwitch(notifyOn, notifyPermission);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // The boot effect must not re-run when the language changes, but the notice
@@ -156,13 +160,32 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
     return () => {
       controller.setServerRequestSink(null);
-      controller.setNoticeSink(null);
+      // The notice sink deliberately stays: the controller outlives this page
+      // (see `persistent.ts`), so a turn that finishes while the user is on
+      // another dashboard route still rings the desktop. `maybeNotify` is
+      // module-level and touches only `window`/`document`, never React state,
+      // so leaving it registered after unmount is safe — and clearing it here is
+      // what made notifications work only while the chat page was on screen.
       // Release the reference only. Disposing here is what closed the socket on
       // every route change and lost the open sessions.
       chatController.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
+
+  // The permission can change outside this page: granted from the site-settings
+  // panel, revoked there too, or accepted in the browser's own prompt while the
+  // window was elsewhere. Re-read it when the page comes back, so the switch
+  // stops claiming a state the browser no longer agrees with.
+  useEffect(() => {
+    const sync = () => setNotifyPermission(notificationPermission());
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
 
   // Seed the pickers from the live session's own model once it is known.
   useEffect(() => {
@@ -195,11 +218,15 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onSend = useCallback(
     (text: string) => {
       setError(null);
-      // A send is a user gesture — the only reliable moment to ask the browser
-      // for notification permission. Without it the switch reads "on" while
-      // nothing could ever fire.
-      if (notifyOn && notificationPermission() === "default") {
-        void requestNotificationPermission().then(setNotifyPermission);
+      // A send is a user gesture — a legitimate moment to ask the browser for
+      // notification permission, for a user who has the switch on and never
+      // clicked it. A granted prompt fires the confirmation toast, so the answer
+      // arrives visibly instead of silently.
+      if (notifyState === "needs-permission") {
+        void requestNotificationPermission().then((permission) => {
+          setNotifyPermission(permission);
+          if (permission === "granted") raiseTestNotification(localeRef.current);
+        });
       }
       const target = editing;
       setEditing(null);
@@ -207,21 +234,32 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       run
         .then(() => setAttachments([]))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-    },
-    [controller, editing, notifyOn],
-  );
+        },
+        [controller, editing, notifyState],
+        );
 
-  /** Flip the notification switch; turning it on asks the browser for permission. */
+  /**
+   * The switch, per state.
+   *
+   * "on" → off. "off" → on, and ask the browser. "needs-permission" → the
+   * preference is already on, so the useful click is the permission prompt
+   * itself, followed by a real toast as proof. "blocked" → nothing this page can
+   * do (browsers never re-prompt); the click turns the preference off so the
+   * switch stops claiming an intent the browser will not honour.
+   */
   const onToggleNotify = useCallback(() => {
-    if (notifyOn) {
+    if (notifyState === "on" || notifyState === "blocked") {
       setNotifyEnabled(false);
       setNotifyOn(false);
       return;
     }
     setNotifyEnabled(true);
     setNotifyOn(true);
-    void requestNotificationPermission().then(setNotifyPermission);
-  }, [notifyOn]);
+    void requestNotificationPermission().then((permission) => {
+      setNotifyPermission(permission);
+      if (permission === "granted") raiseTestNotification(localeRef.current);
+    });
+  }, [notifyState]);
 
   /** Start editing a sent message: put its text in the composer. */
   const onEdit = useCallback((itemId: string, text: string) => {
@@ -404,8 +442,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       activeKey: state.activeKey,
       runningKeys: running,
       historyOpen,
-      notifyOn,
-      notifyBlocked: notifyPermission === "denied",
+      notifyState,
       onToggleNotify,
       onFocus: (key: string) => controller.focusSession(key),
       onClose: (key: string) => controller.closeSession(key),

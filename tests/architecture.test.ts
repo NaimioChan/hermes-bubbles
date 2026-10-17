@@ -66,6 +66,16 @@ describe("architecture invariants", () => {
     expect(offences).toEqual([]);
   });
 
+  it("keeps the notification sink alive across route changes", () => {
+    // The controller is a module-level singleton (persistent.ts): it keeps
+    // streaming while the user is on another dashboard route. Clearing the sink
+    // in the page's cleanup therefore silenced notifications for exactly the
+    // case they exist for — an arrival the user is not watching.
+    const code = stripComments(readFileSync(join(SRC, "ui", "ChatPage.ts"), "utf8"));
+    expect(code).toMatch(/controller\.setNoticeSink\(/);
+    expect(code).not.toMatch(/setNoticeSink\(\s*null\s*\)/);
+  });
+
   it("guards the regexes themselves (a guard that matches nothing is not a guard)", () => {
     // Sanity-check the two scanners against known-bad input.
     expect(/innerHTML/.test(stripComments("el.innerHTML = x;"))).toBe(true);
@@ -73,5 +83,8 @@ describe("architecture invariants", () => {
     // Comments must be ignored, or this file would flag itself.
     expect(/\bdocument\./.test(stripComments("/* document.title */ const a = 1;"))).toBe(false);
     expect(/innerHTML/.test(stripComments("// innerHTML would be bad here"))).toBe(false);
+    // The sink-lifetime guard must also be able to fire.
+    expect(/setNoticeSink\(\s*null\s*\)/.test("controller.setNoticeSink(null);")).toBe(true);
+    expect(/setNoticeSink\(\s*null\s*\)/.test(stripComments("// do not call setNoticeSink(null)"))).toBe(false);
   });
 });

@@ -164,7 +164,10 @@ var HermesBubbles = (() => {
     notifyFailedTitle: "Hermes stopped with an error",
     notifyOnTitle: "Desktop notifications on (only while this window is in the background)",
     notifyOffTitle: "Desktop notifications off",
-    notifyBlockedTitle: "Notifications are blocked in the browser settings"
+    notifyBlockedTitle: "Notifications are blocked in the browser settings",
+    notifyPendingTitle: "Desktop notifications are not allowed yet \u2014 click to ask this browser",
+    notifyTestTitle: "Desktop notifications are on",
+    notifyTestBody: "This is what a finished turn looks like."
   };
   var ZH = {
     empty: "\u5F00\u59CB\u4E00\u6BB5\u5BF9\u8BDD\u3002\u8F93\u5165 / \u5524\u8D77\u547D\u4EE4\u3002",
@@ -261,7 +264,10 @@ var HermesBubbles = (() => {
     notifyFailedTitle: "Hermes \u51FA\u9519\u505C\u6B62",
     notifyOnTitle: "\u684C\u9762\u901A\u77E5\u5DF2\u5F00\u542F\uFF08\u4EC5\u7A97\u53E3\u4E0D\u5728\u524D\u53F0\u65F6\u5F39\u51FA\uFF09",
     notifyOffTitle: "\u684C\u9762\u901A\u77E5\u5DF2\u5173\u95ED",
-    notifyBlockedTitle: "\u6D4F\u89C8\u5668\u91CC\u5DF2\u963B\u6B62\u901A\u77E5\u6743\u9650"
+    notifyBlockedTitle: "\u6D4F\u89C8\u5668\u91CC\u5DF2\u963B\u6B62\u901A\u77E5\u6743\u9650\uFF0C\u9700\u5728\u7AD9\u70B9\u8BBE\u7F6E\u91CC\u91CD\u65B0\u5141\u8BB8",
+    notifyPendingTitle: "\u684C\u9762\u901A\u77E5\u8FD8\u6CA1\u751F\u6548\u2014\u2014\u6D4F\u89C8\u5668\u5C1A\u672A\u6388\u6743\uFF0C\u70B9\u8FD9\u91CC\u6388\u6743",
+    notifyTestTitle: "\u684C\u9762\u901A\u77E5\u5DF2\u5F00\u542F",
+    notifyTestBody: "\u4E00\u8F6E\u7ED3\u675F\u65F6\u7684\u901A\u77E5\u5C31\u957F\u8FD9\u6837\u3002"
   };
   var CATALOG = { en: EN, zh: ZH };
   function messagesFor(locale) {
@@ -4855,10 +4861,43 @@ var HermesBubbles = (() => {
   }
 
   // src/ui/TabStrip.ts
+  function notifyFace(state) {
+    switch (state) {
+      case "on":
+        return {
+          glyph: "\u25C9",
+          color: "var(--color-card-foreground)",
+          opacity: 1,
+          title: (t) => t.notifyOnTitle
+        };
+      case "needs-permission":
+        return {
+          glyph: "\u25D1",
+          color: "var(--color-muted-foreground)",
+          opacity: 0.8,
+          title: (t) => t.notifyPendingTitle
+        };
+      case "blocked":
+        return {
+          glyph: "\u2298",
+          color: "var(--color-muted-foreground)",
+          opacity: 0.45,
+          title: (t) => t.notifyBlockedTitle
+        };
+      default:
+        return {
+          glyph: "\u25CC",
+          color: "var(--color-muted-foreground)",
+          opacity: 1,
+          title: (t) => t.notifyOffTitle
+        };
+    }
+  }
   function TabStrip(props) {
     const { sdk } = props;
     const { React } = sdk;
     const t = messagesFor(props.locale);
+    const notify = notifyFace(props.notifyState);
     return React.createElement(
       "div",
       {
@@ -4921,17 +4960,15 @@ var HermesBubbles = (() => {
           "button",
           {
             type: "button",
-            title: props.notifyBlocked ? t.notifyBlockedTitle : props.notifyOn ? t.notifyOnTitle : t.notifyOffTitle,
+            title: notify.title(t),
             "data-hb": "notify-toggle",
-            "data-on": props.notifyOn ? "true" : "false",
+            "data-on": props.notifyState === "on" ? "true" : "false",
+            "data-state": props.notifyState,
             className: "cursor-pointer px-2 py-1 text-xs leading-none",
-            style: {
-              color: props.notifyOn ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
-              opacity: props.notifyBlocked ? 0.45 : 1
-            },
+            style: { color: notify.color, opacity: notify.opacity },
             onClick: props.onToggleNotify
           },
-          props.notifyOn ? "\u25C9" : "\u25CC"
+          notify.glyph
         ),
         React.createElement(
           "button",
@@ -5069,6 +5106,11 @@ var HermesBubbles = (() => {
     return gate.enabled && gate.permission === "granted" && gate.background;
   }
   var NOTIFY_STORAGE_KEY = "hb-notify";
+  function notifySwitch(enabled, permission) {
+    if (!enabled) return "off";
+    if (permission === "granted") return "on";
+    return permission === "denied" ? "blocked" : "needs-permission";
+  }
   function storedEnabled(raw) {
     return raw !== "off";
   }
@@ -5087,7 +5129,8 @@ var HermesBubbles = (() => {
         kind: "approval",
         title: t.notifyApprovalTitle,
         body: flatten2(detail, 160) || firstString(params.tool_name) || t.approvalTitle,
-        tag
+        tag,
+        sticky: true
       };
     }
     const questions = Array.isArray(params.questions) ? params.questions : [];
@@ -5098,7 +5141,8 @@ var HermesBubbles = (() => {
       kind: "clarify",
       title: t.notifyClarifyTitle,
       body: question ? `${flatten2(question, 140)}${extra}` : t.clarifyTitle,
-      tag
+      tag,
+      sticky: true
     };
   }
   function completionNotice(result, t, tag) {
@@ -5108,7 +5152,8 @@ var HermesBubbles = (() => {
         kind: "failed",
         title: t.notifyFailedTitle,
         body: flatten2(error, 160) || t.notifyFailedTitle,
-        tag
+        tag,
+        sticky: false
       };
     }
     const body = flatten2(result.text ?? "", 160);
@@ -5117,7 +5162,17 @@ var HermesBubbles = (() => {
       kind: "done",
       title: name ? `${t.notifyDoneTitle} \xB7 ${name}` : t.notifyDoneTitle,
       body: body || t.notifyDoneTitle,
-      tag
+      tag,
+      sticky: false
+    };
+  }
+  function testNotice(t) {
+    return {
+      kind: "done",
+      title: t.notifyTestTitle,
+      body: t.notifyTestBody,
+      tag: "hb-test",
+      sticky: false
     };
   }
 
@@ -5176,8 +5231,9 @@ var HermesBubbles = (() => {
       const notification = new window.Notification(spec.title, {
         body: spec.body,
         tag: spec.tag,
-        // Clicking the notification should land on the chat, not just dismiss it.
-        requireInteraction: false
+        // A request the agent is blocked on stays put; a finished turn does not
+        // need to be dismissed by hand.
+        requireInteraction: spec.sticky
       });
       notification.onclick = () => {
         try {
@@ -5188,6 +5244,9 @@ var HermesBubbles = (() => {
       };
     } catch {
     }
+  }
+  function raiseTestNotification(locale) {
+    raiseNotification(testNotice(messagesFor(locale)));
   }
   function maybeNotify(notice, locale) {
     const gate = {
@@ -5271,6 +5330,7 @@ var HermesBubbles = (() => {
     const [notifyPermission, setNotifyPermission] = useState(
       () => notificationPermission()
     );
+    const notifyState = notifySwitch(notifyOn, notifyPermission);
     const bottomRef = useRef(null);
     const scrollerRef = useRef(null);
     const localeRef = useRef(locale);
@@ -5301,10 +5361,18 @@ var HermesBubbles = (() => {
       controller.commandsCatalog().then((raw) => setCatalog(entriesFromCatalog(raw))).catch(() => setCatalog([]));
       return () => {
         controller.setServerRequestSink(null);
-        controller.setNoticeSink(null);
         chatController.release();
       };
     }, [controller]);
+    useEffect(() => {
+      const sync = () => setNotifyPermission(notificationPermission());
+      window.addEventListener("focus", sync);
+      document.addEventListener("visibilitychange", sync);
+      return () => {
+        window.removeEventListener("focus", sync);
+        document.removeEventListener("visibilitychange", sync);
+      };
+    }, []);
     useEffect(() => {
       const meta = timeline.meta;
       if (meta.model) setModelChoice({ model: meta.model, provider: meta.provider });
@@ -5323,26 +5391,32 @@ var HermesBubbles = (() => {
     const onSend = useCallback(
       (text) => {
         setError(null);
-        if (notifyOn && notificationPermission() === "default") {
-          void requestNotificationPermission().then(setNotifyPermission);
+        if (notifyState === "needs-permission") {
+          void requestNotificationPermission().then((permission) => {
+            setNotifyPermission(permission);
+            if (permission === "granted") raiseTestNotification(localeRef.current);
+          });
         }
         const target = editing;
         setEditing(null);
         const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
         run.then(() => setAttachments([])).catch((err) => setError(err instanceof Error ? err.message : String(err)));
       },
-      [controller, editing, notifyOn]
+      [controller, editing, notifyState]
     );
     const onToggleNotify = useCallback(() => {
-      if (notifyOn) {
+      if (notifyState === "on" || notifyState === "blocked") {
         setNotifyEnabled(false);
         setNotifyOn(false);
         return;
       }
       setNotifyEnabled(true);
       setNotifyOn(true);
-      void requestNotificationPermission().then(setNotifyPermission);
-    }, [notifyOn]);
+      void requestNotificationPermission().then((permission) => {
+        setNotifyPermission(permission);
+        if (permission === "granted") raiseTestNotification(localeRef.current);
+      });
+    }, [notifyState]);
     const onEdit = useCallback((itemId, text) => {
       setError(null);
       setEditing({ itemId, text });
@@ -5465,8 +5539,7 @@ var HermesBubbles = (() => {
         activeKey: state.activeKey,
         runningKeys: running,
         historyOpen,
-        notifyOn,
-        notifyBlocked: notifyPermission === "denied",
+        notifyState,
         onToggleNotify,
         onFocus: (key) => controller.focusSession(key),
         onClose: (key) => controller.closeSession(key),

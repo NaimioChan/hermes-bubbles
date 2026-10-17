@@ -794,3 +794,183 @@ describe("locale", () => {
     expect(notice?.kind === "notice" ? notice.text : "").toMatch(/插入/);
   });
 });
+
+describe("stored-session management", () => {
+  /** Record REST calls so the verbs and paths can be asserted. */
+  function withRest(controller: ChatController) {
+    const calls: { path: string; method: string; body?: unknown }[] = [];
+    controller.setHttpFetcher((path, init) => {
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ path, method: String(init.method), body });
+      if (init.method === "PATCH") return Promise.resolve({ ok: true, title: (body as { title: string }).title });
+      return Promise.resolve({ ok: true });
+    });
+    return calls;
+  }
+
+  it("renames through REST PATCH, not the session.title RPC", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const calls = withRest(controller);
+    const storedId = controller.getSnapshot().tabs[0]?.storedId ?? "";
+
+    await controller.renameStoredSession(storedId, "新名字");
+
+    expect(calls).toEqual([
+      { path: `/api/sessions/${storedId}`, method: "PATCH", body: { title: "新名字" } },
+    ]);
+    // `session.title` needs a LIVE session, which means resuming the row — and a
+    // resumed row is then refused by delete with 4023. It must not be used here.
+    const methods = socket.frames().map((f) => f.method);
+    expect(methods).not.toContain("session.title");
+    expect(methods).not.toContain("session.resume");
+  });
+
+  it("retitles the open tab so the strip and the list agree", async () => {
+    const { controller } = await connectAndOpen();
+    withRest(controller);
+    const storedId = controller.getSnapshot().tabs[0]?.storedId ?? "";
+
+    await controller.renameStoredSession(storedId, "改过的");
+    expect(controller.getSnapshot().tabs[0]?.title).toBe("改过的");
+  });
+
+  it("refuses an empty title without touching the network", async () => {
+    const { controller } = await connectAndOpen();
+    const calls = withRest(controller);
+    await expect(controller.renameStoredSession("any", "   ")).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("deletes through REST DELETE and closes the tab holding it", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const calls = withRest(controller);
+    const storedId = controller.getSnapshot().tabs[0]?.storedId ?? "";
+    const tabsBefore = controller.getSnapshot().tabs.length;
+
+    // The row is gone by definition once REST deleted it; the confirming
+    // `session.list` must report it missing, or the delete throws.
+    controller.listSessions = async () => [];
+
+    // `session.close` is awaited before the DELETE, so answer it as it arrives.
+    const done = controller.deleteStoredSession(storedId);
+    await tick();
+    socket.replyTo("session.close", {});
+    await done;
+
+    const methods = socket.frames().map((f) => f.method);
+    expect(methods).toContain("session.close");
+    expect(calls).toEqual([
+      { path: `/api/sessions/${storedId}`, method: "DELETE", body: undefined },
+    ]);
+    expect(controller.getSnapshot().tabs.length).toBeLessThan(tabsBefore);
+    expect(controller.getSnapshot().tabs.some((t) => t.storedId === storedId)).toBe(false);
+  });
+
+  it("reports a delete that silently failed, instead of trusting REST's ok", async () => {
+    const { controller } = await connectAndOpen();
+    withRest(controller);
+    // REST answered ok, but the row is still there — that is what an ACTIVE
+    // session does, and the user must not be told it worked.
+    controller.listSessions = async () => [{ id: "s1", title: "", preview: "", started_at: 0, message_count: 1 }];
+    await expect(controller.deleteStoredSession("s1")).rejects.toThrow();
+  });
+
+  it("surfaces a REST failure instead of claiming success", async () => {
+    const { controller } = await connectAndOpen();
+    controller.setHttpFetcher(() => Promise.reject(new Error("403 Forbidden")));
+    await expect(controller.deleteStoredSession("s1")).rejects.toThrow(/403/);
+  });
+});
+
+describe("edit a sent message", () => {
+  /** A finished turn whose user row carries a durable id. */
+  async function withDurableTurn() {
+    const { controller, socket } = await connectAndOpen();
+    const sent = controller.send("原始问题");
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 42 });
+    await sent;
+    socket.event("message.delta", { text: "第一版" });
+    socket.event("message.complete", { status: "ok", text: "第一版" });
+    await tick();
+    const user = activeTimeline(controller.getSnapshot()).items.find((i) => i.kind === "user");
+    return { controller, socket, userId: user?.id ?? "" };
+  }
+
+  it("submits the corrected text with the durable row as the cut point", async () => {
+    const { controller, socket, userId } = await withDurableTurn();
+    const done = controller.editAndResend(userId, "改过的问题");
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 43 });
+    await done;
+
+    const submit = socket.frames().filter((f) => f.method === "prompt.submit").at(-1);
+    const params = submit?.params as Record<string, unknown>;
+    expect(params.text).toBe("改过的问题");
+    expect(params.truncate_before_row_id).toBe(42);
+    expect(params.confirm_truncate).toBe(true);
+    // The cut is addressed by row id, so no divergent ordinal may be sent.
+    expect(params.truncate_before_user_ordinal).toBeUndefined();
+    expect(params.truncate_before_message_id).toBeUndefined();
+  });
+
+  it("drops the edited turn and everything after it locally", async () => {
+    const { controller, socket, userId } = await withDurableTurn();
+    const done = controller.editAndResend(userId, "改过的问题");
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 43 });
+    await done;
+
+    const items = activeTimeline(controller.getSnapshot()).items;
+    // The old reply is gone; the corrected user turn is the last thing.
+    const texts = items.map((i) => ("text" in i ? i.text : ""));
+    expect(texts).not.toContain("第一版");
+    expect(texts.at(-1)).toBe("改过的问题");
+  });
+
+  it("refuses a turn with no durable row id rather than sending a cut the gateway rejects", async () => {
+    const { controller, socket } = await connectAndOpen();
+    // A locally appended turn never learned a row id.
+    const sent = controller.send("还没落库");
+    await tick();
+    // Reply WITHOUT user_row_id: no durable anchor.
+    socket.replyTo("prompt.submit", {});
+    await sent;
+    const user = activeTimeline(controller.getSnapshot()).items.find((i) => i.kind === "user");
+
+    const before = socket.frames().length;
+    await expect(controller.editAndResend(user?.id ?? "", "改")).rejects.toThrow();
+    expect(socket.frames().length).toBe(before);
+  });
+
+  it("interrupts a running turn before rewriting it", async () => {
+    const { controller, socket, userId } = await withDurableTurn();
+    socket.event("message.start", {});
+    await tick();
+
+    const done = controller.editAndResend(userId, "改过的问题");
+    await tick();
+    socket.replyTo("session.interrupt", {});
+    await tick();
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 44 });
+    await done;
+
+    const methods = socket.frames().map((f) => f.method);
+    expect(methods).toContain("session.interrupt");
+    expect(methods.indexOf("session.interrupt")).toBeLessThan(methods.lastIndexOf("prompt.submit"));
+  });
+
+  it("restores the transcript when the resubmit fails", async () => {
+    const { controller, socket, userId } = await withDurableTurn();
+    const before = activeTimeline(controller.getSnapshot()).items.map((i) => i.id);
+
+    const promise = controller.editAndResend(userId, "改过的问题");
+    await tick();
+    const frame = socket.frames().filter((f) => f.method === "prompt.submit").at(-1);
+    socket.deliver({ jsonrpc: "2.0", id: frame?.id, error: { code: -1, message: "truncate refused" } });
+
+    await expect(promise).rejects.toBeTruthy();
+    expect(activeTimeline(controller.getSnapshot()).items.map((i) => i.id)).toEqual(before);
+  });
+});

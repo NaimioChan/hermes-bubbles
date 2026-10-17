@@ -24,6 +24,8 @@ export interface HistoryPanelProps {
   loading: boolean;
   activeStoredId: string | null;
   onOpen: (id: string, title: string) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
   onRefresh: () => void;
   onClose: () => void;
 }
@@ -49,7 +51,11 @@ function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Locale): st
 export function HistoryPanel(props: HistoryPanelProps) {
   const { sdk } = props;
   const { React } = sdk;
+  const { useState } = sdk.hooks;
   const t = messagesFor(props.locale);
+  // Which row is being renamed, and the draft. Null means no row is editing.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
 
   if (!props.open) return null;
 
@@ -139,7 +145,42 @@ export function HistoryPanel(props: HistoryPanelProps) {
                 React.createElement(
                   "div",
                   { className: "flex items-baseline gap-1.5" },
-                  React.createElement("span", { className: "hb-flex-fill hb-truncate" }, session.title || t.untitled),
+                  renamingId === session.id
+                    ? React.createElement("input", {
+                        autoFocus: true,
+                        value: draft,
+                        "data-hb": "rename-input",
+                        className: "hb-input hb-flex-fill",
+                        style: { fontSize: "0.75rem", padding: "0.1rem 0.3rem" },
+                        onClick: (event: { stopPropagation: () => void }) => event.stopPropagation(),
+                        onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+                        // Read the value off the ELEMENT rather than the `draft`
+                        // state: React commits state on its own schedule, so a
+                        // fast type-then-Enter (or a scripted one) would otherwise
+                        // commit the previous value and rename to the old title.
+                        onKeyDown: (event: {
+                          key: string;
+                          currentTarget: { value: string };
+                          preventDefault: () => void;
+                          stopPropagation: () => void;
+                        }) => {
+                          event.stopPropagation();
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            const next = event.currentTarget.value.trim();
+                            if (next) props.onRename(session.id, next);
+                            setRenamingId(null);
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            setRenamingId(null);
+                          }
+                        },
+                      })
+                    : React.createElement(
+                        "span",
+                        { className: "hb-flex-fill hb-truncate" },
+                        session.title || t.untitled,
+                      ),
                   React.createElement(
                     "span",
                     {
@@ -147,6 +188,44 @@ export function HistoryPanel(props: HistoryPanelProps) {
                       style: { color: "var(--color-muted-foreground)" },
                     },
                     relativeTime(session.started_at, sdk, props.locale),
+                  ),
+                  // Hidden until the row is hovered, so the list stays quiet.
+                  React.createElement(
+                    "span",
+                    { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        title: t.rename,
+                        "aria-label": t.rename,
+                        "data-hb": "rename-session",
+                        className: "hb-action-btn",
+                        onClick: (event: { stopPropagation: () => void }) => {
+                          event.stopPropagation();
+                          setDraft(session.title || "");
+                          setRenamingId(session.id);
+                        },
+                      },
+                      "✎",
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        title: t.delete,
+                        "aria-label": t.delete,
+                        "data-hb": "delete-session",
+                        className: "hb-action-btn",
+                        onClick: (event: { stopPropagation: () => void }) => {
+                          event.stopPropagation();
+                          // Destructive and irreversible: confirm in the host's
+                          // own dialog rather than acting on a stray click.
+                          if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
+                        },
+                      },
+                      "🗑",
+                    ),
                   ),
                 ),
                 session.preview

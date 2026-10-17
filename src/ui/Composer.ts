@@ -52,6 +52,9 @@ export interface ComposerProps {
   onOpenModelPicker: () => void;
   onPickReasoning: (level: string) => void;
   onError: (message: string) => void;
+  /** Text of the message being rewritten, or null when composing normally. */
+  editingText?: string | null;
+  onCancelEdit?: () => void;
 }
 
 /**
@@ -70,7 +73,7 @@ export function Composer(props: ComposerProps) {
   const { useCallback, useEffect, useMemo, useRef, useState } = sdk.hooks;
   const t = messagesFor(props.locale);
 
-  const [text, setText] = useState("");
+  const [text, setText] = useState(props.editingText ?? "");
   const [caret, setCaret] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState(false);
@@ -86,6 +89,21 @@ export function Composer(props: ComposerProps) {
   );
 
   const menuVisible = Boolean(slashToken && items.length && !menuDismissed);
+
+  // Follow the edit target: entering an edit fills the box with that message,
+  // leaving it clears back to a normal draft.
+  useEffect(() => {
+    if (props.editingText == null) return;
+    setText(props.editingText);
+    setCaret(props.editingText.length);
+    setMenuDismissed(true);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(props.editingText!.length, props.editingText!.length);
+    });
+  }, [props.editingText]);
 
   // Reset the highlight whenever the candidate list changes shape.
   useEffect(() => {
@@ -192,6 +210,36 @@ export function Composer(props: ComposerProps) {
     React.createElement(
       "div",
       { className: "mx-auto", style: { maxWidth: "860px" } },
+
+      // ── editing banner ───────────────────────────────────────────────────
+      props.editingText != null
+        ? React.createElement(
+            "div",
+            {
+              className: "hb-edit-banner mb-1.5 flex items-center gap-2 px-2 py-1 hb-text-micro",
+              "data-hb": "editing-banner",
+              style: {
+                background: "color-mix(in oklab, var(--color-primary) 12%, var(--color-card))",
+                color: "var(--color-card-foreground)",
+                borderRadius: "calc(var(--radius) * 0.6)",
+              },
+            },
+            React.createElement("span", { className: "hb-flex-fill hb-truncate" }, t.editingHint),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "cursor-pointer px-1",
+                style: { color: "var(--color-muted-foreground)" },
+                onClick: () => {
+                  setText("");
+                  props.onCancelEdit?.();
+                },
+              },
+              "×",
+            ),
+          )
+        : null,
 
       // ── attachment tray ──────────────────────────────────────────────────
       props.attachments.length

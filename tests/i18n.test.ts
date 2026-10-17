@@ -97,7 +97,16 @@ describe("i18n: reasoning labels", () => {
 });
 
 describe("i18n: timestamps", () => {
-  const at = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
+  // Milliseconds: the timeline's `at` / `completedAt` unit (core/types.ts).
+  const at = (iso: string) => new Date(iso).getTime();
+
+  it("treats its input as milliseconds, not seconds", () => {
+    // The bug this exists for: callers pass ms (Date.now()) while the formatter
+    // assumed seconds and multiplied again, so 02:46 rendered as 19:32.
+    const ms = new Date("2026-10-17T02:46:00").getTime();
+    expect(clockTime(ms)).toBe("02:46");
+    expect(clockTime(ms / 1000)).not.toBe("02:46");
+  });
 
   it("formats a clock as HH:MM, zero-padded", () => {
     expect(clockTime(at("2026-10-17T09:05:00"))).toBe("09:05");

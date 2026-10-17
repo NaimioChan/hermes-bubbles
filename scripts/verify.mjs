@@ -494,6 +494,274 @@ async function main() {
     }
     check("live metrics appear after a turn (context bar / t/s)", metricsSeen === true);
 
+    // ── item 1 (this round): rename + delete in the history panel ──────────
+    // A rename is a real RPC round trip (resume → session.title), so this drives
+    // the actual UI and then reads the backend list back.
+    await session.evaluate(`(() => {
+      // Ensure OPEN: the header toggle flips state, and an earlier layout check
+      // may already have opened it (clicking blindly would close it again).
+      if (!document.querySelector('[data-hb="history-panel"]')) {
+        document.querySelector('[data-hb="history-toggle"]')?.click();
+      }
+      return Boolean(document.querySelector('[data-hb="history-panel"]'));
+    })()`);
+    await sleep(1500);
+
+    const rowTools = await session.evaluate(`(() => {
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      return panel ? {
+        rename: panel.querySelectorAll('[data-hb="rename-session"]').length,
+        del: panel.querySelectorAll('[data-hb="delete-session"]').length,
+      } : null;
+    })()`);
+    check(
+      "every history row offers rename and delete",
+      rowTools !== null && rowTools.rename > 0 && rowTools.del === rowTools.rename,
+      JSON.stringify(rowTools),
+    );
+
+    // Rename the first row through the UI.
+    const renameTarget = await session.evaluate(`(() => {
+      const btn = document.querySelector('[data-hb="rename-session"]');
+      if (!btn) return null;
+      btn.click();
+      return 'opened';
+    })()`);
+    await sleep(700);
+    const editorShown = await session.evaluate(`(() => {
+      const input = document.querySelector('[data-hb="rename-input"]');
+      return input ? { present: true, seeded: Boolean(input.value) } : { present: false, seeded: false };
+    })()`);
+    check(
+      "rename opens an editor seeded with the current title",
+      renameTarget === "opened" && editorShown.present === true && editorShown.seeded === true,
+      JSON.stringify(editorShown),
+    );
+
+    const NEW_TITLE = "verify-renamed-" + Date.now().toString(36);
+    await session.evaluate(
+      "(() => { const input = document.querySelector('[data-hb=\"rename-input\"]');"
+      + " if (!input) return 'none'; const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;"
+      + " setter.call(input, " + JSON.stringify(NEW_TITLE) + ");"
+      + " input.dispatchEvent(new Event('input', { bubbles: true })); return 'typed'; })()",
+    );
+    await sleep(300);
+    await session.evaluate(`(() => {
+      const input = document.querySelector('[data-hb="rename-input"]');
+      if (!input) return 'none';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      return 'committed';
+    })()`);
+
+    // Read back the way the panel does: `session.list` over the gateway.
+    // REST /api/sessions is a DIFFERENT store (it returns null for a title set
+    // through `session.title`), so asserting on it tested the wrong thing and
+    // made a working rename look broken.
+    const listViaRpc = async () => session.evaluate(`(async () => {
+      const sdk = window.__HERMES_PLUGIN_SDK__;
+      const url = await sdk.buildWsUrl('/api/ws');
+      const ws = new WebSocket(url);
+      const pending = new Map();
+      let nextId = 1;
+      const req = (method, params) => new Promise((resolve) => {
+        const id = nextId++;
+        pending.set(id, resolve);
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+        setTimeout(() => resolve({ error: 'timeout' }), 8000);
+      });
+      ws.onmessage = (e) => {
+        const f = JSON.parse(e.data);
+        if (f.id !== undefined) { const r = pending.get(f.id); if (r) { pending.delete(f.id); r(f); } }
+      };
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const listed = await req('session.list', { limit: 40 });
+      ws.close();
+      return (listed.result?.sessions ?? []).map((r) => ({ id: r.id, title: r.title }));
+    })()`, { awaitPromise: true });
+
+    let renamed = false;
+    for (let i = 0; i < 12; i += 1) {
+      await sleep(1200);
+      const rows = await listViaRpc();
+      const hit = Array.isArray(rows) ? rows.find((r) => (r.title || "") === NEW_TITLE) : null;
+      renamed = Boolean(hit);
+      if (renamed) break;
+    }
+    check("renaming a history row persists to the backend", renamed === true, NEW_TITLE);
+
+    // Delete a DISPOSABLE session, never the one this run is chatting in: that
+    // session is active by definition and the gateway refuses it (4023), while
+    // REST answers ok and the row simply re-persists.
+    const deleted = await session.evaluate(`(async () => {
+      const sdk = window.__HERMES_PLUGIN_SDK__;
+      const url = await sdk.buildWsUrl('/api/ws');
+      const ws = new WebSocket(url);
+      const pending = new Map();
+      let nextId = 1;
+      const req = (method, params) => new Promise((resolve) => {
+        const id = nextId++;
+        pending.set(id, resolve);
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+        setTimeout(() => resolve({ error: 'timeout' }), 8000);
+      });
+      ws.onmessage = (e) => {
+        const f = JSON.parse(e.data);
+        if (f.id !== undefined) { const r = pending.get(f.id); if (r) { pending.delete(f.id); r(f); } }
+      };
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+
+      // Mint a throwaway stored session: create one, send a turn so a row exists,
+      // then close it so it is not active.
+      const made = await req('session.create', { source: 'desktop' });
+      const runtimeId = made.result?.session_id;
+      const storedId = made.result?.stored_session_id;
+      if (!runtimeId) { ws.close(); return { error: 'could not create a scratch session' }; }
+
+      await req('prompt.submit', { session_id: runtimeId, text: 'scratch session for delete test' });
+      await new Promise((r) => setTimeout(r, 4000));
+      await req('session.close', { session_id: runtimeId });
+      await new Promise((r) => setTimeout(r, 1500));
+
+      // Find it in the list and confirm it is not one of the open tabs.
+      const listed = await req('session.list', { limit: 20 });
+      const victim = (listed.result?.sessions ?? []).find((r) => r.id === storedId)
+        ?? (listed.result?.sessions ?? [])[0];
+      ws.close();
+      if (!victim) return { error: 'scratch session did not persist' };
+
+      // Drive the real UI: refresh the panel, find the row, click delete.
+      const refreshBtn = [...document.querySelectorAll('[data-hb="history-panel"] button')]
+        .find((b) => /refresh/i.test(b.getAttribute('title') || ''));
+      refreshBtn?.click();
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      const rows = panel
+        ? [...panel.querySelectorAll('[data-hb="delete-session"]')].map((b) => b.closest('div')).filter(Boolean)
+        : [];
+      const row = rows.find((r) => (r.innerText || '').includes((victim.title || '').slice(0, 20)))
+        ?? rows[0];
+      const del = row?.querySelector('[data-hb="delete-session"]');
+      if (!del) return { error: 'no delete button found', victim: victim.id };
+
+      const realConfirm = window.confirm;
+      window.confirm = () => true;
+      del.click();
+      window.confirm = realConfirm;
+      return { clicked: true, victimId: victim.id, victimTitle: (victim.title || '').slice(0, 30) };
+    })()`, { awaitPromise: true });
+
+    let gone = false;
+    if (deleted && deleted.victimId) {
+      for (let i = 0; i < 12; i += 1) {
+        await sleep(1200);
+        const rows = await listViaRpc();
+        gone = Array.isArray(rows) && !rows.some((r) => r.id === deleted.victimId);
+        if (gone) break;
+      }
+    }
+    check(
+      "deleting a history row removes it from the backend",
+      deleted !== null && deleted.clicked === true && gone === true,
+      JSON.stringify({ deleted, gone }),
+    );
+
+    // Leave it open: later checks that measure the transcript tolerate that, and
+    // closing here would fight the next blind toggle.
+    await sleep(200);
+    await sleep(600);
+
+    // ── item 4: inline code contrast ───────────────────────────────────────
+    // The chip painted (a background was set) while the TEXT stayed at the host's
+    // near-background colour, so it was unreadable. Assert a real contrast ratio
+    // against the bubble, not merely that a background exists.
+    const inlineCode = await session.evaluate(`(() => {
+      // Measure a controlled sample inside a real bubble: the transcript only
+      // carries inline code when the model chose to emit some, and a check that
+      // silently finds nothing proves nothing.
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;left:-9999px;top:0;width:900px';
+      const bubble = document.createElement('div');
+      bubble.className = 'break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text';
+      bubble.style.cssText = 'max-width:min(72ch,82%);background:var(--color-card);color:var(--color-card-foreground)';
+      const md = document.createElement('div');
+      md.className = 'hb-md';
+      md.innerHTML = '<p class="hb-md-p">行内 <code class="hb-inline-code">npm test</code> 结束</p>';
+      bubble.appendChild(md);
+      host.appendChild(bubble);
+      document.body.appendChild(host);
+      const code = md.querySelector('.hb-inline-code');
+      const cs = getComputedStyle(code);
+      const lum = (color) => {
+        const c = document.createElement('canvas').getContext('2d');
+        c.fillStyle = color; c.fillRect(0, 0, 1, 1);
+        const [r, g, b] = c.getImageData(0, 0, 1, 1).data;
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      // Contrast against the chip's own surface, and against the bubble behind it.
+      const fg = lum(cs.color);
+      const chipBg = lum(cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? getComputedStyle(bubble).backgroundColor : cs.backgroundColor);
+      const bubbleBg = lum(getComputedStyle(bubble).backgroundColor);
+      const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      const out = {
+        color: cs.color,
+        bubbleColor: getComputedStyle(bubble).color,
+        againstChip: +ratio(fg, chipBg).toFixed(2),
+        againstBubble: +ratio(fg, bubbleBg).toFixed(2),
+      };
+      host.remove();
+      return out;
+    })()`);
+    check(
+      "inline code is legible (≥4.5:1 against its own surface)",
+      inlineCode !== null && inlineCode.againstChip >= 4.5,
+      JSON.stringify(inlineCode),
+    );
+    check(
+      "inline code text follows the message text colour",
+      inlineCode !== null && inlineCode.color === inlineCode.bubbleColor,
+      JSON.stringify(inlineCode),
+    );
+
+    // ── item 2 (this round): editing a sent message ────────────────────────
+    const editButton = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-hb="user-actions"]')];
+      const btn = rows.at(-1)?.querySelector('[data-hb="edit-message"]');
+      return btn ? { present: true, title: btn.getAttribute('title') } : { present: false };
+    })()`);
+    check(
+      "a sent user message offers edit",
+      editButton !== null && editButton.present === true,
+      JSON.stringify(editButton),
+    );
+
+    // Clicking it must seed the composer with that message and say so.
+    const seeded = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-hb="user-actions"]')];
+      rows.at(-1)?.querySelector('[data-hb="edit-message"]')?.click();
+      return 'clicked';
+    })()`);
+    await sleep(900);
+    const editState = await session.evaluate(`(() => {
+      const banner = document.querySelector('[data-hb="editing-banner"]');
+      const ta = document.querySelector('textarea');
+      return { banner: Boolean(banner), composerText: (ta?.value || '').slice(0, 40) };
+    })()`);
+    check(
+      "edit seeds the composer and shows an editing banner",
+      seeded === "clicked" && editState.banner === true && editState.composerText.length > 0,
+      JSON.stringify(editState),
+    );
+
+    // Cancel out of edit mode so the run ends in a normal state.
+    await session.evaluate(`(() => {
+      const banner = document.querySelector('[data-hb="editing-banner"]');
+      banner?.querySelector('button')?.click();
+      return 'cancelled';
+    })()`);
+    await sleep(500);
+
     // ── item 2: bubbles have real vertical spacing ─────────────────────────
     const spacing = await session.evaluate(`(() => {
       const rows = [...document.querySelectorAll('.hb-bubble-gap')];

@@ -8,6 +8,36 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 13:05 · hermes · 会话管理、编辑重发、时间戳、行内代码
+
+- 改：新增 `src/core/requests.ts` 之外的 `editTargetFor` / `forgetStoredSession` / `retitleStoredSession`（`core/sessions.ts`）；`controller.ts` 加 `deleteStoredSession` / `renameStoredSession` / `editAndResend` / `fetchJSON`（REST 通道）；`Bubble.ts` 用户气泡加编辑；`HistoryPanel.ts` 加改名/删除；`Composer.ts` 加编辑态；`style.css` 行内代码配色
+- 验证：`npm test` 372 passed；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 54/54；`node scripts/audit-classes.mjs` 0 缺失
+- 遗留：无
+
+### 时间戳：三处各按自己的假设缩放
+
+`at` / `completedAt` 一直是**毫秒**（`Date.now()`，以及 `history.ts::timestampOf` 里的 `ts * 1000`），但 `clockTime` / `fullStamp` / `messageStamp` 都按**秒**再接一个 `* 1000`。于是 02:46 的任务显示成 19:32。修法是把单位写进 `types.ts`（`export type Millis`），格式化函数不再缩放，秒→毫秒的换算只留在 `timestampOf` 一处，并顺手防了一次「已经是毫秒」的源（`> 1e11` 不再乘）。
+
+### 改存量会话：REST 与 RPC 不是同一件事
+
+最初用 `session.title` 改名——它能用，但要先 `session.resume` 拿到 runtime id，而 resume 会让该行变成**活跃**。之后 `session.delete` 直接 4023 拒绝。改用桌面端同款的 REST：`PATCH /api/sessions/{id}` 改名、`DELETE /api/sessions/{id}` 删除。
+
+更坑的是：对活跃会话 REST DELETE **返回 `{ok:true}` 却什么也没删**（行被重新持久化）。所以删除后必须回查 `session.list` 确认，不能信返回值。另外 REST `/api/sessions` 与网关 `session.list` 读的是**不同的库**——一次调试里 REST 显示 `title: null` 而 `session.list` 已经有新标题，我差点把它当成改名失败，实际是查错了源。这条已写进 AGENTS.md。
+
+删除还有一个前提：先 `await session.close` 把活跃会话关掉（不是只关本地 tab——本地关 tab 不影响网关的活跃状态，行会重新落库）。
+
+### 编辑已发送消息
+
+用户气泡悬停出现编辑按钮 → 文本灌进输入框并显示一条「正在编辑」横幅 → 发送时走 `prompt.submit` 带 `truncate_before_row_id` + `confirm_truncate`，从那一轮重写，之后的对话一并截断。没有 durable row id 的目标直接拒绝（网关对这种截断是 fail-closed 的，发过去只会得到一个错）。失败会把转写区原样恢复。
+
+### 行内代码：只设了背景色，没设前景色
+
+`.hb-inline-code` 一直只写了 `background`，而宿主有一条按**标签名**匹配的 `code { color: var(--background) }`——前景色因此停在接近背景的位置，chip 画出来了但字看不见。补上显式 `color` 后对比度 8.72:1。
+
+### 又一次测试自身的坑
+
+`verify.mjs` 的删除检查一直失败，查了三轮才看清：它挑的是**本次对话自己所在的行**，那行永远活跃、按设计删不掉。改成现场造一个一次性会话再删。另外 `renameSession` 的 Enter 处理原来读 React 的 `draft` state，脚本「输入后立刻回车」会拿到上一帧的值——改为从 `event.currentTarget.value` 读，真实打字本来也没问题，但依赖渲染时序的写法不该留。
+
 ## 2026-10-17 08:10 · hermes · 六条反馈返工（代码块宽度/颜色、间距、消息操作、卡片、语言、@）
 
 - 改：新增 `src/core/i18n.ts`、`src/core/requests.ts`、`src/ui/useLocale.ts`、`src/ui/RequestCards.ts`、`tests/i18n.test.ts`、`tests/requests.test.ts`、`scripts/verify-clarify.mjs`；改 `Bubble`/`Composer`/`ChatPage`/`TabStrip`/`HistoryPanel`/`ModelPicker`/`style.css`；`reduce.ts` 记 `completedAt` 并本地推算用时；`controller.ts` 加 `regenerateAssistant` / `branchSession` / `setLocale`

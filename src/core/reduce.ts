@@ -407,6 +407,7 @@ function turnDuration(items: readonly TimelineItem[], completedAt: number): numb
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
     if (!item || item.kind !== "user") continue;
+    // Both sides are milliseconds; the duration is reported in seconds.
     const elapsed = (completedAt - item.at) / 1000;
     if (!Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 6 * 3600) return undefined;
     return elapsed;

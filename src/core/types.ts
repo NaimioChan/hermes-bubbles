@@ -38,10 +38,21 @@ export interface Usage {
   credits_lines?: string[];
 }
 
+/**
+ * Every `at` / `completedAt` on a timeline item is UNIX MILLISECONDS.
+ *
+ * One unit, stated once: the formatters multiply by nothing, and a value from
+ * the backend (seconds) is scaled exactly once where it enters the model. This
+ * used to be mixed — history projected `ts * 1000` while live rows used
+ * `Date.now()` — and the formatters assumed seconds on top, so a 02:46 turn
+ * displayed as 19:32.
+ */
+export type Millis = number;
+
 export interface UserItem {
   kind: "user";
   id: string;
-  at: number;
+  at: Millis;
   text: string;
   /** Durable row id, when the backend has told us one. */
   rowId?: number;
@@ -60,7 +71,7 @@ export interface UserItem {
 export interface AssistantItem {
   kind: "assistant";
   id: string;
-  at: number;
+  at: Millis;
   text: string;
   reasoning: string;
   /** Still receiving deltas. Drives the caret and the stop button. */
@@ -77,7 +88,7 @@ export interface AssistantItem {
    * number to print under a reply that streamed for a minute. Absent while
    * streaming.
    */
-  completedAt?: number;
+  completedAt?: Millis;
   /** Seconds the turn took, when the backend reported it. */
   durationS?: number;
 }
@@ -87,7 +98,7 @@ export type ToolStatus = "running" | "ok" | "error";
 export interface ToolItem {
   kind: "tool";
   id: string;
-  at: number;
+  at: Millis;
   /** Stable backend id (`tool.start` / `tool.complete` correlate on it). */
   toolId: string;
   name: string;
@@ -105,7 +116,7 @@ export interface ToolItem {
 export interface NoticeItem {
   kind: "notice";
   id: string;
-  at: number;
+  at: Millis;
   text: string;
   tone: "info" | "error";
 }

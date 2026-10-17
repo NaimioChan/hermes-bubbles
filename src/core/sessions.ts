@@ -260,3 +260,68 @@ export function tabLabel(tab: SessionTab): string {
   if (tab.storedId) return tab.storedId.slice(0, 8);
   return tab.title || "新对话";
 }
+
+/**
+ * The turn an edit would rewrite.
+ *
+ * Editing message N means: drop message N and everything after it, then re-send
+ * the corrected text. The cut is addressed by `truncate_before_row_id`, which
+ * must be the DURABLE row id — a target without one cannot be cut server-side
+ * (the gateway fails closed rather than guessing), so it is refused here instead
+ * of producing a confusing partial edit.
+ */
+export interface EditTarget {
+  /** The user item being edited. */
+  itemId: string;
+  /** Its text, as the composer should show it. */
+  text: string;
+  /** Durable row id of THAT user row, when the backend has told us one. */
+  rowId: number | null;
+  /** How many user turns the cut would remove (for the deep-truncate warning). */
+  userTurnsRemoved: number;
+}
+
+export function editTargetFor(
+  items: readonly { kind: string; id: string; text?: string; rowId?: number }[],
+  itemId: string,
+): EditTarget | null {
+  const index = items.findIndex((item) => item.id === itemId);
+  if (index < 0) return null;
+  const target = items[index];
+  if (!target || target.kind !== "user") return null;
+
+  let userTurnsRemoved = 0;
+  for (let i = index; i < items.length; i += 1) {
+    if (items[i]?.kind === "user") userTurnsRemoved += 1;
+  }
+
+  return {
+    itemId,
+    text: target.text ?? "",
+    rowId: typeof target.rowId === "number" ? target.rowId : null,
+    userTurnsRemoved,
+  };
+}
+
+/** Delete a stored session from the open tabs first, so no tab is left orphaned. */
+export function forgetStoredSession<T extends { key: string; storedId: string | null }>(
+  tabs: readonly T[],
+  activeKey: string | null,
+  storedId: string,
+): { tabs: T[]; activeKey: string | null } {
+  const remaining = tabs.filter((tab) => tab.storedId !== storedId);
+  const stillActive = remaining.some((tab) => tab.key === activeKey);
+  return {
+    tabs: remaining,
+    activeKey: stillActive ? activeKey : (remaining[0]?.key ?? null),
+  };
+}
+
+/** Retitle a stored session wherever it is open. */
+export function retitleStoredSession<T extends { storedId: string | null; title: string }>(
+  tabs: readonly T[],
+  storedId: string,
+  title: string,
+): T[] {
+  return tabs.map((tab) => (tab.storedId === storedId ? { ...tab, title } : tab));
+}

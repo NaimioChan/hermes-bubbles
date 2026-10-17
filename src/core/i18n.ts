@@ -94,6 +94,16 @@ export interface Messages {
   minutesAgo: (n: number) => string;
   hoursAgo: (n: number) => string;
   daysAgo: (n: number) => string;
+  editingHint: string;
+  titleRequired: string;
+  editUnavailable: string;
+  editNoAnchor: string;
+  edit: string;
+  rename: string;
+  delete: string;
+  deleteConfirm: string;
+  deleteRefused: string;
+  saved: string;
   cheapModelConfirm: string;
   modelQueued: string;
   /** Notices. */
@@ -152,6 +162,16 @@ const EN: Messages = {
   minutesAgo: (n) => `${n} min ago`,
   hoursAgo: (n) => `${n} h ago`,
   daysAgo: (n) => `${n} d ago`,
+  editingHint: "Editing a sent message — sending rewrites the turn from here",
+  titleRequired: "A title is required",
+  editUnavailable: "That message is no longer in this transcript",
+  editNoAnchor: "This message has no stored id yet, so the turn cannot be rewritten",
+  edit: "Edit",
+  rename: "Rename",
+  delete: "Delete",
+  deleteConfirm: "Delete this session? This cannot be undone.",
+  deleteRefused: "The session is still active on the gateway, so it was not deleted. Close it first.",
+  saved: "Saved",
   cheapModelConfirm: "That is an expensive model — switch cancelled",
   modelQueued: "Model switch queued; takes effect next turn",
   steered: "Inserted into the running turn; the model sees it at its next step",
@@ -209,6 +229,16 @@ const ZH: Messages = {
   minutesAgo: (n) => `${n} 分钟前`,
   hoursAgo: (n) => `${n} 小时前`,
   daysAgo: (n) => `${n} 天前`,
+  editingHint: "正在编辑已发送的消息 —— 发送将从这里重写这一轮",
+  titleRequired: "标题不能为空",
+  editUnavailable: "该消息已不在当前转写中",
+  editNoAnchor: "该消息还没有存储行号，无法改写这一轮",
+  edit: "编辑",
+  rename: "重命名",
+  delete: "删除",
+  deleteConfirm: "删除这个会话？无法撤销。",
+  deleteRefused: "该会话仍在网关中活跃，未能删除。请先关闭它。",
+  saved: "已保存",
   cheapModelConfirm: "这是一个较贵的模型，已取消切换",
   modelQueued: "模型切换已排队，下一轮生效",
   steered: "已插入当前任务，模型会在下一步看到它",
@@ -261,21 +291,26 @@ export function reasoningLabel(value: string, locale: Locale): string {
 /**
  * A compact clock, `HH:MM`, for the per-message timestamp.
  *
+ * Takes MILLISECONDS (timeline items carry `at` / `completedAt` in ms — see
+ * `core/types.ts`). It used to take seconds and multiply, while its callers were
+ * already handing it milliseconds; that is the bug that rendered a 02:46 turn as
+ * 19:32.
+ *
  * `HH:MM` is the one format that does not need translating; the day is
- * disambiguated by the tooltip instead of by a localized label.
+ * disambiguated by the label instead of by a locale.
  */
-export function clockTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "";
-  const date = new Date(seconds * 1000);
+export function clockTime(millis: number): string {
+  if (!Number.isFinite(millis) || millis <= 0) return "";
+  const date = new Date(millis);
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
 }
 
-/** `2026-10-17 01:50:03` — the tooltip's full stamp, locale-independent. */
-export function fullStamp(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "";
-  const date = new Date(seconds * 1000);
+/** `2026-10-17 01:50:03` — the tooltip's full stamp, locale-independent. Takes milliseconds. */
+export function fullStamp(millis: number): string {
+  if (!Number.isFinite(millis) || millis <= 0) return "";
+  const date = new Date(millis);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -287,12 +322,14 @@ export function fullStamp(seconds: number): string {
  * Today and yesterday get named (matching the desktop app's `Yesterday, 3:27`
  * shape); anything older is a bare date plus the clock, which needs no word.
  */
-export function messageStamp(seconds: number, locale: Locale, now = Date.now()): string {
-  const time = clockTime(seconds);
+export function messageStamp(millis: number, locale: Locale, now = Date.now()): string {
+  const time = clockTime(millis);
   if (!time) return "";
   const t = messagesFor(locale);
-  const then = new Date(seconds * 1000);
+  const then = new Date(millis);
   const today = new Date(now);
+  // Compared against local midnight, so "today" is the viewer's today rather
+  // than a UTC day boundary.
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   if (then.getTime() >= startOfToday) return t.today(time);
   if (then.getTime() >= startOfToday - 86_400_000) return t.yesterday(time);

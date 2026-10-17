@@ -12,6 +12,7 @@
 import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
 import { EventDedupe } from "../core/dedupe";
 import { messagesFor, normalizeLocale, type Locale } from "../core/i18n";
+import { editTargetFor, retitleStoredSession } from "../core/sessions";
 import { reduceEvent, type GatewayEvent } from "../core/reduce";
 import {
   ackUserInActive,
@@ -69,6 +70,12 @@ export class ChatController {
   private detail = "";
   private resyncing = false;
   private cardSink: ((card: ServerRequestCard) => void) | null = null;
+  /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
+  private http: ((path: string, init: RequestInit) => Promise<unknown>) | null = null;
+
+  setHttpFetcher(fn: ((path: string, init: RequestInit) => Promise<unknown>) | null): void {
+    this.http = fn;
+  }
   /** Locale for controller-emitted strings (notices, errors). The page keeps it current. */
   private locale: Locale = normalizeLocale(null);
 
@@ -137,6 +144,21 @@ export class ChatController {
    * on a socket that came up milliseconds later. Routing everything through one
    * guarded helper makes that impossible to reintroduce by accident.
    */
+  /**
+   * An auth-aware REST call.
+   *
+   * Uses the injected `fetchJSON` (the SDK's, which carries the session token),
+   * never a bare `fetch` — see AGENTS.md: a bare fetch 401s against this server.
+   */
+  private async fetchJSON<T = unknown>(path: string, init: { method: string; body?: unknown }): Promise<T> {
+    if (!this.http) throw new Error("REST transport unavailable");
+    return this.http(path, {
+      method: init.method,
+      headers: { "Content-Type": "application/json" },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    }) as Promise<T>;
+  }
+
   private async rpc<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     await this.client.ensureOpen();
     return this.client.request<T>(method, params);
@@ -455,6 +477,142 @@ export class ChatController {
 
     // Open the child beside the parent rather than replacing it.
     await this.openStoredSession(forked.stored_session_id, forked.title || tab.title);
+  }
+
+  // ── stored-session management ────────────────────────────────────────────
+
+  /**
+   * Delete a stored session.
+   *
+   * Goes through REST (`DELETE /api/sessions/{id}`), NOT `session.delete`: the
+   * RPC refuses with 4023 while a session is active anywhere, and a session
+   * resumed for any reason stays active for a moment. REST works on the stored
+   * row regardless and is what the desktop app uses for the same verb.
+   *
+   * Any tab holding this session is closed first so no tab is left pointing at
+   * a deleted row.
+   */
+  async deleteStoredSession(storedId: string): Promise<void> {
+    const openTab = this.state.tabs.find((tab) => tab.storedId === storedId);
+
+    // Close the LIVE session first, on the server. Closing the tab is only a
+    // local view operation: a still-live session re-persists its row after the
+    // DELETE, so the row reappears and the delete looks like a no-op (the REST
+    // call even returns ok).
+    if (openTab?.runtimeId) {
+      // Awaiting the close is the whole guarantee: once it returns the session is
+      // no longer live, so the DELETE below cannot race a re-persist. (A blind
+      // sleep here was both a race and untestable.)
+      try {
+        await this.client.request("session.close", { session_id: openTab.runtimeId });
+      } catch {
+        // Best effort: the DELETE below reports the real outcome.
+      }
+    }
+    if (openTab) this.closeSession(openTab.key);
+
+    await this.fetchJSON(`/api/sessions/${encodeURIComponent(storedId)}`, {
+      method: "DELETE",
+    });
+
+    // REST answers `{ok: true}` even when the row is still active on the gateway
+    // and will simply re-persist. Confirm it is actually gone rather than
+    // reporting a success that did not happen.
+    const still = await this.listSessions(200);
+    if (still.some((row) => row.id === storedId)) {
+      throw new Error(messagesFor(this.locale).deleteRefused);
+    }
+  }
+
+  /**
+   * Rename a stored session.
+   *
+   * REST `PATCH /api/sessions/{id}` — the same call the desktop app makes.
+   * `session.title` was the obvious-looking choice and it "works", but only for
+   * a LIVE session: reaching a runtime id means resuming the row, which makes it
+   * active and then blocks a later delete with 4023. PATCH addresses the stored
+   * row directly, so renaming has no side effect on liveness.
+   */
+  async renameStoredSession(storedId: string, title: string): Promise<string> {
+    const next = title.trim();
+    if (!next) throw new Error(messagesFor(this.locale).titleRequired);
+
+    const result = await this.fetchJSON<{ ok?: boolean; title?: string }>(
+      `/api/sessions/${encodeURIComponent(storedId)}`,
+      { method: "PATCH", body: { title: next } },
+    );
+    const finalTitle = result?.title || next;
+
+    this.setState({ ...this.state, tabs: retitleStoredSession(this.state.tabs, storedId, finalTitle) });
+    return finalTitle;
+  }
+
+  /**
+   * Edit an already-sent message and continue from there.
+   *
+   * The desktop app's shape: interrupt whatever is running, then submit the
+   * corrected text with `truncate_before_row_id` + `confirm_truncate` so the
+   * backend drops that turn and everything after it. A target without a durable
+   * row id is refused rather than sent as a cut the gateway would reject.
+   */
+  async editAndResend(itemId: string, text: string): Promise<void> {
+    const key = this.state.activeKey;
+    if (!key) return;
+    const next = text.trim();
+    if (!next) return;
+
+    const runtimeId = await this.ensureSession();
+    if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
+
+    const timeline = timelineOf(this.state, key);
+    const target = editTargetFor(
+      timeline.items as { kind: string; id: string; text?: string; rowId?: number }[],
+      itemId,
+    );
+    if (!target) throw new Error(messagesFor(this.locale).editUnavailable);
+    if (target.rowId === null) throw new Error(messagesFor(this.locale).editNoAnchor);
+
+    // Whatever is running would fight the truncation.
+    if (timeline.meta.running) {
+      try {
+        await this.client.request("session.interrupt", { session_id: runtimeId });
+      } catch {
+        // Best effort; the submit is gated server-side either way.
+      }
+    }
+
+    const cutIndex = timeline.items.findIndex((item) => item.id === itemId);
+    const kept = timeline.items.slice(0, cutIndex);
+    this.setState({
+      ...this.state,
+      sessions: {
+        ...this.state.sessions,
+        [key]: { items: kept, meta: { ...timeline.meta, running: true, status: "" } },
+      },
+    });
+    this.setState(appendUserToActive(this.state, next));
+
+    try {
+      const result = await this.client.request<{ status?: string; user_row_id?: number }>("prompt.submit", {
+        session_id: runtimeId,
+        text: next,
+        truncate_before_row_id: target.rowId,
+        confirm_truncate: true,
+        // Only meaningful when the cut empties the transcript; the gateway
+        // ignores it for a non-empty prefix.
+        ...(kept.length === 0 ? { confirm_empty_truncate: true } : {}),
+        // A cut of more than one user turn is a deep truncate on newer gateways.
+        ...(target.userTurnsRemoved > 1 ? { confirm_deep_truncate: true } : {}),
+      });
+      this.setState(ackUserInActive(this.state, result?.user_row_id));
+    } catch (error) {
+      // The server kept its copy; put the transcript back.
+      this.setState({
+        ...this.state,
+        sessions: { ...this.state.sessions, [key]: { items: timeline.items, meta: timeline.meta } },
+      });
+      throw error;
+    }
   }
 
   /** Append a local notice line to the focused transcript. */

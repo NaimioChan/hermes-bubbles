@@ -59,9 +59,18 @@ function assistantReasoning(row: TranscriptMessage): string {
   return parts.join("\n\n");
 }
 
+/**
+ * A history row's timestamp, in MILLISECONDS (the unit every timeline item uses).
+ *
+ * The wire sends seconds. This is the one place that scaling happens; nothing
+ * downstream multiplies again.
+ */
 function timestampOf(row: TranscriptMessage, fallback: number): number {
   const ts = row.timestamp;
-  return typeof ts === "number" && ts > 0 ? ts * 1000 : fallback;
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return fallback;
+  // Guard against a source that already sends milliseconds (a value this large
+  // cannot be a plausible seconds-since-epoch stamp).
+  return ts > 1e11 ? ts : ts * 1000;
 }
 
 /**

@@ -57,6 +57,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
   const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
   const [reasoning, setReasoning] = useState("medium");
+  // Set while an existing user message is being rewritten: Send then truncates
+  // and resubmits instead of appending.
+  const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
@@ -68,6 +71,13 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   useEffect(() => {
     controller.setLocale(locale);
   }, [controller, locale]);
+
+  // Stored-session rename/delete go through REST, and the only auth-aware
+  // fetcher is the SDK's — a bare `fetch` 401s against this server.
+  useEffect(() => {
+    controller.setHttpFetcher((path, init) => sdk.fetchJSON(path, init));
+    return () => controller.setHttpFetcher(null);
+  }, [controller, sdk]);
 
   // ── boot ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -127,13 +137,21 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onSend = useCallback(
     (text: string) => {
       setError(null);
-      controller
-        .send(text)
+      const target = editing;
+      setEditing(null);
+      const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
+      run
         .then(() => setAttachments([]))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     },
-    [controller],
+    [controller, editing],
   );
+
+  /** Start editing a sent message: put its text in the composer. */
+  const onEdit = useCallback((itemId: string, text: string) => {
+    setError(null);
+    setEditing({ itemId, text });
+  }, []);
 
   const onStop = useCallback(() => {
     controller.interrupt().catch(() => undefined);
@@ -238,6 +256,26 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.newSession().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, [controller]);
 
+  const onRename = useCallback(
+    (id: string, title: string) => {
+      controller
+        .renameStoredSession(id, title)
+        .then(() => refreshStored())
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller, refreshStored],
+  );
+
+  const onDelete = useCallback(
+    (id: string) => {
+      controller
+        .deleteStoredSession(id)
+        .then(() => refreshStored())
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller, refreshStored],
+  );
+
   // ── per-message actions ─────────────────────────────────────────────────
 
   const onCopy = useCallback((text: string) => {
@@ -316,6 +354,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                       sdk,
                       item,
                       locale,
+                      onEdit,
                       onBranch,
                       onRegenerate,
                       onCopy,
@@ -361,6 +400,8 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         React.createElement(Composer, {
           sdk,
           locale,
+          editingText: editing?.text ?? null,
+          onCancelEdit: () => setEditing(null),
           running: timeline.meta.running,
           status,
           connected: timeline.meta.connected,
@@ -389,6 +430,8 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         activeStoredId,
         onOpen: onOpenStored,
         onRefresh: refreshStored,
+        onRename,
+        onDelete,
         onClose: () => setHistoryOpen(false),
       }),
     ),

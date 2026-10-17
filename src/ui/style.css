@@ -143,6 +143,11 @@
   padding: 0.1em 0.35em;
   font-family: var(--font-mono);
   font-size: 0.9em;
+  /* Explicit foreground, not inherited-by-luck: the host has a global
+   * `code { color: var(--background) }` rule keyed on the TAG, so a bare
+   * background swap left the text at near-background colour. That is the
+   * "inline code is unreadable" report — the chip painted, the text did not. */
+  color: var(--color-card-foreground);
   background: color-mix(in oklab, var(--color-muted) 70%, transparent);
   border-radius: calc(var(--radius) * 0.4);
 }
@@ -378,6 +383,25 @@
 
 .hb-input:focus {
   border-color: var(--color-ring);
+}
+
+/* The "editing a sent message" banner above the composer. Its own class so the
+ * colour mix and radius live in CSS rather than inline, and so the guards can see
+ * it. */
+.hb-edit-banner {
+  border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
+}
+
+/* The rename/delete tools on a history row: hidden until the row is hovered, so
+ * the list reads as plain titles until you go to act on one. */
+.hb-row-tools {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+div:hover > .hb-row-tools,
+.hb-row-tools:focus-within {
+  opacity: 1;
 }
 
 /* ── scrollbars ───────────────────────────────────────────────────────────── */

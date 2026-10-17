@@ -20,6 +20,7 @@ interface BubbleProps {
   item: UserItem | AssistantItem | ToolItem | NoticeItem;
   locale: Locale;
   /** Per-message actions. Absent on a transcript that cannot act (a read-only view). */
+  onEdit?: (itemId: string, text: string) => void;
   onBranch?: (itemId: string) => void;
   onRegenerate?: (itemId: string) => void;
   onCopy?: (text: string) => void;
@@ -29,8 +30,19 @@ interface BubbleProps {
 const USER_RADIUS = "calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 0.5) calc(var(--radius) * 1.6)";
 const ASSISTANT_RADIUS = "calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 0.5)";
 
-function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
+function UserBubble({
+  sdk,
+  item,
+  locale,
+  onEdit,
+}: {
+  sdk: HermesPluginSdk;
+  item: UserItem;
+  locale: Locale;
+  onEdit?: (itemId: string, text: string) => void;
+}) {
   const { React } = sdk;
+  const t = messagesFor(locale);
   return React.createElement(
     "div",
     { className: "flex flex-col items-end" },
@@ -48,6 +60,33 @@ function UserBubble({ sdk, item }: { sdk: HermesPluginSdk; item: UserItem }) {
       },
       item.text,
     ),
+    // Edit is offered on a settled user turn only: while it is still in flight
+    // there is no stored row to cut, and the affordance would fail on click.
+    onEdit && !item.pending
+      ? React.createElement(
+          "div",
+          { className: "hb-actions flex items-center gap-1.5", "data-hb": "user-actions" },
+          React.createElement(
+            "div",
+            { className: "hb-actions-tools ml-auto flex items-center gap-1" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                title: t.edit,
+                "aria-label": t.edit,
+                "data-hb": "edit-message",
+                className: "hb-action-btn",
+                onClick: (event: { stopPropagation: () => void }) => {
+                  event.stopPropagation();
+                  onEdit(item.id, item.text);
+                },
+              },
+              "✎",
+            ),
+          ),
+        )
+      : null,
   );
 }
 
@@ -421,7 +460,7 @@ export function Bubble(props: BubbleProps) {
   const { sdk, item, locale } = props;
   switch (item.kind) {
     case "user":
-      return UserBubble({ sdk, item });
+      return UserBubble({ sdk, item, locale, onEdit: props.onEdit });
     case "assistant":
       return AssistantBubble({
         sdk,

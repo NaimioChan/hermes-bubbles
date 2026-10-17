@@ -41,7 +41,9 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 15. **文案不进测试断言。** 每个可点/可测的元素带一个 `data-hb="…"` 钩子（`tab` / `tab-new` / `history-toggle` / `history-panel` / `primary-action` / `stop-action` / `reasoning-toggle` / `message-actions` / `request-card` / `clarify-submit`），`scripts/verify.mjs` 只按钩子找元素。踩过一次：整套验收按中文文案选择器写，页面默认语言改成英语后 9 条断言集体失效——那是测试脆，不是功能坏。新增可交互元素时补一个钩子。
 16. **默认语言是英语，并跟随仪表盘。** `display.language` 默认就是 `en`；插件从 `localStorage['hermes-locale']` 与 `<html lang>` 两个信号读当前语言（无 RPC 可问），并用 `storage` + `MutationObserver` 跟着切。文案集中在 `src/core/i18n.ts`，任何组件里不许再写裸字符串。
 17. **`@` 不是补全入口。** 后端 `complete.path` 期望的 `word` **包含**开头的 `@`（`is_context = word.startswith("@")`），早期客户端发的是去掉 `@` 的查询，所以永远匹配不上。功能已按用户要求移除，`@` 当普通字符；文件用 `+` 按钮走 `file.attach`。别再加回来，除非同时把 `@` 带上。
-18. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+18. **时间线的时间戳一律是毫秒。** `at` / `completedAt` 是 `Date.now()` 的量级，格式化函数**不做**任何缩放；后端给的是秒，只在数据进入模型的那一处（`core/history.ts::timestampOf`）乘一次 1000。这条踩过：三处各按自己的假设缩放，结果 02:46 的任务显示成 19:32。
+19. **改存量会话走 REST，不走 `session.*` 的写接口。** 重命名用 `PATCH /api/sessions/{id}`、删除用 `DELETE /api/sessions/{id}`（桌面端同款）。`session.title` 只认**活跃**会话，为拿 runtime id 而 resume 会让该行变成活跃，之后 `session.delete` 以 4023 拒绝；而 REST DELETE 对活跃会话会**返回 `{ok:true}` 却删不掉**（行会被重新持久化），所以删完必须回查 `session.list` 确认，不能信返回值。REST 与 `session.list` 是**不同的库**，校验要用 `session.list`。
+20. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 

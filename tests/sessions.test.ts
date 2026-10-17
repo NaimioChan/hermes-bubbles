@@ -9,17 +9,20 @@ import {
   appendUserToActive,
   bindSnapshot,
   closeTab,
+  editTargetFor,
   emptyMultiState,
   focus,
+  forgetStoredSession,
   openDraft,
   openStored,
   renameTab,
   replaceHistory,
   resetDraftCounter,
+  retitleStoredSession,
   routeEvent,
   runningKeys,
-  tabLabel,
   tabKeyFor,
+  tabLabel,
   timelineOf,
 } from "../src/core/sessions";
 
@@ -289,5 +292,70 @@ describe("tab helpers", () => {
     let state = openDraft(emptyMultiState);
     state = bindSnapshot(state, state.activeKey!, { session_id: "rt-a", messages: [], info: { running: true } });
     expect(runningKeys(state)).toEqual(["rt-a"]);
+  });
+});
+
+describe("edit target", () => {
+  const items = [
+    { kind: "user", id: "u1", text: "问题一", rowId: 10 },
+    { kind: "assistant", id: "a1", text: "答一" },
+    { kind: "user", id: "u2", text: "问题二", rowId: 20 },
+    { kind: "assistant", id: "a2", text: "答二" },
+    { kind: "user", id: "u3", text: "问题三" },
+  ];
+
+  it("finds the user turn and its durable row", () => {
+    expect(editTargetFor(items, "u2")).toEqual({
+      itemId: "u2",
+      text: "问题二",
+      rowId: 20,
+      userTurnsRemoved: 2,
+    });
+  });
+
+  it("reports a missing durable row rather than inventing one", () => {
+    // u3 never learned a row id: the gateway fails such a cut closed, so the
+    // caller must refuse instead of sending it.
+    expect(editTargetFor(items, "u3")?.rowId).toBeNull();
+  });
+
+  it("counts the user turns the cut removes", () => {
+    expect(editTargetFor(items, "u1")?.userTurnsRemoved).toBe(3);
+    expect(editTargetFor(items, "u3")?.userTurnsRemoved).toBe(1);
+  });
+
+  it("refuses a non-user item or an unknown id", () => {
+    expect(editTargetFor(items, "a1")).toBeNull();
+    expect(editTargetFor(items, "nope")).toBeNull();
+  });
+});
+
+describe("stored-session bookkeeping", () => {
+  const tabs = [
+    { key: "k1", storedId: "s1", title: "一" },
+    { key: "k2", storedId: "s2", title: "二" },
+    { key: "k3", storedId: null, title: "" },
+  ];
+
+  it("drops every tab holding the deleted session", () => {
+    expect(forgetStoredSession(tabs, "k1", "s1").tabs.map((t) => t.key)).toEqual(["k2", "k3"]);
+  });
+
+  it("moves focus when the active tab is the one deleted", () => {
+    expect(forgetStoredSession(tabs, "k1", "s1").activeKey).toBe("k2");
+  });
+
+  it("keeps focus when a different tab is deleted", () => {
+    expect(forgetStoredSession(tabs, "k2", "s1").activeKey).toBe("k2");
+  });
+
+  it("retitles only the matching tab", () => {
+    const next = retitleStoredSession(tabs, "s2", "新");
+    expect(next.find((t) => t.key === "k2")?.title).toBe("新");
+    expect(next.find((t) => t.key === "k1")?.title).toBe("一");
+  });
+
+  it("leaves the list untouched for an unknown stored id", () => {
+    expect(retitleStoredSession(tabs, "zzz", "新")).toEqual(tabs);
   });
 });

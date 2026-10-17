@@ -23,6 +23,16 @@ export interface HistoryPanelProps {
   sessions: readonly StoredSession[];
   loading: boolean;
   activeStoredId: string | null;
+  /**
+   * Stored ids that are OPEN in a tab right now.
+   *
+   * Distinct from `activeStoredId` (the tab currently focused): the point of the
+   * dot is to answer "have I already got this one open?", so every open session
+   * gets one, and the focused one is brighter.
+   */
+  openStoredIds: readonly string[];
+  /** Stored ids whose session is mid-turn, for the pulsing dot. */
+  busyStoredIds: readonly string[];
   onOpen: (id: string, title: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -181,6 +191,23 @@ export function HistoryPanel(props: HistoryPanelProps) {
                         { className: "hb-flex-fill hb-truncate" },
                         session.title || t.untitled,
                       ),
+                  // A small lamp, the same signal the tab strip uses: filled and
+                  // pulsing while that session is running, dim while merely open.
+                  props.openStoredIds.includes(session.id)
+                    ? React.createElement("span", {
+                        className: props.busyStoredIds.includes(session.id) ? "hb-dot hb-caret" : "hb-dot",
+                        "data-hb": "session-active",
+                        "data-state": props.busyStoredIds.includes(session.id) ? "busy" : "open",
+                        title: props.busyStoredIds.includes(session.id) ? t.sessionRunning : t.sessionOpen,
+                        style: {
+                          width: "0.4rem",
+                          height: "0.4rem",
+                          borderRadius: "9999px",
+                          background: "var(--color-primary)",
+                          opacity: session.id === props.activeStoredId ? 1 : 0.45,
+                        },
+                      })
+                    : null,
                   React.createElement(
                     "span",
                     {

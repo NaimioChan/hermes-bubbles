@@ -98,6 +98,8 @@ export interface Messages {
   titleRequired: string;
   editUnavailable: string;
   editNoAnchor: string;
+  sessionOpen: string;
+  sessionRunning: string;
   jumpToMessage: string;
   copyCode: string;
   edit: string;
@@ -168,6 +170,8 @@ const EN: Messages = {
   titleRequired: "A title is required",
   editUnavailable: "That message is no longer in this transcript",
   editNoAnchor: "This message has no stored id yet, so the turn cannot be rewritten",
+  sessionOpen: "Open in a tab",
+  sessionRunning: "Running",
   jumpToMessage: "Jump to an earlier message",
   copyCode: "Copy code",
   edit: "Edit",
@@ -237,6 +241,8 @@ const ZH: Messages = {
   titleRequired: "标题不能为空",
   editUnavailable: "该消息已不在当前转写中",
   editNoAnchor: "该消息还没有存储行号，无法改写这一轮",
+  sessionOpen: "已在页签中打开",
+  sessionRunning: "正在运行",
   jumpToMessage: "跳到之前的消息",
   copyCode: "复制代码",
   edit: "编辑",

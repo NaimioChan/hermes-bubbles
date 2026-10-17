@@ -8,6 +8,28 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 15:10 · hermes · 历史状态灯、跨路由保持会话
+
+- 改：新增 `src/app/persistent.ts` + `tests/persistent.test.ts`；`ChatPage.ts` 改用文档级 controller、卸载只 release、重挂载回放暂存请求；`controller.ts` 加 `pendingCards` / `takeParkedCards`；`HistoryPanel.ts` 加状态灯（`openStoredIds` / `busyStoredIds`）；`style.css` `.hb-dot`
+- 验证：`npm test` 397 passed（19 文件）；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 64/64；`node scripts/audit-classes.mjs` 0 缺失
+- 遗留：无
+
+### 跨路由保持会话
+
+根因很直接：仪表盘切页会卸载插件页，而 ChatPage 的 cleanup 里调了 `controller.dispose()`——socket 关掉、页签全没。改成模块级单例（`createControllerHolder`）：卸载只 `release()` 引用，不销毁；重新挂载拿回同一个实例，页签、进行中的回复原样都在。
+
+连带要处理的一件事：控制器活得比页面长，那么页面不在时到达的 approval/clarify 请求会没人接，channel 会回 `-32601` 让后端放弃。但后端对这种请求会一直等（clarify 3600s），而这只是「用户刚好在别的页面」。所以 controller 把它们暂存进 `pendingCards`，页面重新挂载时取走渲染。channel 的 fail-fast 本身没错，它针对的是永远不会答的客户端。
+
+### 历史列表的状态灯
+
+每行一个小圆点：该会话已在页签中打开就亮，正在运行则用现有的 `.hb-caret` 心跳闪，聚焦中的那个更亮、其余半透明。区分 `open` 与 `busy` 两个状态，验收实测拿到 `["open","busy","open"]`。
+
+写验收时踩了个自己挖的坑：一开始测的时候用的是**草稿页签**（新建的没保存过的会话），草稿没有 stored id，永远点不亮任何一盏灯——断言成了空转。改成从历史面板打开一个**已有**会话再测。
+
+### 又一个注入脚本的转义坑
+
+`verify.mjs` 里的查找 Config 导航项那段，模板字符串把 `/\/config/` 渲染成了 `//config/`——变成行注释，后面整段被吃掉，浏览器报 `Unexpected token 'if'`。`\s` 同样被消费成 `s`，正则 `/^\s*config\s*$/` 变成 `/^s*configs*$/`。改用 `String.raw` 后正常。这类错误看起来像逻辑 bug，实际是字符串转义，排查了三轮才定位（先把每个模板单独 `new Function` 校验，都没问题，最后才发现要检查**渲染后**的字符串）。
+
 ## 2026-10-17 14:25 · hermes · 定位轨道、空状态输入、选项换行、卡片默认折叠、代码复制
 
 - 改：新增 `src/core/rail.ts` + `src/ui/LocatorRail.ts` + `tests/rail.test.ts`；`controller.ts`（无页签时 send 先建会话）；`ChatPage.ts`（轨道挂载、`data-hb-item` 锚点、`composerConnected`）；`Bubble.ts`（工具卡默认折叠）；`RequestCards.ts` + `style.css`（选项改为列布局）；`Markdown.ts`（代码块复制按钮 + 剪贴板回退）

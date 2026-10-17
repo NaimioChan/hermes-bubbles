@@ -70,6 +70,14 @@ export class ChatController {
   private detail = "";
   private resyncing = false;
   private cardSink: ((card: ServerRequestCard) => void) | null = null;
+  /**
+   * Requests that arrived while the page was unmounted.
+   *
+   * The backend blocks on an answer (clarify waits 3600s), so refusing a request
+   * that arrives mid-navigation would break the turn. Park it and replay it when
+   * the page mounts again.
+   */
+  private pendingCards: ServerRequestCard[] = [];
   /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
   private http: ((path: string, init: RequestInit) => Promise<unknown>) | null = null;
 
@@ -129,6 +137,13 @@ export class ChatController {
   private setState(next: MultiState): void {
     this.state = next;
     this.emit();
+  }
+
+  /** Cards parked while the page was unmounted, for the remounting page. */
+  takeParkedCards(): ServerRequestCard[] {
+    const parked = this.pendingCards;
+    this.pendingCards = [];
+    return parked;
   }
 
   setServerRequestSink(sink: ((card: ServerRequestCard) => void) | null): void {
@@ -817,14 +832,20 @@ export class ChatController {
 
   private handleServerRequest(request: ServerRequest): boolean {
     if (!HANDLED_REQUESTS.has(request.method)) return false;
-    if (!this.cardSink) return false;
-    this.cardSink({
+    const card: ServerRequestCard = {
       id: request.id,
       method: request.method,
       params: request.params,
       respond: request.respond,
       fail: request.fail,
-    });
+    };
+    if (!this.cardSink) {
+      // Between mounts (the user switched dashboard tabs). Park it rather than
+      // letting the channel fail it with -32601: this client IS going to answer.
+      this.pendingCards.push(card);
+      return true;
+    }
+    this.cardSink(card);
     return true;
   }
 

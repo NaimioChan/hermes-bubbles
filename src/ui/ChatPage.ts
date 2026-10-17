@@ -17,6 +17,7 @@ import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
 import type { TimelineItem } from "../core/types";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
+import { createControllerHolder } from "../app/persistent";
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
 import { HistoryPanel, type StoredSession } from "./HistoryPanel";
@@ -28,6 +29,26 @@ import { runningLabel } from "./format";
 import { useLocale } from "./useLocale";
 import type { HermesPluginSdk } from "./sdk";
 
+let boundSdk: HermesPluginSdk | null = null;
+
+/**
+ * The chat controller for this document.
+ *
+ * Module scope, not component scope: the dashboard unmounts this page when you
+ * switch to another dashboard tab, and a per-mount controller took the socket
+ * and every open session down with it. The SDK is captured on first mount (a
+ * document has exactly one).
+ */
+const chatController = createControllerHolder<ChatController>(() => {
+  if (!boundSdk) throw new Error("hermes-bubbles: controller acquired before the page mounted");
+  return new ChatController({ urlProvider: () => boundSdk!.buildWsUrl("/api/ws") });
+});
+
+function acquireController(sdk: HermesPluginSdk): ChatController {
+  boundSdk = sdk;
+  return chatController.acquire();
+}
+
 export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const { React } = sdk;
   const { useCallback, useEffect, useMemo, useRef, useState } = sdk.hooks;
@@ -38,13 +59,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const locale: Locale = useLocale(sdk);
   const t = messagesFor(locale);
 
-  const controller = useMemo(
-    () =>
-      new ChatController({
-        urlProvider: () => sdk.buildWsUrl("/api/ws"),
-      }),
-    [sdk],
-  );
+  // Module-level so a route change (which unmounts this page) does not tear down
+  // the socket and the open tabs. See `app/persistent.ts`.
+  const controller = useMemo(() => acquireController(sdk), [sdk]);
 
   const [cards, setCards] = useState<ServerRequestCard[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +103,20 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.setServerRequestSink((card) => {
       setCards((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
     });
+    // Anything that asked while this page was unmounted (the user was on another
+    // dashboard tab) is replayed now rather than having been refused.
+    const parked = controller.takeParkedCards();
+    if (parked.length) {
+      setCards((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...parked.filter((c) => !seen.has(c.id))];
+      });
+    }
     // `start()` waits for the socket before opening the session. Calling
     // `connect()` then `openSession()` races and reports "gateway not connected"
     // on a connection that succeeds a moment later.
+    // Safe to call on every mount: `start()` reconnects only if the socket is
+    // closed and leaves an existing tab list alone.
     controller
       .start()
       .then(() => refreshStored())
@@ -103,7 +131,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
     return () => {
       controller.setServerRequestSink(null);
-      controller.dispose();
+      // Release the reference only. Disposing here is what closed the socket on
+      // every route change and lost the open sessions.
+      chatController.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller]);
@@ -457,6 +487,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         sessions: stored,
         loading: loadingStored,
         activeStoredId,
+        // Every open tab's stored id feeds the lamp; `running` decides pulse.
+        openStoredIds: tabs.map((tab) => tab.storedId).filter((id): id is string => Boolean(id)),
+        busyStoredIds: tabs
+          .filter((tab) => running.includes(tab.key))
+          .map((tab) => tab.storedId)
+          .filter((id): id is string => Boolean(id)),
         onOpen: onOpenStored,
         onRefresh: refreshStored,
         onRename,

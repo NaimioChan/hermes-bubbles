@@ -45,7 +45,10 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 19. **改存量会话走 REST，不走 `session.*` 的写接口。** 重命名用 `PATCH /api/sessions/{id}`、删除用 `DELETE /api/sessions/{id}`（桌面端同款）。`session.title` 只认**活跃**会话，为拿 runtime id 而 resume 会让该行变成活跃，之后 `session.delete` 以 4023 拒绝；而 REST DELETE 对活跃会话会**返回 `{ok:true}` 却删不掉**（行会被重新持久化），所以删完必须回查 `session.list` 确认，不能信返回值。REST 与 `session.list` 是**不同的库**，校验要用 `session.list`。
 20. **列表型选项用 `flex-direction: column`，不用 `flex-wrap`。** `flex-wrap` 只在容器边缘换行，几个短选项就挤在同一行；每行一个是要么全换、要么不换的语义，用列。行内再配 `width:100%` 与左对齐，否则看起来像一堆药丸。
 21. **空状态不是死状态。** 关掉所有页签时 `activeTimeline` 是空的占位，它的 `meta.connected` 恒为 false——直接拿它当输入框可用性会让整个输入区变灰。判断能否输入看**socket**（`getConnection().state`），`send()` 在没有活动页签时先 `newSession()`。
-22. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+22. **聊天 controller 是文档级单例，卸载时只能 `release()`，不能 `dispose()`。** 仪表盘切页会卸载插件页；早期在 cleanup 里 dispose，等于每次切走就把 socket 和所有打开的会话一起关掉。生命周期规则在 `src/app/persistent.ts`，`tests/persistent.test.ts` 守着（含 StrictMode 双挂载只能建一个实例）。
+23. **页面卸载期间到达的服务端请求要暂存，不能回 `-32601`。** 后端会一直等到超时（clarify 是 3600s）。controller 现在把这类请求放进 `pendingCards`，重新挂载时由页面取走渲染。给 channel 的 fail-fast 是针对「永远不会答的客户端」，不是针对「刚好在两次挂载之间」。
+24. **写进注入脚本的正则用 `String.raw`。** `verify.mjs` 的表达式是模板字符串，`\/` 与 `\s` 会被当成转义消费掉，`/\/config/` 会变成 `//config/`（行注释），整段代码被注释掉后报 `Unexpected token`。这个坑排查了三轮才定位，代价很高。
+25. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 

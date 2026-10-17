@@ -1191,6 +1191,102 @@ async function main() {
       console.log("SKIP  rail jump — this run's transcript is shorter than the viewport, so there is nothing to scroll");
     }
 
+    // ── ITEM 2 (this round): tabs survive a dashboard route change ──────────
+    // The dashboard unmounts this page when you switch to Config and back. The
+    // controller used to be disposed on unmount, which closed the socket and
+    // dropped every open tab.
+    await session.evaluate(`(() => {
+      if (!document.querySelector('[data-hb="tab"]')) document.querySelector('[data-hb="tab-new"]')?.click();
+      return 1;
+    })()`);
+    await sleep(2500);
+    await session.evaluate(`(() => { document.querySelector('[data-hb="tab-new"]')?.click(); return 1; })()`);
+    await sleep(3000);
+
+    const tabsBeforeNav = await session.evaluate(
+      `JSON.stringify([...document.querySelectorAll('[data-hb="tab"]')].map((t) => t.getAttribute('data-hb-key')))`,
+    );
+
+    // Navigate away through the real sidebar nav item (the dashboard uses router
+    // paths, not hashes).
+    const wentAway = await session.evaluate(String.raw`(() => {
+      const nav = [...document.querySelectorAll('a[href], button')]
+        .filter((el) => /^\s*config\s*$/i.test((el.textContent || '').trim()));
+      if (nav.length) { nav[0].click(); return 'clicked'; }
+      const byHref = [...document.querySelectorAll('a[href]')]
+        .find((a) => /\/config/.test(a.getAttribute('href') || ''));
+      if (byHref) { byHref.click(); return 'href-click'; }
+      return 'not-found';
+    })()`);
+    await sleep(4000);
+    const unmounted = await session.evaluate(
+      `JSON.stringify({ chatMounted: Boolean(document.querySelector('[data-hb="transcript"]')), path: location.pathname })`,
+    );
+    check(
+      "navigating away actually unmounts the chat page (the test is meaningful)",
+      wentAway !== "not-found" && JSON.parse(unmounted).chatMounted === false,
+      JSON.stringify({ wentAway, ...JSON.parse(unmounted) }),
+    );
+
+    // Come back and compare.
+    await session.evaluate(`(() => {
+      history.pushState({}, '', '/chat');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return 1;
+    })()`);
+    await sleep(5000);
+    const tabsAfterNav = await session.evaluate(
+      `JSON.stringify([...document.querySelectorAll('[data-hb="tab"]')].map((t) => t.getAttribute('data-hb-key')))`,
+    );
+    const remounted = await session.evaluate(`Boolean(document.querySelector('[data-hb="transcript"]'))`);
+    check(
+      "coming back keeps every open tab",
+      remounted === true && tabsAfterNav === tabsBeforeNav && JSON.parse(tabsBeforeNav).length >= 2,
+      `before=${tabsBeforeNav} after=${tabsAfterNav}`,
+    );
+
+    // ── ITEM 1 (this round): history rows show which sessions are open ──────
+    await session.evaluate(`(() => {
+      if (!document.querySelector('[data-hb="history-panel"]')) document.querySelector('[data-hb="history-toggle"]')?.click();
+      return 1;
+    })()`);
+    await sleep(2000);
+
+    // Open a STORED session: a draft tab has no stored id, so it can never light
+    // a lamp — an earlier version of this check measured exactly that and passed
+    // vacuously.
+    await session.evaluate(`(() => {
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      const rows = panel
+        ? [...panel.querySelectorAll('[data-hb="rename-session"]')].map((b) => b.closest('div')).filter(Boolean)
+        : [];
+      rows[0]?.click();
+      return rows.length;
+    })()`);
+    await sleep(6500);
+
+    const lamps = await session.evaluate(`(() => {
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      if (!panel) return { error: 'no panel' };
+      const found = [...panel.querySelectorAll('[data-hb="session-active"]')];
+      return {
+        lamps: found.length,
+        states: found.map((l) => l.getAttribute('data-state')),
+        labelled: found.every((l) => Boolean(l.getAttribute('title'))),
+        sized: found.every((l) => parseFloat(getComputedStyle(l).width) > 0),
+      };
+    })()`);
+    check(
+      "an open session shows a lamp in the history list",
+      lamps !== null && lamps.lamps >= 1 && lamps.labelled === true && lamps.sized === true,
+      JSON.stringify(lamps),
+    );
+    check(
+      "the lamp distinguishes open from running",
+      lamps !== null && lamps.states.every((st) => st === "open" || st === "busy"),
+      JSON.stringify(lamps?.states),
+    );
+
     // ── item 2 (this round): the composer survives closing every tab ───────
     // Runs LAST in this block because it destroys the open transcript, so it is
     // followed by a fresh session for anything below it.

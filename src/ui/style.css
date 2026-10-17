@@ -449,6 +449,14 @@
   border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
 }
 
+/* The "this session is open" lamp on a history row. The pulse reuses
+ * `.hb-caret`; this just fixes the shape so the two states look identical in
+ * size and only differ in motion. */
+.hb-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
 /* The rename/delete tools on a history row: hidden until the row is hovered, so
  * the list reads as plain titles until you go to act on one. */
 .hb-row-tools {

@@ -1017,3 +1017,44 @@ describe("sending with no tabs open", () => {
     expect(socket.frames().filter((f) => f.method === "session.create")).toHaveLength(1);
   });
 });
+
+describe("server requests across a route change", () => {
+  it("parks a request that arrives while the page is unmounted instead of refusing it", async () => {
+    const { controller, socket } = await connectAndOpen();
+
+    // The page unmounts (user switched dashboard tabs): no sink.
+    controller.setServerRequestSink(null);
+
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "srv-1",
+      method: "clarify",
+      params: { questions: [{ qid: "a", question: "?" }] },
+    });
+    await tick();
+
+    // Nothing was answered with -32601; the request is waiting for the remount.
+    const parked = controller.takeParkedCards();
+    expect(parked).toHaveLength(1);
+    expect(parked[0]?.method).toBe("clarify");
+    // Taking them clears the queue, so a second mount cannot double-render them.
+    expect(controller.takeParkedCards()).toHaveLength(0);
+  });
+
+  it("delivers straight to the sink once the page is mounted again", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const seen: string[] = [];
+    controller.setServerRequestSink((card) => seen.push(card.method));
+
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "srv-2",
+      method: "approval",
+      params: { request_id: "r", choices: ["once"] },
+    });
+    await tick();
+
+    expect(seen).toEqual(["approval"]);
+    expect(controller.takeParkedCards()).toHaveLength(0);
+  });
+});

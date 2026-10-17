@@ -13,7 +13,10 @@ import {
   pressureTone,
   tokensPerSecondLabel,
 } from "../src/core/metrics";
+import { messagesFor } from "../src/core/i18n";
 import type { Usage } from "../src/core/types";
+
+const en = messagesFor("en");
 
 const usage: Usage = {
   model: "m",
@@ -150,23 +153,30 @@ describe("ioLabel", () => {
 
 describe("metricChips", () => {
   it("returns the chips that have data, in order", () => {
-    expect(metricChips(usage).map((c) => c.key)).toEqual(["context", "cache", "tps", "cost"]);
+    expect(metricChips(usage, en).map((c) => c.key)).toEqual(["context", "cache", "tps", "cost"]);
   });
 
   it("omits chips the backend did not report", () => {
-    expect(metricChips({ context_max: 1000, context_percent: 5 }).map((c) => c.key)).toEqual(["context"]);
+    expect(metricChips({ context_max: 1000, context_percent: 5 }, en).map((c) => c.key)).toEqual(["context"]);
   });
 
   it("collapses to nothing on a fresh session", () => {
-    expect(metricChips(null)).toEqual([]);
-    expect(metricChips({})).toEqual([]);
+    expect(metricChips(null, en)).toEqual([]);
+    expect(metricChips({}, en)).toEqual([]);
   });
 
   it("gives every chip a tooltip", () => {
-    for (const chip of metricChips(usage)) {
+    for (const chip of metricChips(usage, en)) {
       expect(chip.title.length).toBeGreaterThan(0);
       expect(chip.label.length).toBeGreaterThan(0);
     }
+  });
+
+  it("localizes every tooltip through the catalog", () => {
+    const zh = messagesFor("zh");
+    const cjk = /[\u4e00-\u9fff]/;
+    expect(metricChips(usage, zh).every((c) => cjk.test(c.title))).toBe(true);
+    expect(metricChips(usage, en).some((c) => cjk.test(c.title))).toBe(false);
   });
 });
 

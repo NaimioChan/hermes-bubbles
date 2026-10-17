@@ -20,6 +20,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Task list | Done | `todo.updated` snapshots render as a panel above the composer; collapsible, and the collapsed state is remembered. A tool call seals the reply bubble, so text after a tool starts a new bubble below the card instead of growing the one above it |
 | Subagents | Done | One `delegate_task` batch is one card: concurrent children are rows on it, each expanding to its last tool, recent progress and summary |
 | Desktop notifications | Done | Pending approvals/clarify (toasts stay until dismissed) and finished turns ring the desktop **only while the window is in the background**; the switch in the tab strip reports permission too, asks for it on click, and pops a confirmation toast; still rings while you are on another dashboard route |
+| Composer auto-grow | Done | The input box follows the draft's height (32–192px) and then scrolls, instead of staying one row and hiding everything after the first line |
 | Session history | Done | `session.history` projects into the same bubble structure, so a reload keeps the conversation |
 | Session management | Done | Rename and delete from the history panel, which also shows a status lamp: lit = open in a tab, pulsing = running |
 | Tabs survive navigation | Done | Switch to Config and back — open tabs and in-flight replies are still there |

@@ -239,6 +239,52 @@ async function main() {
     );
     check("no 'gateway not connected' banner on a healthy socket", noGatewayError === true);
 
+    // ── composer grows with its text, and stops ────────────────────────────
+    // The native resize grip is gone, so a box stuck at one row would hide every
+    // line after the first. Measured, not inferred: set the value, let React
+    // commit, then read the box's own geometry in a SEPARATE evaluate.
+    const fillComposer = async (value) => {
+      await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(ta, ${JSON.stringify(value)});
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`);
+      await sleep(250);
+      return session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        const box = ta.getBoundingClientRect();
+        return JSON.stringify({
+          height: Math.round(box.height),
+          scrollHeight: ta.scrollHeight,
+          overflowY: getComputedStyle(ta).overflowY,
+        });
+      })()`);
+    };
+
+    const oneRow = JSON.parse(await fillComposer("hello"));
+    const threeRows = JSON.parse(await fillComposer("one\ntwo\nthree"));
+    check(
+      "composer starts at one row and grows with the text",
+      oneRow.height <= 40 && threeRows.height > oneRow.height,
+      `one=${JSON.stringify(oneRow)} three=${JSON.stringify(threeRows)}`,
+    );
+
+    const tall = JSON.parse(await fillComposer(Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n")));
+    check(
+      "composer stops at its cap and scrolls the rest",
+      tall.height === 192 && tall.scrollHeight > tall.height && tall.overflowY === "auto",
+      JSON.stringify(tall),
+    );
+
+    const cleared = JSON.parse(await fillComposer(""));
+    check(
+      "composer shrinks back to one row when emptied",
+      Math.abs(cleared.height - oneRow.height) <= 1,
+      JSON.stringify(cleared),
+    );
+
     const hasXterm = await session.evaluate("Boolean(document.querySelector('.xterm'))");
     check("built-in xterm terminal is gone (route overridden)", hasXterm === false, `xterm present: ${hasXterm}`);
 

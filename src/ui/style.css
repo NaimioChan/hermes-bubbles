@@ -33,6 +33,20 @@
   min-height: 2rem;
 }
 
+/*
+ * The composer's height cap, in CSS as well as in `Composer.ts`.
+ *
+ * The script sizes the box to its text (`fitComposerHeight`, 32–192px); this
+ * rule is the same ceiling for the frames where the script has not run yet, so
+ * a pasted wall of text can never paint a screen-tall textarea. `overflow-y`
+ * only takes effect once the content exceeds the box — a one-line draft shows
+ * no scrollbar.
+ */
+.hb-composer-input {
+  max-height: 192px;
+  overflow-y: auto;
+}
+
 .hb-flex-none {
   min-height: 0;
   flex: 0 0 auto;

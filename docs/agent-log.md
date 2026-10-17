@@ -8,6 +8,18 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 01:05 · hermes · 输入框按内容自动增高（带上限）
+
+- 改：新增 `core/autosize.ts`（`fitComposerHeight()`，纯函数：内容高度 → 夹在 32–192px 之间，并回报是否需要滚动）；`ui/Composer.ts`（`fitInput()` 先 `height:auto` 再量 `scrollHeight`，`useLayoutEffect` 跟 `text` 走，`resize` 事件重算；`max-h-48` 换成 `hb-composer-input`）；`ui/style.css`（`.hb-composer-input` 同样的 192px 上限 + `overflow-y:auto`，脚本没跑起来时也封顶）；`tests/autosize.test.ts`；`scripts/verify.mjs` 加三条实测断言
+- 验证：`npx vitest run` 448 passed（22 文件）；`npx tsc --noEmit` 干净；`node scripts/audit-classes.mjs` 153/153；`node scripts/verify.mjs` 77/77（实测 32px → 68px → 192px 且 `scrollHeight` 761、`overflow-y:auto` → 清空回 32px）
+- 遗留：无
+
+### 为什么不是一个 CSS 属性了事
+
+`field-sizing: content` 正是这个需求，但只有 Chrome/Edge 123+ 认，插件是「用户浏览器里跑的一段脚本」，不能把可用性押在一个版本号上，所以走 JS 量 `scrollHeight`。量之前必须先把 `style.height` 归 `auto`：否则量到的是上一次设的固定高度，框只会越量越大、永远不缩。上限同时写在 CSS 和 JS 里是故意的——CSS 那份是脚本首帧还没执行时的兜底，防止粘贴一整段日志的瞬间撑出一屏高的输入框。
+
+`rows={1}` 保留，作为脚本缺席时的默认观感；原生缩放手柄（`resize: none`）依旧不要，这就是自动增高的替代物。
+
 ## 2026-10-18 00:40 · hermes · 桌面通知返工（开关撒谎、离开页面即静音）
 
 - 改：`core/notify.ts`（新增 `notifySwitch()` 把「开关偏好 + 浏览器权限」合成四态；`NotifySpec.sticky`；`testNotice()`）；`core/i18n.ts`（`notifyPendingTitle` / `notifyTestTitle` / `notifyTestBody`，中英各一套）；`ui/notifier.ts`（`requireInteraction` 跟 `sticky` 走，新增 `raiseTestNotification()`）；`ui/TabStrip.ts`（`notifyOn`/`notifyBlocked` 两个布尔换成 `notifyState` 四态，字形 ◉/◑/⊘/◌，加 `data-state`）；`ui/ChatPage.ts`（开关按状态决定点击含义；授权探明后弹一条确认通知；`focus`/`visibilitychange` 回读权限；卸载时不再 `setNoticeSink(null)`）；`tests/architecture.test.ts` + `tests/notify.test.ts` 加护栏；`scripts/verify.mjs` 加两条开关诚实性断言；新增 `scripts/probe-notify.mjs`

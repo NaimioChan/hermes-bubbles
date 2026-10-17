@@ -3686,6 +3686,14 @@ var HermesBubbles = (() => {
     }
   }
 
+  // src/core/autosize.ts
+  function fitComposerHeight(contentHeight, limits) {
+    const ceiling = Math.max(limits.min, limits.max);
+    const measured = Number.isFinite(contentHeight) && contentHeight > 0 ? Math.ceil(contentHeight) : limits.min;
+    const height = Math.min(Math.max(measured, limits.min), ceiling);
+    return { height, scrolls: measured > ceiling };
+  }
+
   // src/core/metrics.ts
   function compactNumber(value) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "";
@@ -3751,6 +3759,8 @@ var HermesBubbles = (() => {
 
   // src/ui/Composer.ts
   var MENU_LIMIT = 200;
+  var INPUT_MIN_PX = 32;
+  var INPUT_MAX_PX = 192;
   function Composer(props) {
     const { sdk } = props;
     const { React } = sdk;
@@ -3762,6 +3772,21 @@ var HermesBubbles = (() => {
     const [menuDismissed, setMenuDismissed] = useState(false);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
+    const fitInput = useCallback(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      const fit = fitComposerHeight(el.scrollHeight, { min: INPUT_MIN_PX, max: INPUT_MAX_PX });
+      el.style.height = `${fit.height}px`;
+      el.style.overflowY = fit.scrolls ? "auto" : "hidden";
+    }, []);
+    React.useLayoutEffect(() => {
+      fitInput();
+    }, [text, fitInput]);
+    useEffect(() => {
+      window.addEventListener("resize", fitInput);
+      return () => window.removeEventListener("resize", fitInput);
+    }, [fitInput]);
     const slashToken = useMemo(() => findSlashToken(text, caret), [text, caret]);
     const items = useMemo(
       () => slashToken ? filterCommands(props.catalog, slashToken.query, MENU_LIMIT) : [],
@@ -4033,7 +4058,7 @@ var HermesBubbles = (() => {
             disabled: !props.connected,
             placeholder: props.connected ? t.composerPlaceholder : "\u2026",
             "aria-label": t.composerPlaceholder,
-            className: "hb-resize-none hb-min-h-input max-h-48 flex-1 bg-transparent py-1.5 text-sm outline-none",
+            className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent py-1.5 text-sm outline-none",
             style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
             onChange: (event) => {
               setText(event.target.value);

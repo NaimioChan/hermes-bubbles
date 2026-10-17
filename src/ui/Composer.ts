@@ -16,6 +16,7 @@
 
 import type { Attachment } from "../core/attachments";
 import { formatBytes, screenFiles } from "../core/attachments";
+import { fitComposerHeight } from "../core/autosize";
 import { metricChips, pressureTone } from "../core/metrics";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
 import {
@@ -67,6 +68,18 @@ export interface ComposerProps {
  */
 const MENU_LIMIT = 200;
 
+/**
+ * The text box's height range, in px.
+ *
+ * The floor matches `.hb-min-h-input` (2rem); the ceiling is eight-ish lines of
+ * `text-sm`, past which a long draft scrolls inside the box instead of pushing
+ * the transcript and the send button off screen. `.hb-composer-input` carries
+ * the same cap in CSS, so a frame with JS still starting up cannot open a
+ * screen-tall textarea.
+ */
+const INPUT_MIN_PX = 32;
+const INPUT_MAX_PX = 192;
+
 export function Composer(props: ComposerProps) {
   const { sdk } = props;
   const { React } = sdk;
@@ -79,6 +92,37 @@ export function Composer(props: ComposerProps) {
   const [menuDismissed, setMenuDismissed] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Size the box to its content.
+   *
+   * `rows={1}` alone leaves a textarea one row tall forever: it scrolls its own
+   * text instead of growing, and the native resize grip that used to paper over
+   * that is gone (`resize: none`). Collapsing to `auto` first is what makes
+   * `scrollHeight` report the text's real height rather than the height we set
+   * last time.
+   */
+  const fitInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const fit = fitComposerHeight(el.scrollHeight, { min: INPUT_MIN_PX, max: INPUT_MAX_PX });
+    el.style.height = `${fit.height}px`;
+    el.style.overflowY = fit.scrolls ? "auto" : "hidden";
+  }, []);
+
+  // Follow the text: typing, pasting, clearing after send, and being filled by
+  // "edit this message" all change it. Layout effect, so the box never paints at
+  // one row and then jump.
+  React.useLayoutEffect(() => {
+    fitInput();
+  }, [text, fitInput]);
+
+  // Same text, narrower box, more lines: a window resize rewraps it.
+  useEffect(() => {
+    window.addEventListener("resize", fitInput);
+    return () => window.removeEventListener("resize", fitInput);
+  }, [fitInput]);
 
   // The slash token under the caret drives the popover.
   const slashToken = useMemo(() => findSlashToken(text, caret), [text, caret]);
@@ -387,7 +431,7 @@ export function Composer(props: ComposerProps) {
           disabled: !props.connected,
           placeholder: props.connected ? t.composerPlaceholder : "…",
           "aria-label": t.composerPlaceholder,
-          className: "hb-resize-none hb-min-h-input max-h-48 flex-1 bg-transparent py-1.5 text-sm outline-none",
+          className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent py-1.5 text-sm outline-none",
           style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
           onChange: (event: { target: { value: string; selectionStart: number } }) => {
             setText(event.target.value);

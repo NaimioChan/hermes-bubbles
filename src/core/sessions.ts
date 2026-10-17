@@ -101,7 +101,13 @@ export function bindSnapshot(
   // The connection flag describes the socket, not the session: take it from the
   // caller when given, else from whichever timeline already knew.
   const connected = options.connected ?? existing?.meta.connected ?? timeline.meta.connected;
-  sessions[nextKey] = { items, meta: { ...timeline.meta, connected } };
+  sessions[nextKey] = {
+    items,
+    // A snapshot without `todo_state` must not wipe the live list the panel is
+    // already showing: the resume response only carries one when the backend
+    // has a stored snapshot.
+    meta: { ...timeline.meta, connected, todo: timeline.meta.todo ?? existing?.meta.todo ?? null },
+  };
 
   const tabs = state.tabs.map((tab) =>
     tab.key === key

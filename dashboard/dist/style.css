@@ -574,8 +574,220 @@ div:hover > .hb-row-tools,
   overflow-wrap: anywhere;
 }
 
+/* ── task list panel (todo.updated) ───────────────────────────────────────── */
+
+/* Docked above the composer. The card colour (not a border) keeps it readable
+   over both light and dark dashboard themes. */
+.hb-todo-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-card);
+  font-size: 0.75rem;
+  overflow: hidden;
+}
+
+.hb-todo-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.375rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.hb-todo-caret {
+  color: var(--color-muted-foreground);
+}
+
+.hb-todo-title {
+  font-weight: 600;
+  color: var(--color-card-foreground);
+}
+
+.hb-todo-count {
+  margin-left: auto;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Long plans scroll instead of pushing the composer off screen. */
+.hb-todo-list {
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 0 0.6rem 0.45rem;
+}
+
+.hb-todo-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  padding: 0.125rem 0;
+  color: var(--color-card-foreground);
+  line-height: 1.45;
+}
+
+.hb-todo-child {
+  padding-left: 1.1rem;
+}
+
+.hb-todo-glyph {
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+}
+
+.hb-todo-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hb-todo-active {
+  color: var(--color-primary);
+  animation: hb-caret 1.1s steps(1, end) infinite;
+}
+
+.hb-todo-row[data-status="completed"] .hb-todo-text {
+  color: var(--color-muted-foreground);
+  text-decoration: line-through;
+}
+
+.hb-todo-row[data-status="cancelled"] .hb-todo-text {
+  color: var(--color-muted-foreground);
+  opacity: 0.65;
+  text-decoration: line-through;
+}
+
+/* ── subagent batch card ──────────────────────────────────────────────────── */
+
+.hb-sub-card {
+  max-width: min(72ch, 82%);
+  border-left: 2px solid var(--color-border);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--color-muted) 45%, var(--color-card));
+  font-size: 0.75rem;
+}
+
+.hb-sub-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.2;
+  color: var(--color-card-foreground);
+}
+
+.hb-sub-title {
+  font-weight: 600;
+}
+
+.hb-sub-count {
+  margin-left: auto;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.hb-sub-caret {
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+}
+
+.hb-sub-live {
+  flex: 0 0 auto;
+  font-size: 0.5rem;
+}
+
+.hb-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0 0.35rem 0.35rem;
+}
+
+.hb-sub-child {
+  display: block;
+}
+
+.hb-sub-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: calc(var(--radius) * 0.6);
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-card-foreground);
+}
+
+.hb-sub-row:hover {
+  background: color-mix(in oklab, var(--color-muted) 70%, transparent);
+}
+
+/* The child's ordinal within the batch: "2" of "3". */
+.hb-sub-index {
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.hb-sub-goal {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hb-sub-status,
+.hb-sub-duration {
+  flex: 0 0 auto;
+}
+
+.hb-sub-duration {
+  color: var(--color-muted-foreground);
+}
+
+.hb-sub-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.1rem 0.35rem 0.45rem 1.4rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.hb-sub-detail,
+.hb-sub-summary {
+  overflow-wrap: anywhere;
+}
+
+.hb-sub-think {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.4rem;
+  opacity: 0.85;
+}
+
+.hb-sub-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.hb-sub-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-sub-summary {
+  color: var(--color-card-foreground);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .hb-caret {
+  .hb-caret,
+  .hb-todo-active {
     animation: none;
   }
 }

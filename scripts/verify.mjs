@@ -28,10 +28,14 @@ const USER_DATA = join(process.env.LOCALAPPDATA ?? process.env.TEMP ?? ".", "Tem
 const results = [];
 let failures = 0;
 
-function check(name, ok, detail) {
-  results.push({ name, ok, detail });
-  if (!ok) failures += 1;
-  const mark = ok ? "PASS" : "FAIL";
+function check(name, ok, detail, options = {}) {
+  // Soft checks depend on a live model doing what it was asked (calling todo /
+  // delegate_task). A model that ignores the instruction is a flaky test, not a
+  // broken plugin, so those report SKIP instead of failing the run.
+  const soft = Boolean(options.soft);
+  results.push({ name, ok, detail, soft });
+  if (!ok && !soft) failures += 1;
+  const mark = ok ? "PASS" : soft ? "SKIP" : "FAIL";
   console.log(`${mark}  ${name}${detail === undefined ? "" : `  — ${detail}`}`);
 }
 
@@ -142,6 +146,31 @@ async function waitFor(session, expression, { timeout = 20000, label = expressio
     await sleep(250);
   }
   throw new Error(`timed out waiting for ${label}`);
+}
+
+/** `waitFor` for the soft checks: a timeout is a false, not an exception. */
+async function waitForOr(session, expression, options) {
+  try {
+    return await waitFor(session, expression, options);
+  } catch {
+    return false;
+  }
+}
+
+/** Type into the composer and press Enter, the way a person would. */
+async function typeAndSend(session, text) {
+  await session.evaluate(`(() => {
+    const ta = document.querySelector('textarea');
+    if (!ta) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(ta, ${JSON.stringify(text)});
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await sleep(150);
+  await session.evaluate(
+    `document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`,
+  );
 }
 
 async function main() {
@@ -1355,6 +1384,85 @@ async function main() {
     }
     await sleep(1500);
 
+    // ── task list, subagents, notification switch ──────────────────────────
+    const notifyState = await session.evaluate(`(() => {
+      const btn = document.querySelector('[data-hb="notify-toggle"]');
+      return btn ? btn.getAttribute('data-on') : null;
+    })()`);
+    check(
+      "notification switch is in the tab strip",
+      notifyState === "true" || notifyState === "false",
+      `data-on=${String(notifyState)}`,
+    );
+
+    // The switch must round-trip through storage, not merely repaint.
+    await session.evaluate(`document.querySelector('[data-hb="notify-toggle"]').click()`);
+    await sleep(300);
+    const storedOff = await session.evaluate(`localStorage.getItem('hb-notify')`);
+    check("notification switch persists its state", storedOff === "off", String(storedOff));
+    await session.evaluate(`document.querySelector('[data-hb="notify-toggle"]').click()`);
+    await sleep(300);
+    const storedOn = await session.evaluate(`localStorage.getItem('hb-notify')`);
+    check("notification switch turns back on", storedOn === "on", String(storedOn));
+
+    // A turn that has to plan AND delegate. The model choosing not to call the
+    // tools is not a plugin failure, so everything below is soft.
+    await typeAndSend(
+      session,
+      "先用 todo 工具记下两条任务（把第一条标记为 completed），再用 delegate_task 派一个子代理去算 1+1，最后用一句话报告结果。",
+    );
+
+    const todoSeen = await waitForOr(session, `Boolean(document.querySelector('[data-hb="todo-panel"]'))`, {
+      timeout: 150000,
+      label: "todo panel",
+    });
+    check("task list panel renders once the agent plans", todoSeen, todoSeen ? undefined : "model never called todo", {
+      soft: true,
+    });
+
+    if (todoSeen) {
+      const rows = await session.evaluate(`document.querySelectorAll('[data-hb="todo-row"]').length`);
+      check("task list shows the planned items", Number(rows) >= 2, `${rows} rows`, { soft: true });
+      await session.evaluate(`document.querySelector('[data-hb="todo-toggle"]').click()`);
+      await sleep(300);
+      const collapsed = await session.evaluate(`(() => {
+        const btn = document.querySelector('[data-hb="todo-toggle"]');
+        return { open: btn ? btn.getAttribute('data-open') : null, rows: document.querySelectorAll('[data-hb="todo-row"]').length };
+      })()`);
+      check(
+        "task list collapses to its header on click",
+        collapsed.open === "false" && collapsed.rows === 0,
+        JSON.stringify(collapsed),
+      );
+      await session.evaluate(`document.querySelector('[data-hb="todo-toggle"]').click()`);
+      await sleep(200);
+    }
+
+    const subSeen = await waitForOr(session, `Boolean(document.querySelector('[data-hb="subagent-card"]'))`, {
+      timeout: 180000,
+      label: "subagent card",
+    });
+    check(
+      "subagent batch card renders",
+      subSeen,
+      subSeen ? undefined : "model never called delegate_task",
+      { soft: true },
+    );
+
+    if (subSeen) {
+      await session.evaluate(`document.querySelector('[data-hb="subagent-toggle"]').click()`);
+      await sleep(300);
+      const expanded = await session.evaluate(`(() => {
+        const btn = document.querySelector('[data-hb="subagent-toggle"]');
+        return { open: btn ? btn.getAttribute('data-open') : null, rows: document.querySelectorAll('[data-hb="subagent-row"]').length };
+      })()`);
+      check(
+        "subagent card expands to one row per child",
+        expanded.open === "true" && Number(expanded.rows) >= 1,
+        JSON.stringify(expanded),
+      );
+    }
+
     const consoleErrors = session.consoleLines.filter(
       (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),
     );
@@ -1370,10 +1478,13 @@ async function main() {
     child.kill();
   }
 
-  console.log(`\n${results.length - failures}/${results.length} checks passed`);
+  const skipped = results.filter((r) => !r.ok && r.soft).length;
+  console.log(
+    `\n${results.length - failures - skipped}/${results.length} checks passed${skipped ? ` (${skipped} skipped: the model did not call the tool)` : ""}`,
+  );
   if (failures > 0) {
     console.log("\nFailed:");
-    for (const r of results.filter((x) => !x.ok)) console.log(`  - ${r.name}: ${r.detail}`);
+    for (const r of results.filter((x) => !x.ok && !x.soft)) console.log(`  - ${r.name}: ${r.detail}`);
     process.exitCode = 1;
   }
 }

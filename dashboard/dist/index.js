@@ -137,7 +137,29 @@ var HermesBubbles = (() => {
     redirected: "Turn redirected",
     queued: "Queued \u2014 sends when the current turn ends",
     fileReadFailed: "Could not read the file",
-    sessionNotReady: "Session is not ready yet"
+    sessionNotReady: "Session is not ready yet",
+    todos: "Tasks",
+    todoProgress: (done, total) => `${done}/${total} done`,
+    todoEmpty: "No tasks yet",
+    subagents: "Subagents",
+    subagentProgress: (done, total) => `${done}/${total} finished`,
+    subagentTools: (n) => `${n} tools`,
+    subagentStatus: (status) => ({
+      queued: "queued",
+      running: "running",
+      completed: "done",
+      failed: "failed",
+      error: "error",
+      timeout: "timed out",
+      interrupted: "interrupted"
+    })[status] ?? status,
+    notifyApprovalTitle: "Hermes needs your confirmation",
+    notifyClarifyTitle: "Hermes is asking a question",
+    notifyDoneTitle: "Hermes finished",
+    notifyFailedTitle: "Hermes stopped with an error",
+    notifyOnTitle: "Desktop notifications on (only while this window is in the background)",
+    notifyOffTitle: "Desktop notifications off",
+    notifyBlockedTitle: "Notifications are blocked in the browser settings"
   };
   var ZH = {
     empty: "\u5F00\u59CB\u4E00\u6BB5\u5BF9\u8BDD\u3002\u8F93\u5165 / \u5524\u8D77\u547D\u4EE4\u3002",
@@ -207,7 +229,29 @@ var HermesBubbles = (() => {
     redirected: "\u5DF2\u6539\u4E3A\u65B0\u65B9\u5411",
     queued: "\u5DF2\u6392\u961F\uFF0C\u5F53\u524D\u4EFB\u52A1\u7ED3\u675F\u540E\u53D1\u9001",
     fileReadFailed: "\u8BFB\u53D6\u6587\u4EF6\u5931\u8D25",
-    sessionNotReady: "\u4F1A\u8BDD\u5C1A\u672A\u5EFA\u7ACB"
+    sessionNotReady: "\u4F1A\u8BDD\u5C1A\u672A\u5EFA\u7ACB",
+    todos: "\u4EFB\u52A1\u6E05\u5355",
+    todoProgress: (done, total) => `\u5B8C\u6210 ${done}/${total}`,
+    todoEmpty: "\u6682\u65E0\u4EFB\u52A1",
+    subagents: "\u5B50\u4EE3\u7406",
+    subagentProgress: (done, total) => `\u5B8C\u6210 ${done}/${total}`,
+    subagentTools: (n) => `${n} \u6B21\u5DE5\u5177`,
+    subagentStatus: (status) => ({
+      queued: "\u6392\u961F\u4E2D",
+      running: "\u8FD0\u884C\u4E2D",
+      completed: "\u5DF2\u5B8C\u6210",
+      failed: "\u5931\u8D25",
+      error: "\u51FA\u9519",
+      timeout: "\u8D85\u65F6",
+      interrupted: "\u5DF2\u4E2D\u65AD"
+    })[status] ?? status,
+    notifyApprovalTitle: "Hermes \u9700\u8981\u4F60\u786E\u8BA4",
+    notifyClarifyTitle: "Hermes \u6709\u95EE\u9898\u8981\u95EE\u4F60",
+    notifyDoneTitle: "Hermes \u5DF2\u5B8C\u6210",
+    notifyFailedTitle: "Hermes \u51FA\u9519\u505C\u6B62",
+    notifyOnTitle: "\u684C\u9762\u901A\u77E5\u5DF2\u5F00\u542F\uFF08\u4EC5\u7A97\u53E3\u4E0D\u5728\u524D\u53F0\u65F6\u5F39\u51FA\uFF09",
+    notifyOffTitle: "\u684C\u9762\u901A\u77E5\u5DF2\u5173\u95ED",
+    notifyBlockedTitle: "\u6D4F\u89C8\u5668\u91CC\u5DF2\u963B\u6B62\u901A\u77E5\u6743\u9650"
   };
   var CATALOG = { en: EN, zh: ZH };
   function messagesFor(locale) {
@@ -413,107 +457,17 @@ var HermesBubbles = (() => {
     }
   };
 
-  // src/core/history.ts
-  var historyCounter = 0;
-  function historyId(prefix) {
-    historyCounter += 1;
-    return `h${prefix}-${historyCounter}`;
-  }
-  function textOf(value) {
-    if (typeof value === "string") return value;
-    if (value === null || value === void 0) return "";
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-  var ASSISTANT_DETAIL_KEYS = ["reasoning", "thinking", "reasoning_text"];
-  function assistantReasoning(row) {
-    const parts = [];
-    for (const key of ASSISTANT_DETAIL_KEYS) {
-      const value = row[key];
-      if (typeof value === "string" && value.trim()) parts.push(value);
-    }
-    return parts.join("\n\n");
-  }
-  function timestampOf(row, fallback) {
-    const ts = row.timestamp;
-    if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return fallback;
-    return ts > 1e11 ? ts : ts * 1e3;
-  }
-  function projectHistory(messages, now = Date.now()) {
-    const items = [];
-    for (const row of messages) {
-      const role = row.role;
-      if (role !== "user" && role !== "assistant" && role !== "tool" && role !== "system") continue;
-      if (row.display_kind === "hidden") continue;
-      const at = timestampOf(row, now);
-      const rowId = typeof row.row_id === "number" ? row.row_id : void 0;
-      if (role === "tool") {
-        const name = row.name ?? "tool";
-        const item = {
-          kind: "tool",
-          id: historyId("tool"),
-          at,
-          toolId: row.tool_call_id ?? "",
-          name,
-          summary: row.context ?? "",
-          // History does not record whether a call failed; the summary line is
-          // the only signal and it is a display projection, not a verdict.
-          status: "ok",
-          args: row.args ?? void 0,
-          resultText: row.content === void 0 ? void 0 : textOf(row.content)
-        };
-        items.push(item);
-        continue;
-      }
-      const text = typeof row.text === "string" ? row.text : "";
-      if (role === "user") {
-        if (!text.trim()) continue;
-        items.push({ kind: "user", id: historyId("user"), at, text, rowId });
-        continue;
-      }
-      if (role === "assistant") {
-        const reasoning = assistantReasoning(row);
-        if (!text.trim() && !reasoning) continue;
-        const item = {
-          kind: "assistant",
-          id: historyId("assistant"),
-          at,
-          text,
-          reasoning,
-          streaming: false,
-          rowId
-        };
-        items.push(item);
-        continue;
-      }
-      if (!text.trim()) continue;
-      items.push({ kind: "notice", id: historyId("notice"), at, text, tone: "info" });
-    }
-    return items;
-  }
-  function timelineFromSnapshot(snapshot, now = Date.now()) {
-    const info = snapshot.info ?? {};
-    return {
-      items: projectHistory(snapshot.messages ?? [], now),
-      meta: {
-        runtimeId: snapshot.session_id ?? null,
-        storedId: snapshot.stored_session_id ?? null,
-        title: info.title ?? "",
-        model: info.model ?? "",
-        provider: info.provider ?? "",
-        reasoningEffort: info.reasoning_effort ?? "",
-        running: Boolean(info.running ?? snapshot.running),
-        usage: info.usage ?? null,
-        status: "",
-        connected: true
-      }
-    };
-  }
-
   // src/core/types.ts
+  var TERMINAL_SUBAGENT_STATUSES = [
+    "completed",
+    "failed",
+    "error",
+    "timeout",
+    "interrupted"
+  ];
+  function isSubagentTerminal(status) {
+    return TERMINAL_SUBAGENT_STATUSES.includes(status);
+  }
   var emptyMeta = {
     runtimeId: null,
     storedId: null,
@@ -524,7 +478,8 @@ var HermesBubbles = (() => {
     running: false,
     usage: null,
     status: "",
-    connected: false
+    connected: false,
+    todo: null
   };
   var emptyTimeline = { items: [], meta: { ...emptyMeta } };
   function lastAssistant(items) {
@@ -603,6 +558,171 @@ var HermesBubbles = (() => {
       args: p.args,
       argsText: str(p.args_text) || void 0
     };
+  }
+  var MAX_PROGRESS_LINES = 6;
+  function todoEntry(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const row = value;
+    const id = str(row.id);
+    const content = str(row.content);
+    if (!id || !content) return null;
+    const parent = str(row.parent);
+    return { id, content, status: (str(row.status) || "pending").toLowerCase(), parent: parent || void 0 };
+  }
+  function reduceTodos(current, payload) {
+    if (!Array.isArray(payload.todos)) return void 0;
+    const revision = num(payload.revision) ?? 0;
+    if (current && revision < current.revision) return void 0;
+    const todos = payload.todos.map(todoEntry).filter((entry) => entry !== null);
+    if (!todos.length && revision === 0) return void 0;
+    return { todos, revision };
+  }
+  var SUBAGENT_STATUSES = [
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "error",
+    "timeout",
+    "interrupted"
+  ];
+  function subagentStatusOf(value) {
+    const raw = str(value).toLowerCase();
+    return SUBAGENT_STATUSES.includes(raw) ? raw : void 0;
+  }
+  function stringList(value) {
+    if (!Array.isArray(value)) return void 0;
+    const out = value.filter((item) => typeof item === "string" && item.trim() !== "");
+    return out.length ? out : void 0;
+  }
+  function outputTailOf(value) {
+    if (!Array.isArray(value)) return void 0;
+    const rows = value.filter((row) => Boolean(row) && typeof row === "object").map((row) => ({
+      tool: str(row.tool),
+      preview: str(row.preview),
+      isError: Boolean(row.is_error)
+    })).filter((row) => row.tool || row.preview);
+    return rows.length ? rows.slice(-6) : void 0;
+  }
+  function batchKeyOf(p) {
+    const delegation = str(p.delegation_id);
+    if (delegation) return delegation;
+    const parent = str(p.parent_id);
+    return parent ? `flat:${parent}` : "flat";
+  }
+  function mergeChild(prev, type, p, key, taskIndex) {
+    const base = prev ?? {
+      key,
+      taskIndex,
+      goal: "",
+      status: "queued",
+      toolCount: 0,
+      lastTool: "",
+      progress: [],
+      thinking: ""
+    };
+    const next = { ...base, progress: base.progress.slice() };
+    const goal = str(p.goal);
+    if (goal) next.goal = goal;
+    const model = str(p.model);
+    if (model) next.model = model;
+    const toolsets = stringList(p.toolsets);
+    if (toolsets) next.toolsets = toolsets;
+    const toolCount = num(p.tool_count);
+    if (toolCount !== void 0) next.toolCount = toolCount;
+    const filesRead = stringList(p.files_read);
+    if (filesRead) next.filesRead = filesRead;
+    const filesWritten = stringList(p.files_written);
+    if (filesWritten) next.filesWritten = filesWritten;
+    const input = num(p.input_tokens);
+    const output = num(p.output_tokens);
+    if (input !== void 0 || output !== void 0) {
+      next.tokens = { input: input ?? base.tokens?.input, output: output ?? base.tokens?.output };
+    }
+    switch (type) {
+      case "subagent.start":
+        next.status = "running";
+        break;
+      case "subagent.progress": {
+        const line = str(p.text);
+        if (line) next.progress = [...base.progress, line].slice(-MAX_PROGRESS_LINES);
+        break;
+      }
+      case "subagent.thinking": {
+        const text = str(p.text);
+        if (text) next.thinking = text.length > 240 ? `\u2026${text.slice(-240)}` : text;
+        break;
+      }
+      case "subagent.tool": {
+        const tool = str(p.tool_name) || str(p.name);
+        if (tool) next.lastTool = tool;
+        const preview = str(p.tool_preview) || str(p.text);
+        if (preview) next.progress = [...base.progress, preview].slice(-MAX_PROGRESS_LINES);
+        break;
+      }
+      case "subagent.complete": {
+        next.status = subagentStatusOf(p.status) ?? "completed";
+        const summary = str(p.summary) || str(p.text);
+        if (summary) next.summary = summary;
+        const duration = num(p.duration_seconds);
+        if (duration !== void 0) next.durationS = duration;
+        const tail = outputTailOf(p.output_tail);
+        if (tail) next.outputTail = tail;
+        break;
+      }
+      default:
+        break;
+    }
+    return next;
+  }
+  function upsertSubagent(items, event) {
+    const p = event.payload ?? {};
+    const type = event.type;
+    const key = str(p.subagent_id) || `idx:${num(p.task_index) ?? 0}`;
+    const batchKey = batchKeyOf(p);
+    const taskCount = num(p.task_count) ?? 1;
+    const taskIndex = num(p.task_index) ?? 0;
+    const anonymous = batchKey.startsWith("flat");
+    let found = -1;
+    for (let i = items.length - 1; i >= 0 && found < 0; i -= 1) {
+      const item = items[i];
+      if (item?.kind !== "subagents") continue;
+      if (item.children.some((child2) => child2.key === key)) found = i;
+    }
+    if (found < 0) {
+      for (let i = items.length - 1; i >= 0 && found < 0; i -= 1) {
+        const item = items[i];
+        if (item?.kind !== "subagents") continue;
+        if (anonymous) {
+          if (!item.finishedAt && item.children.length < item.taskCount) found = i;
+        } else if (item.batchKey === batchKey && !item.finishedAt) {
+          found = i;
+        }
+      }
+    }
+    const prev = found >= 0 ? items[found] : null;
+    const base = prev ?? {
+      kind: "subagents",
+      id: nextId("subagents"),
+      at: Date.now(),
+      batchKey,
+      taskCount,
+      depth: num(p.depth),
+      children: []
+    };
+    const existing = base.children.find((child2) => child2.key === key) ?? null;
+    const child = mergeChild(existing, type, p, key, taskIndex);
+    const children = existing ? base.children.map((row) => row.key === key ? child : row) : [...base.children, child].sort((a, b) => a.taskIndex - b.taskIndex);
+    const done = children.length > 0 && children.every((row) => isSubagentTerminal(row.status));
+    const next = {
+      ...base,
+      children,
+      finishedAt: done ? base.finishedAt ?? Date.now() : void 0
+    };
+    if (found < 0) return [...items, next];
+    const copy = items.slice();
+    copy[found] = next;
+    return copy;
   }
   function resultTextOf(p) {
     const explicit = str(p.result_text);
@@ -747,7 +867,7 @@ var HermesBubbles = (() => {
       }
       case "tool.start": {
         const tool = toolFromStart(event);
-        return { items: [...items, tool], meta };
+        return { items: [...sealAssistant(items), tool], meta };
       }
       case "tool.complete": {
         const toolId = str(p.tool_id);
@@ -785,6 +905,18 @@ var HermesBubbles = (() => {
         const updated = { ...existing, risk: str(p.risk) || "unknown" };
         return { items: items.map((item) => item === existing ? updated : item), meta };
       }
+      case "todo.updated": {
+        const todo = reduceTodos(meta.todo, p);
+        if (todo === void 0) return timeline;
+        return { items, meta: { ...meta, todo } };
+      }
+      case "subagent.spawn_requested":
+      case "subagent.start":
+      case "subagent.progress":
+      case "subagent.thinking":
+      case "subagent.tool":
+      case "subagent.complete":
+        return { items: upsertSubagent(items, event), meta };
       case "status.update": {
         const text = str(p.text);
         const kind = str(p.kind);
@@ -868,6 +1000,108 @@ var HermesBubbles = (() => {
     };
   }
 
+  // src/core/history.ts
+  var historyCounter = 0;
+  function historyId(prefix) {
+    historyCounter += 1;
+    return `h${prefix}-${historyCounter}`;
+  }
+  function textOf(value) {
+    if (typeof value === "string") return value;
+    if (value === null || value === void 0) return "";
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  var ASSISTANT_DETAIL_KEYS = ["reasoning", "thinking", "reasoning_text"];
+  function assistantReasoning(row) {
+    const parts = [];
+    for (const key of ASSISTANT_DETAIL_KEYS) {
+      const value = row[key];
+      if (typeof value === "string" && value.trim()) parts.push(value);
+    }
+    return parts.join("\n\n");
+  }
+  function timestampOf(row, fallback) {
+    const ts = row.timestamp;
+    if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return fallback;
+    return ts > 1e11 ? ts : ts * 1e3;
+  }
+  function projectHistory(messages, now = Date.now()) {
+    const items = [];
+    for (const row of messages) {
+      const role = row.role;
+      if (role !== "user" && role !== "assistant" && role !== "tool" && role !== "system") continue;
+      if (row.display_kind === "hidden") continue;
+      const at = timestampOf(row, now);
+      const rowId = typeof row.row_id === "number" ? row.row_id : void 0;
+      if (role === "tool") {
+        const name = row.name ?? "tool";
+        const item = {
+          kind: "tool",
+          id: historyId("tool"),
+          at,
+          toolId: row.tool_call_id ?? "",
+          name,
+          summary: row.context ?? "",
+          // History does not record whether a call failed; the summary line is
+          // the only signal and it is a display projection, not a verdict.
+          status: "ok",
+          args: row.args ?? void 0,
+          resultText: row.content === void 0 ? void 0 : textOf(row.content)
+        };
+        items.push(item);
+        continue;
+      }
+      const text = typeof row.text === "string" ? row.text : "";
+      if (role === "user") {
+        if (!text.trim()) continue;
+        items.push({ kind: "user", id: historyId("user"), at, text, rowId });
+        continue;
+      }
+      if (role === "assistant") {
+        const reasoning = assistantReasoning(row);
+        if (!text.trim() && !reasoning) continue;
+        const item = {
+          kind: "assistant",
+          id: historyId("assistant"),
+          at,
+          text,
+          reasoning,
+          streaming: false,
+          rowId
+        };
+        items.push(item);
+        continue;
+      }
+      if (!text.trim()) continue;
+      items.push({ kind: "notice", id: historyId("notice"), at, text, tone: "info" });
+    }
+    return items;
+  }
+  function timelineFromSnapshot(snapshot, now = Date.now()) {
+    const info = snapshot.info ?? {};
+    const todo = reduceTodos(null, snapshot.todo_state ?? {}) ?? null;
+    return {
+      items: projectHistory(snapshot.messages ?? [], now),
+      meta: {
+        runtimeId: snapshot.session_id ?? null,
+        storedId: snapshot.stored_session_id ?? null,
+        title: info.title ?? "",
+        model: info.model ?? "",
+        provider: info.provider ?? "",
+        reasoningEffort: info.reasoning_effort ?? "",
+        running: Boolean(info.running ?? snapshot.running),
+        usage: info.usage ?? null,
+        status: "",
+        connected: true,
+        todo
+      }
+    };
+  }
+
   // src/core/sessions.ts
   var emptyMultiState = { sessions: {}, tabs: [], activeKey: null };
   var draftCounter = 0;
@@ -903,7 +1137,13 @@ var HermesBubbles = (() => {
     const sessions = { ...state.sessions };
     if (nextKey !== key) delete sessions[key];
     const connected = options.connected ?? existing?.meta.connected ?? timeline.meta.connected;
-    sessions[nextKey] = { items, meta: { ...timeline.meta, connected } };
+    sessions[nextKey] = {
+      items,
+      // A snapshot without `todo_state` must not wipe the live list the panel is
+      // already showing: the resume response only carries one when the backend
+      // has a stored snapshot.
+      meta: { ...timeline.meta, connected, todo: timeline.meta.todo ?? existing?.meta.todo ?? null }
+    };
     const tabs = state.tabs.map(
       (tab) => tab.key === key ? {
         ...tab,
@@ -1432,6 +1672,8 @@ var HermesBubbles = (() => {
      * the page mounts again.
      */
     pendingCards = [];
+    /** Desktop-notification sink (see `setNoticeSink`). */
+    noticeSink = null;
     /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
     http = null;
     setHttpFetcher(fn) {
@@ -1490,6 +1732,10 @@ var HermesBubbles = (() => {
     }
     setServerRequestSink(sink) {
       this.cardSink = sink;
+    }
+    /** Desktop-notification sink. Set by the page; absent means "notify nobody". */
+    setNoticeSink(sink) {
+      this.noticeSink = sink;
     }
     /**
      * Every RPC goes through here so the socket is guaranteed before the frame is
@@ -2022,7 +2268,43 @@ var HermesBubbles = (() => {
     handleEvent(event) {
       if (event.type === "gateway.ready") this.dedupe.setEpoch(this.client.epoch);
       const result = routeEvent(this.state, event, this.dedupe);
-      if (result.applied && result.state !== this.state) this.setState(result.state);
+      if (result.applied && result.state !== this.state) {
+        this.setState(result.state);
+        this.announce(event, result.state);
+      }
+    }
+    /**
+     * Tell the page a turn ended, so it can decide whether to ring the desktop.
+     *
+     * The text is taken from the timeline rather than the frame: `message.complete`
+     * often carries an empty `text` because the reply already streamed, and a
+     * notification whose body is blank is worse than none.
+     */
+    announce(event, state) {
+      if (!this.noticeSink) return;
+      if (event.type !== "message.complete" && event.type !== "error") return;
+      const key = event.session_id ? state.tabs.find((tab) => tab.runtimeId === event.session_id)?.key ?? null : state.activeKey;
+      if (!key) return;
+      const timeline = state.sessions[key];
+      if (!timeline) return;
+      const p = event.payload ?? {};
+      const textOf2 = (value) => typeof value === "string" ? value : "";
+      let fallback = "";
+      for (let i = timeline.items.length - 1; i >= 0; i -= 1) {
+        const item = timeline.items[i];
+        if (item?.kind === "assistant") {
+          fallback = item.text;
+          break;
+        }
+      }
+      const error = event.type === "error" ? textOf2(p.message) || "error" : textOf2(p.error) || textOf2(p.failure_reason) || void 0;
+      this.noticeSink({
+        kind: "complete",
+        sessionKey: key,
+        title: timeline.meta.title,
+        text: textOf2(p.text) || fallback,
+        error
+      });
     }
     handleServerRequest(request) {
       if (!HANDLED_REQUESTS.has(request.method)) return false;
@@ -2033,6 +2315,15 @@ var HermesBubbles = (() => {
         respond: request.respond,
         fail: request.fail
       };
+      this.noticeSink?.({
+        kind: "request",
+        method: request.method,
+        params: request.params,
+        requestId: request.id,
+        sessionKey: typeof request.params.session_id === "string" ? request.params.session_id : "",
+        title: "",
+        text: ""
+      });
       if (!this.cardSink) {
         this.pendingCards.push(card);
         return true;
@@ -3216,6 +3507,131 @@ var HermesBubbles = (() => {
       ) : null
     );
   }
+  function SubagentsCard({ sdk, item, locale }) {
+    const { React } = sdk;
+    const { useState } = sdk.hooks;
+    const t = messagesFor(locale);
+    const [open, setOpen] = useState(false);
+    const [expanded, setExpanded] = useState({});
+    const done = item.children.filter((child) => isSubagentTerminal(child.status)).length;
+    const total = item.children.length;
+    const running = item.children.some((child) => child.status === "running" || child.status === "queued");
+    const failed = item.children.some(
+      (child) => child.status === "failed" || child.status === "error" || child.status === "timeout"
+    );
+    const stripe = failed ? "var(--color-destructive)" : running ? "var(--color-ring)" : "var(--color-border)";
+    const toneOf = (status) => {
+      if (status === "running") return "var(--color-primary)";
+      if (status === "failed" || status === "error" || status === "timeout" || status === "interrupted") {
+        return "var(--color-destructive)";
+      }
+      return "var(--color-muted-foreground)";
+    };
+    const childRow = (child) => {
+      const isOpen = Boolean(expanded[child.key]);
+      const duration = formatDuration(child.durationS);
+      const detail = [];
+      if (child.lastTool) {
+        detail.push(
+          React.createElement(
+            "div",
+            { key: "tool", className: "hb-sub-detail" },
+            `${toolLabel(child.lastTool)}${child.toolCount ? ` \xB7 ${t.subagentTools(child.toolCount)}` : ""}`
+          )
+        );
+      }
+      if (child.thinking && !child.summary) {
+        detail.push(
+          React.createElement("div", { key: "think", className: "hb-sub-detail hb-sub-think" }, child.thinking)
+        );
+      }
+      if (child.progress.length) {
+        detail.push(
+          React.createElement(
+            "div",
+            { key: "progress", className: "hb-sub-progress" },
+            child.progress.map(
+              (line, index) => React.createElement("div", { key: `p${index}`, className: "hb-sub-line" }, line)
+            )
+          )
+        );
+      }
+      if (child.summary) {
+        detail.push(
+          React.createElement("div", { key: "summary", className: "hb-sub-summary" }, child.summary)
+        );
+      }
+      if (child.tokens && (child.tokens.input || child.tokens.output)) {
+        detail.push(
+          React.createElement(
+            "div",
+            { key: "tokens", className: "hb-sub-detail" },
+            `${child.tokens.input ?? 0} \u2192 ${child.tokens.output ?? 0} tokens`
+          )
+        );
+      }
+      const files = [...child.filesWritten ?? [], ...child.filesRead ?? []];
+      if (files.length) {
+        detail.push(
+          React.createElement(
+            "div",
+            { key: "files", className: "hb-sub-detail" },
+            files.slice(0, 6).join(" \xB7 ") + (files.length > 6 ? " \u2026" : "")
+          )
+        );
+      }
+      return React.createElement(
+        "div",
+        { key: child.key, className: "hb-sub-child", "data-hb": "subagent-row", "data-status": child.status },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "hb-sub-row",
+            "data-hb": "subagent-row-toggle",
+            "data-open": isOpen ? "true" : "false",
+            "aria-expanded": isOpen ? "true" : "false",
+            onClick: () => setExpanded((prev) => ({ ...prev, [child.key]: !prev[child.key] }))
+          },
+          React.createElement("span", { className: "hb-sub-caret" }, isOpen ? "\u25BE" : "\u25B8"),
+          React.createElement("span", { className: "hb-sub-index" }, `${child.taskIndex + 1}`),
+          React.createElement(
+            "span",
+            { className: "hb-sub-goal hb-truncate" },
+            child.goal || t.subagents
+          ),
+          React.createElement(
+            "span",
+            { className: "hb-sub-status", style: { color: toneOf(child.status) } },
+            t.subagentStatus(child.status)
+          ),
+          child.status === "running" ? React.createElement("span", { className: "hb-caret hb-sub-live", style: { color: "var(--color-primary)" } }, "\u25CF") : null,
+          duration ? React.createElement("span", { className: "hb-sub-duration tabular-nums" }, duration) : null
+        ),
+        isOpen && detail.length ? React.createElement("div", { className: "hb-sub-body" }, detail) : null
+      );
+    };
+    return React.createElement(
+      "div",
+      { className: "hb-sub-card", "data-hb": "subagent-card", style: { borderLeftColor: stripe } },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "hb-sub-head",
+          "data-hb": "subagent-toggle",
+          "data-open": open ? "true" : "false",
+          "aria-expanded": open ? "true" : "false",
+          onClick: () => setOpen((v) => !v)
+        },
+        React.createElement("span", { className: "hb-sub-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", { className: "hb-sub-title" }, t.subagents),
+        running ? React.createElement("span", { className: "hb-caret hb-sub-live", style: { color: "var(--color-primary)" } }, "\u25CF") : null,
+        React.createElement("span", { className: "hb-sub-count" }, t.subagentProgress(done, total))
+      ),
+      open ? React.createElement("div", { className: "hb-sub-list" }, item.children.map(childRow)) : null
+    );
+  }
   function NoticeRow({ sdk, item }) {
     const { React } = sdk;
     return React.createElement(
@@ -3246,6 +3662,8 @@ var HermesBubbles = (() => {
         });
       case "tool":
         return ToolCard({ sdk, item });
+      case "subagents":
+        return SubagentsCard({ sdk, item, locale });
       case "notice":
         return NoticeRow({ sdk, item });
     }
@@ -4492,6 +4910,22 @@ var HermesBubbles = (() => {
           "button",
           {
             type: "button",
+            title: props.notifyBlocked ? t.notifyBlockedTitle : props.notifyOn ? t.notifyOnTitle : t.notifyOffTitle,
+            "data-hb": "notify-toggle",
+            "data-on": props.notifyOn ? "true" : "false",
+            className: "cursor-pointer px-2 py-1 text-xs leading-none",
+            style: {
+              color: props.notifyOn ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
+              opacity: props.notifyBlocked ? 0.45 : 1
+            },
+            onClick: props.onToggleNotify
+          },
+          props.notifyOn ? "\u25C9" : "\u25CC"
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
             title: t.newChat,
             "data-hb": "tab-new",
             className: "cursor-pointer px-2 py-1 text-sm leading-none",
@@ -4518,6 +4952,240 @@ var HermesBubbles = (() => {
         )
       )
     );
+  }
+
+  // src/ui/TodoPanel.ts
+  var OPEN_STORAGE_KEY = "hb-todo-open";
+  function glyphFor(status) {
+    if (status === "completed") return "\u2713";
+    if (status === "cancelled") return "\u2715";
+    if (status === "in_progress") return "\u25D0";
+    return "\u25CB";
+  }
+  function countDone(todos) {
+    return todos.filter((todo) => todo.status === "completed").length;
+  }
+  function tree(todos) {
+    const ids = new Set(todos.map((todo) => todo.id));
+    const children = /* @__PURE__ */ new Map();
+    const roots = [];
+    for (const todo of todos) {
+      if (todo.parent && ids.has(todo.parent)) {
+        const bucket = children.get(todo.parent) ?? [];
+        bucket.push(todo);
+        children.set(todo.parent, bucket);
+      } else {
+        roots.push(todo);
+      }
+    }
+    return { roots, children };
+  }
+  function TodoPanel({ sdk, locale, todo }) {
+    const { React } = sdk;
+    const { useState } = sdk.hooks;
+    const t = messagesFor(locale);
+    const [open, setOpen] = useState(() => {
+      try {
+        return window.localStorage.getItem(OPEN_STORAGE_KEY) !== "off";
+      } catch {
+        return true;
+      }
+    });
+    if (!todo || !todo.todos.length) return null;
+    const done = countDone(todo.todos);
+    const total = todo.todos.length;
+    const { roots, children } = tree(todo.todos);
+    const toggle = () => {
+      const next = !open;
+      setOpen(next);
+      try {
+        window.localStorage.setItem(OPEN_STORAGE_KEY, next ? "on" : "off");
+      } catch {
+      }
+    };
+    const row = (entry, depth) => {
+      const status = entry.status || "pending";
+      return React.createElement(
+        "div",
+        {
+          key: entry.id,
+          className: depth ? "hb-todo-row hb-todo-child" : "hb-todo-row",
+          "data-hb": "todo-row",
+          "data-status": status
+        },
+        React.createElement(
+          "span",
+          {
+            className: status === "in_progress" ? "hb-todo-glyph hb-todo-active shrink-0" : "hb-todo-glyph shrink-0",
+            "aria-hidden": "true"
+          },
+          glyphFor(status)
+        ),
+        React.createElement("span", { className: "hb-todo-text" }, entry.content)
+      );
+    };
+    const body = () => {
+      const rows = [];
+      for (const rootEntry of roots) {
+        rows.push(row(rootEntry, 0));
+        for (const child of children.get(rootEntry.id) ?? []) rows.push(row(child, 1));
+      }
+      return rows;
+    };
+    return React.createElement(
+      "div",
+      { className: "hb-todo-panel", "data-hb": "todo-panel" },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "hb-todo-head",
+          "data-hb": "todo-toggle",
+          "data-open": open ? "true" : "false",
+          "aria-expanded": open ? "true" : "false",
+          onClick: toggle
+        },
+        React.createElement("span", { className: "hb-todo-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", { className: "hb-todo-title" }, t.todos),
+        React.createElement("span", { className: "hb-todo-count" }, t.todoProgress(done, total))
+      ),
+      open ? React.createElement("div", { className: "hb-todo-list", role: "list" }, body()) : null
+    );
+  }
+
+  // src/core/notify.ts
+  function shouldNotify(gate) {
+    return gate.enabled && gate.permission === "granted" && gate.background;
+  }
+  var NOTIFY_STORAGE_KEY = "hb-notify";
+  function storedEnabled(raw) {
+    return raw !== "off";
+  }
+  function flatten2(text, limit = 120) {
+    const plain = text.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]*)`/g, "$1").replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/^#{1,6}\s*/gm, "").replace(/[*_~>|]+/g, "").replace(/\s+/g, " ").trim();
+    if (plain.length <= limit) return plain;
+    return `${plain.slice(0, limit - 1)}\u2026`;
+  }
+  function firstString(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+  function requestNotice(method, params, t, tag) {
+    if (method === "approval") {
+      const detail = firstString(params.description) || firstString(params.command) || firstString(params.tool_name);
+      return {
+        kind: "approval",
+        title: t.notifyApprovalTitle,
+        body: flatten2(detail, 160) || firstString(params.tool_name) || t.approvalTitle,
+        tag
+      };
+    }
+    const questions = Array.isArray(params.questions) ? params.questions : [];
+    const first = questions[0];
+    const question = firstString(first?.question) || firstString(params.question);
+    const extra = questions.length > 1 ? ` (+${questions.length - 1})` : "";
+    return {
+      kind: "clarify",
+      title: t.notifyClarifyTitle,
+      body: question ? `${flatten2(question, 140)}${extra}` : t.clarifyTitle,
+      tag
+    };
+  }
+  function completionNotice(result, t, tag) {
+    const error = (result.error ?? "").trim();
+    if (error) {
+      return {
+        kind: "failed",
+        title: t.notifyFailedTitle,
+        body: flatten2(error, 160) || t.notifyFailedTitle,
+        tag
+      };
+    }
+    const body = flatten2(result.text ?? "", 160);
+    const name = (result.title ?? "").trim();
+    return {
+      kind: "done",
+      title: name ? `${t.notifyDoneTitle} \xB7 ${name}` : t.notifyDoneTitle,
+      body: body || t.notifyDoneTitle,
+      tag
+    };
+  }
+
+  // src/ui/notifier.ts
+  function notificationSupported() {
+    return typeof window !== "undefined" && "Notification" in window;
+  }
+  function notificationPermission() {
+    if (!notificationSupported()) return "denied";
+    return window.Notification.permission;
+  }
+  async function requestNotificationPermission() {
+    if (!notificationSupported()) return "denied";
+    const current = notificationPermission();
+    if (current !== "default") return current;
+    try {
+      return await window.Notification.requestPermission();
+    } catch {
+      return "denied";
+    }
+  }
+  function notifyEnabled() {
+    try {
+      return storedEnabled(window.localStorage.getItem(NOTIFY_STORAGE_KEY));
+    } catch {
+      return true;
+    }
+  }
+  function setNotifyEnabled(enabled) {
+    try {
+      window.localStorage.setItem(NOTIFY_STORAGE_KEY, enabled ? "on" : "off");
+    } catch {
+    }
+  }
+  function windowBackgrounded() {
+    if (typeof document === "undefined") return false;
+    if (document.visibilityState === "hidden") return true;
+    return !document.hasFocus();
+  }
+  function specFor(notice, locale) {
+    const t = messagesFor(locale);
+    if (notice.kind === "request") {
+      const method = notice.method === "clarify" ? "clarify" : "approval";
+      const tag = `hb-request-${notice.requestId ?? notice.sessionKey}`;
+      return requestNotice(method, notice.params ?? {}, t, tag);
+    }
+    return completionNotice(
+      { title: notice.title, text: notice.text, error: notice.error },
+      t,
+      `hb-turn-${notice.sessionKey}`
+    );
+  }
+  function raiseNotification(spec) {
+    if (!notificationSupported()) return;
+    try {
+      const notification = new window.Notification(spec.title, {
+        body: spec.body,
+        tag: spec.tag,
+        // Clicking the notification should land on the chat, not just dismiss it.
+        requireInteraction: false
+      });
+      notification.onclick = () => {
+        try {
+          window.focus();
+        } finally {
+          notification.close();
+        }
+      };
+    } catch {
+    }
+  }
+  function maybeNotify(notice, locale) {
+    const gate = {
+      enabled: notifyEnabled(),
+      permission: notificationPermission(),
+      background: windowBackgrounded()
+    };
+    if (!shouldNotify(gate)) return;
+    raiseNotification(specFor(notice, locale));
   }
 
   // src/ui/useLocale.ts
@@ -4588,13 +5256,19 @@ var HermesBubbles = (() => {
     const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
     const [reasoning, setReasoning] = useState("medium");
     const [editing, setEditing] = useState(null);
+    const [notifyOn, setNotifyOn] = useState(() => notifyEnabled());
+    const [notifyPermission, setNotifyPermission] = useState(
+      () => notificationPermission()
+    );
     const bottomRef = useRef(null);
     const scrollerRef = useRef(null);
+    const localeRef = useRef(locale);
     const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
     const timeline = activeTimeline(state);
     const running = runningKeys(state);
     useEffect(() => {
       controller.setLocale(locale);
+      localeRef.current = locale;
     }, [controller, locale]);
     useEffect(() => {
       controller.setHttpFetcher((path, init) => sdk.fetchJSON(path, init));
@@ -4604,6 +5278,7 @@ var HermesBubbles = (() => {
       controller.setServerRequestSink((card) => {
         setCards((prev) => prev.some((c) => c.id === card.id) ? prev : [...prev, card]);
       });
+      controller.setNoticeSink((notice) => maybeNotify(notice, localeRef.current));
       const parked = controller.takeParkedCards();
       if (parked.length) {
         setCards((prev) => {
@@ -4615,6 +5290,7 @@ var HermesBubbles = (() => {
       controller.commandsCatalog().then((raw) => setCatalog(entriesFromCatalog(raw))).catch(() => setCatalog([]));
       return () => {
         controller.setServerRequestSink(null);
+        controller.setNoticeSink(null);
         chatController.release();
       };
     }, [controller]);
@@ -4636,13 +5312,26 @@ var HermesBubbles = (() => {
     const onSend = useCallback(
       (text) => {
         setError(null);
+        if (notifyOn && notificationPermission() === "default") {
+          void requestNotificationPermission().then(setNotifyPermission);
+        }
         const target = editing;
         setEditing(null);
         const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
         run.then(() => setAttachments([])).catch((err) => setError(err instanceof Error ? err.message : String(err)));
       },
-      [controller, editing]
+      [controller, editing, notifyOn]
     );
+    const onToggleNotify = useCallback(() => {
+      if (notifyOn) {
+        setNotifyEnabled(false);
+        setNotifyOn(false);
+        return;
+      }
+      setNotifyEnabled(true);
+      setNotifyOn(true);
+      void requestNotificationPermission().then(setNotifyPermission);
+    }, [notifyOn]);
     const onEdit = useCallback((itemId, text) => {
       setError(null);
       setEditing({ itemId, text });
@@ -4765,6 +5454,9 @@ var HermesBubbles = (() => {
         activeKey: state.activeKey,
         runningKeys: running,
         historyOpen,
+        notifyOn,
+        notifyBlocked: notifyPermission === "denied",
+        onToggleNotify,
         onFocus: (key) => controller.focusSession(key),
         onClose: (key) => controller.closeSession(key),
         onNew,
@@ -4852,6 +5544,17 @@ var HermesBubbles = (() => {
               scrollerRef
             })
           ),
+          // The task list sits directly above the composer: it describes what the
+          // running turn is doing, and that is where the eye already is.
+          timeline.meta.todo ? React.createElement(
+            "div",
+            { className: "px-4", style: { paddingBottom: "0.375rem" } },
+            React.createElement(
+              "div",
+              { className: "mx-auto", style: { maxWidth: "860px" } },
+              React.createElement(TodoPanel, { sdk, locale, todo: timeline.meta.todo })
+            )
+          ) : null,
           React.createElement(Composer, {
             sdk,
             locale,

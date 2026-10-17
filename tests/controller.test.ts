@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatController } from "../src/app/controller";
+import type { TurnNotice } from "../src/core/notify";
 import { activeTimeline, timelineOf } from "../src/core/sessions";
 
 /**
@@ -1056,5 +1057,69 @@ describe("server requests across a route change", () => {
 
     expect(seen).toEqual(["approval"]);
     expect(controller.takeParkedCards()).toHaveLength(0);
+  });
+});
+
+describe("desktop notifications", () => {
+  it("announces a finished turn with the reply's own text", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen();
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    socket.event("message.delta", { text: "答完了" }, { session_id: "runtime-1", seq: 1 });
+    socket.event("message.complete", { text: "", status: "complete" }, { session_id: "runtime-1", seq: 2 });
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: "complete", sessionKey: "runtime-1", text: "答完了" });
+    expect(notices[0]?.error).toBeUndefined();
+  });
+
+  it("carries the turn's failure reason so the notification can say it failed", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen();
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    socket.event("message.complete", { text: "", status: "error", error: "upstream 429" }, {
+      session_id: "runtime-1",
+      seq: 1,
+    });
+
+    expect(notices[0]).toMatchObject({ kind: "complete", error: "upstream 429" });
+  });
+
+  it("announces a pending approval even when the page will answer it", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen({ onServerRequest: () => undefined });
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "req-9",
+      method: "approval",
+      params: { session_id: "runtime-1", command: "rm -rf build" },
+    });
+
+    expect(notices[0]).toMatchObject({ kind: "request", method: "approval", requestId: "req-9" });
+  });
+
+  it("stays silent for turns of sessions no tab owns", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen();
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    socket.event("message.complete", { text: "别人的会话", status: "complete" }, { session_id: "other", seq: 1 });
+    expect(notices).toHaveLength(0);
+  });
+
+  it("does not notify for a turn that was already delivered once", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen();
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    const frame = { text: "一次", status: "complete" };
+    socket.event("message.complete", frame, { session_id: "runtime-1", seq: 7 });
+    socket.event("message.complete", frame, { session_id: "runtime-1", seq: 7 });
+
+    expect(notices).toHaveLength(1);
   });
 });

@@ -31,6 +31,7 @@ import {
   type MultiState,
 } from "../core/sessions";
 import { parseCommandInput, parseDispatch, type DispatchResult } from "../core/slash";
+import type { TurnNotice } from "../core/notify";
 import type { TimelineItem } from "../core/types";
 import type { ServerRequest } from "../gateway/channel";
 import { GatewayClient, type ConnectionState } from "../gateway/client";
@@ -78,6 +79,8 @@ export class ChatController {
    * the page mounts again.
    */
   private pendingCards: ServerRequestCard[] = [];
+  /** Desktop-notification sink (see `setNoticeSink`). */
+  private noticeSink: ((notice: TurnNotice) => void) | null = null;
   /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
   private http: ((path: string, init: RequestInit) => Promise<unknown>) | null = null;
 
@@ -148,6 +151,11 @@ export class ChatController {
 
   setServerRequestSink(sink: ((card: ServerRequestCard) => void) | null): void {
     this.cardSink = sink;
+  }
+
+  /** Desktop-notification sink. Set by the page; absent means "notify nobody". */
+  setNoticeSink(sink: ((notice: TurnNotice) => void) | null): void {
+    this.noticeSink = sink;
   }
 
   /**
@@ -827,7 +835,49 @@ export class ChatController {
     // The store decides which timeline owns the event and drops what no tab
     // owns; this method only does the connection-level bookkeeping.
     const result = routeEvent(this.state, event, this.dedupe);
-    if (result.applied && result.state !== this.state) this.setState(result.state);
+    if (result.applied && result.state !== this.state) {
+      this.setState(result.state);
+      this.announce(event, result.state);
+    }
+  }
+
+  /**
+   * Tell the page a turn ended, so it can decide whether to ring the desktop.
+   *
+   * The text is taken from the timeline rather than the frame: `message.complete`
+   * often carries an empty `text` because the reply already streamed, and a
+   * notification whose body is blank is worse than none.
+   */
+  private announce(event: GatewayEvent, state: MultiState): void {
+    if (!this.noticeSink) return;
+    if (event.type !== "message.complete" && event.type !== "error") return;
+    const key = event.session_id
+      ? (state.tabs.find((tab) => tab.runtimeId === event.session_id)?.key ?? null)
+      : state.activeKey;
+    if (!key) return;
+    const timeline = state.sessions[key];
+    if (!timeline) return;
+    const p = event.payload ?? {};
+    const textOf = (value: unknown): string => (typeof value === "string" ? value : "");
+    let fallback = "";
+    for (let i = timeline.items.length - 1; i >= 0; i -= 1) {
+      const item = timeline.items[i];
+      if (item?.kind === "assistant") {
+        fallback = item.text;
+        break;
+      }
+    }
+    const error =
+      event.type === "error"
+        ? textOf(p.message) || "error"
+        : textOf(p.error) || textOf(p.failure_reason) || undefined;
+    this.noticeSink({
+      kind: "complete",
+      sessionKey: key,
+      title: timeline.meta.title,
+      text: textOf(p.text) || fallback,
+      error,
+    });
   }
 
   private handleServerRequest(request: ServerRequest): boolean {
@@ -839,6 +889,17 @@ export class ChatController {
       respond: request.respond,
       fail: request.fail,
     };
+    // Announce before parking: a request that arrives while the page is unmounted
+    // still needs the human, and that is exactly the case the window is not on.
+    this.noticeSink?.({
+      kind: "request",
+      method: request.method as "approval" | "clarify",
+      params: request.params,
+      requestId: request.id,
+      sessionKey: typeof request.params.session_id === "string" ? request.params.session_id : "",
+      title: "",
+      text: "",
+    });
     if (!this.cardSink) {
       // Between mounts (the user switched dashboard tabs). Park it rather than
       // letting the channel fail it with -32601: this client IS going to answer.

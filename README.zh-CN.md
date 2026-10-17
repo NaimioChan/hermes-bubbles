@@ -24,7 +24,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页。
 git clone https://github.com/NaimioChan/hermes-bubbles
 cd hermes-bubbles
 npm install --include=dev      # Windows 上 NODE_ENV=production 会静默跳过 devDependencies
-npm test                       # 397 项，纯逻辑，不起浏览器
+npm test                       # 431 项，纯逻辑，不起浏览器
 npm run install-plugin         # 构建 + 装进 $HERMES_HOME/plugins/hermes-bubbles/dashboard/
 hermes plugins enable hermes-bubbles
 ```
@@ -55,6 +55,9 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 |---|---|---|
 | 流式气泡 | 已交付 | `message.delta` 逐块追加到当前气泡，末尾带闪烁光标 |
 | 工具卡片 | 已交付 | 按 `tool_id` 配对 start/complete，运行中展开、完成后折叠，左侧状态色条 |
+| 任务清单 | 已交付 | `todo.updated` 的整体快照渲染成输入框上方的面板，可折叠且记住折叠状态。工具调用会把当前文本气泡封口，工具之后的文字开新气泡落在卡片下方，不会继续往卡片上方的气泡里灌 |
+| 子代理 | 已交付 | 一次 `delegate_task` 一张卡：并发子代理是卡上的多行，每行可再展开看最后调用的工具、近期进度与总结 |
+| 桌面通知 | 已交付 | 待审批/待回答与回合完成时弹系统通知，**仅在窗口不在前台时**；开关在页签栏，首次发送时申请权限 |
 | 历史恢复 | 已交付 | `session.history` 投影成同样的气泡结构，刷新后不丢 |
 | 审批卡片 | 已交付 | `approval` 服务端请求渲染成允许/拒绝按钮，直接回帧 |
 | clarify 卡片 | 已交付 | 同上，按 `qid` 回答案 |
@@ -134,8 +137,8 @@ src/
 
 ## 验证
 
-- `npm test` — 397 项 / 19 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
-- `node scripts/verify.mjs` — 64 项，对**真实仪表盘**跑真模型真往返：插件接管 `/chat`、内置 xterm 消失、流式气泡、Markdown 结构与配色实测、页签与历史面板布局、改名/删除落库、切页后页签保持、状态灯、定位轨道、空状态可输入等等。跑不了的项（模型这次没输出代码块）标 `SKIP` 而不是空转通过。
+- `npm test` — 431 项 / 21 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
+- `node scripts/verify.mjs` — 72 项，对**真实仪表盘**跑真模型真往返：插件接管 `/chat`、内置 xterm 消失、流式气泡、Markdown 结构与配色实测、页签与历史面板布局、改名/删除落库、切页后页签保持、状态灯、定位轨道、空状态可输入等等。跑不了的项（模型这次没输出代码块）标 `SKIP` 而不是空转通过。
 
 - `node scripts/verify-clarify.mjs` — 审批/选择题卡片的按需检查，单独放：它依赖模型主动调用 `clarify`，进主验收会随机失败。
 

@@ -18,6 +18,10 @@ export interface TabStripProps {
   activeKey: string | null;
   runningKeys: readonly string[];
   historyOpen: boolean;
+  /** Desktop notifications: on/off switch, and whether the browser blocks them. */
+  notifyOn: boolean;
+  notifyBlocked: boolean;
+  onToggleNotify: () => void;
   onFocus: (key: string) => void;
   onClose: (key: string) => void;
   onNew: () => void;
@@ -96,6 +100,22 @@ export function TabStrip(props: TabStripProps) {
     React.createElement(
       "div",
       { className: "flex shrink-0 items-center gap-1" },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          title: props.notifyBlocked ? t.notifyBlockedTitle : props.notifyOn ? t.notifyOnTitle : t.notifyOffTitle,
+          "data-hb": "notify-toggle",
+          "data-on": props.notifyOn ? "true" : "false",
+          className: "cursor-pointer px-2 py-1 text-xs leading-none",
+          style: {
+            color: props.notifyOn ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
+            opacity: props.notifyBlocked ? 0.45 : 1,
+          },
+          onClick: props.onToggleNotify,
+        },
+        props.notifyOn ? "◉" : "◌",
+      ),
       React.createElement(
         "button",
         {

@@ -25,6 +25,15 @@ import { LocatorRail } from "./LocatorRail";
 import { ModelPicker } from "./ModelPicker";
 import { ApprovalCard, ClarifyCard, approvalResult } from "./RequestCards";
 import { TabStrip } from "./TabStrip";
+import { TodoPanel } from "./TodoPanel";
+import {
+  maybeNotify,
+  notificationPermission,
+  notifyEnabled,
+  requestNotificationPermission,
+  setNotifyEnabled,
+} from "./notifier";
+import type { NotificationPermissionKind } from "../core/notify";
 import { runningLabel } from "./format";
 import { useLocale } from "./useLocale";
 import type { HermesPluginSdk } from "./sdk";
@@ -78,8 +87,18 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // Set while an existing user message is being rewritten: Send then truncates
   // and resubmits instead of appending.
   const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
+  // Desktop notifications: the switch is persisted, the permission is the
+  // browser's, and the two are independent (a blocked browser keeps the switch
+  // on but nothing fires).
+  const [notifyOn, setNotifyOn] = useState<boolean>(() => notifyEnabled());
+  const [notifyPermission, setNotifyPermission] = useState<NotificationPermissionKind>(() =>
+    notificationPermission(),
+  );
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // The boot effect must not re-run when the language changes, but the notice
+  // sink needs the current language: keep it in a ref it reads at call time.
+  const localeRef = useRef<Locale>(locale);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const timeline = activeTimeline(state);
@@ -89,6 +108,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // locale in step with what is on screen.
   useEffect(() => {
     controller.setLocale(locale);
+    localeRef.current = locale;
   }, [controller, locale]);
 
   // Stored-session rename/delete go through REST, and the only auth-aware
@@ -103,6 +123,11 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.setServerRequestSink((card) => {
       setCards((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
     });
+    // The controller decides *when* a turn ended or a request is pending; the
+    // language and the browser permission are page concerns, so the page turns
+    // one into the other. `maybeNotify` then applies the "only while in the
+    // background" rule.
+    controller.setNoticeSink((notice) => maybeNotify(notice, localeRef.current));
     // Anything that asked while this page was unmounted (the user was on another
     // dashboard tab) is replayed now rather than having been refused.
     const parked = controller.takeParkedCards();
@@ -131,6 +156,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
     return () => {
       controller.setServerRequestSink(null);
+      controller.setNoticeSink(null);
       // Release the reference only. Disposing here is what closed the socket on
       // every route change and lost the open sessions.
       chatController.release();
@@ -169,6 +195,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onSend = useCallback(
     (text: string) => {
       setError(null);
+      // A send is a user gesture — the only reliable moment to ask the browser
+      // for notification permission. Without it the switch reads "on" while
+      // nothing could ever fire.
+      if (notifyOn && notificationPermission() === "default") {
+        void requestNotificationPermission().then(setNotifyPermission);
+      }
       const target = editing;
       setEditing(null);
       const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
@@ -176,8 +208,20 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         .then(() => setAttachments([]))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
     },
-    [controller, editing],
+    [controller, editing, notifyOn],
   );
+
+  /** Flip the notification switch; turning it on asks the browser for permission. */
+  const onToggleNotify = useCallback(() => {
+    if (notifyOn) {
+      setNotifyEnabled(false);
+      setNotifyOn(false);
+      return;
+    }
+    setNotifyEnabled(true);
+    setNotifyOn(true);
+    void requestNotificationPermission().then(setNotifyPermission);
+  }, [notifyOn]);
 
   /** Start editing a sent message: put its text in the composer. */
   const onEdit = useCallback((itemId: string, text: string) => {
@@ -360,6 +404,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       activeKey: state.activeKey,
       runningKeys: running,
       historyOpen,
+      notifyOn,
+      notifyBlocked: notifyPermission === "denied",
+      onToggleNotify,
       onFocus: (key: string) => controller.focusSession(key),
       onClose: (key: string) => controller.closeSession(key),
       onNew,
@@ -455,6 +502,20 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           scrollerRef,
         }),
         ),
+
+        // The task list sits directly above the composer: it describes what the
+        // running turn is doing, and that is where the eye already is.
+        timeline.meta.todo
+          ? React.createElement(
+              "div",
+              { className: "px-4", style: { paddingBottom: "0.375rem" } },
+              React.createElement(
+                "div",
+                { className: "mx-auto", style: { maxWidth: "860px" } },
+                React.createElement(TodoPanel, { sdk, locale, todo: timeline.meta.todo }),
+              ),
+            )
+          : null,
 
         React.createElement(Composer, {
           sdk,

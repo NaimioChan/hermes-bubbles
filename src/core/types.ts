@@ -121,7 +121,94 @@ export interface NoticeItem {
   tone: "info" | "error";
 }
 
-export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem;
+/**
+ * One item of the agent's task list (`todo.updated`).
+ *
+ * `status` is `pending` / `in_progress` / `completed` / `cancelled`; `parent`
+ * nests a subtask under another item's id. Both come straight off the wire —
+ * this model does not interpret them beyond ordering the tree.
+ */
+export interface TodoEntry {
+  id: string;
+  content: string;
+  status: string;
+  parent?: string;
+}
+
+/** The authoritative task-list snapshot; `revision` is monotonic per session. */
+export interface TodoState {
+  todos: TodoEntry[];
+  revision: number;
+}
+
+/** One delegated child (`subagent.*` frames). */
+export type SubagentStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "error"
+  | "timeout"
+  | "interrupted";
+
+export const TERMINAL_SUBAGENT_STATUSES: readonly SubagentStatus[] = [
+  "completed",
+  "failed",
+  "error",
+  "timeout",
+  "interrupted",
+];
+
+export function isSubagentTerminal(status: SubagentStatus): boolean {
+  return TERMINAL_SUBAGENT_STATUSES.includes(status);
+}
+
+export interface SubagentChild {
+  /** `subagent_id` when the emitter sends one, else `idx:<task_index>`. */
+  key: string;
+  taskIndex: number;
+  goal: string;
+  status: SubagentStatus;
+  model?: string;
+  toolsets?: string[];
+  toolCount: number;
+  /** Name of the last tool the child called. */
+  lastTool: string;
+  /** Recent progress lines (batched tool names), newest last, capped. */
+  progress: string[];
+  /** Latest reasoning fragment; only the tail is kept. */
+  thinking: string;
+  summary?: string;
+  durationS?: number;
+  tokens?: { input?: number; output?: number };
+  filesRead?: string[];
+  filesWritten?: string[];
+  /** Last few tool results the child produced (`output_tail`). */
+  outputTail?: { tool: string; preview: string; isError: boolean }[];
+}
+
+/**
+ * One `delegate_task` batch: the children spawned by a single call.
+ *
+ * Batch identity is `delegation_id` when the backend sends one; older emitters
+ * omit it, so a batch also absorbs a frame whose `subagent_id` it already holds,
+ * or — failing both — the last batch that still has an unclaimed slot.
+ */
+export interface SubagentsItem {
+  kind: "subagents";
+  id: string;
+  at: Millis;
+  /** `delegation_id`, or `flat:<parent_id>` when the backend sent none. */
+  batchKey: string;
+  /** Children the batch announced (`task_count`). */
+  taskCount: number;
+  depth?: number;
+  children: SubagentChild[];
+  /** Set once every child reached a terminal status. */
+  finishedAt?: Millis;
+}
+
+export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem | SubagentsItem;
 
 /** Everything the page needs that is not part of the transcript. */
 export interface SessionMeta {
@@ -137,6 +224,8 @@ export interface SessionMeta {
   /** Last `status.update.text`, cleared when the turn ends. */
   status: string;
   connected: boolean;
+  /** Latest `todo.updated` snapshot (or the resumed session's `todo_state`). */
+  todo: TodoState | null;
 }
 
 export const emptyMeta: SessionMeta = {
@@ -150,6 +239,7 @@ export const emptyMeta: SessionMeta = {
   usage: null,
   status: "",
   connected: false,
+  todo: null,
 };
 
 export interface Timeline {

@@ -8,6 +8,29 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 21:10 · hermes · 文本气泡归位、任务清单、子代理、桌面通知
+
+- 改：`core/reduce.ts`（`tool.start` 封口当前气泡、`todo.updated` 归一化 + revision 单调、六个 `subagent.*` 聚合成一张批次卡）；`core/types.ts`（`TodoState` / `SubagentChild` / `SubagentsItem` / `SessionMeta.todo`）；`core/history.ts` + `core/sessions.ts` 投影 resume 的 `todo_state`，且没有快照的 resume 不清空实时清单；新增 `core/notify.ts`、`ui/notifier.ts`、`ui/TodoPanel.ts`；`ui/Bubble.ts` 加 `SubagentsCard`；`ui/ChatPage.ts` 在 Composer 上方挂面板 + 通知 sink + 发送时申请权限；`ui/TabStrip.ts` 加通知开关；`app/controller.ts` 加 `setNoticeSink` 与 `TurnNotice`
+- 验证：`npm test` 431 passed（21 文件）；`npx tsc --noEmit` 干净；`node scripts/audit-classes.mjs` 153/153；`node scripts/verify.mjs` 72/72（真模型跑出 2 条 todo、1 个子代理，折叠往返实测）
+- 遗留：桌面通知的实际弹出在 headless 里验不了（`document.hasFocus()` 恒真、权限拿不到手势），策略与文案只有单测覆盖，实机需最小化窗口试一次
+
+### 为什么工具之后的文字会钻进上面的气泡
+
+`openAssistant()` 只看「最后一个 assistant 是否还在 streaming」。`tool.start` 只往时间线尾部推卡片，没有封口，于是工具返回后的 `message.delta` 仍然 find 到卡片之前那个气泡并继续追加——用户看到的就是最终回答被一串工具卡压在下面，还和工具调用之前的话混在同一格里。
+
+修法是在 `tool.start` 里先 `sealAssistant()`：一段文本段落在工具调用处结束，工具之后的文字新开一个气泡落在卡片下方。`message.complete` 不用改，它本来就用 `openAssistant` 定位本轮气泡，封口后自然指向新气泡。
+
+### 子代理为什么是一张批次卡
+
+后端给的是六种 `subagent.*` 帧，每帧都带 `subagent_id` / `delegation_id` / `task_index` / `task_count`。一次 `delegate_task` 的子代理共享 `delegation_id`，并发时它们的帧交错到达。若一个子代理一张卡，三路并发就会在时间线上插出三张卡，还和父会话自己的工具卡互相穿插。
+
+聚合键优先 `subagent_id`（每帧都有，晚到的帧必定回到自己的行），其次 `delegation_id`（同批），两者都缺的旧 emitter 并进「最后一个没满员、没结束」的卡。全部子代理进终态才给批次盖 `finishedAt`，之后的新一批不会再被并进来。
+
+### 通知什么时候不该响
+
+窗口在前台时不弹。判断用 `visibilityState === "hidden" || !document.hasFocus()`——`visibilityState` 单独不够，窗口被别的应用盖住时它仍是 `visible`。权限只能在用户手势里申请，所以开关点击和首次发送是两个申请点；被浏览器拒绝时开关置灰但保留用户的选择，不反复弹。
+
+
 ## 2026-10-17 15:10 · hermes · 历史状态灯、跨路由保持会话
 
 - 改：新增 `src/app/persistent.ts` + `tests/persistent.test.ts`；`ChatPage.ts` 改用文档级 controller、卸载只 release、重挂载回放暂存请求；`controller.ts` 加 `pendingCards` / `takeParkedCards`；`HistoryPanel.ts` 加状态灯（`openStoredIds` / `busyStoredIds`）；`style.css` `.hb-dot`

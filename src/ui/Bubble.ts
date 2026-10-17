@@ -9,7 +9,8 @@
  * (DESIGN.md). Nothing in this file may hardcode a hex value.
  */
 
-import type { AssistantItem, NoticeItem, ToolItem, UserItem } from "../core/types";
+import type { AssistantItem, NoticeItem, SubagentChild, SubagentsItem, TimelineItem, ToolItem, UserItem } from "../core/types";
+import { isSubagentTerminal } from "../core/types";
 import { formatElapsed, messageStamp, messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
 import { Markdown } from "./Markdown";
@@ -17,7 +18,7 @@ import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
 
 interface BubbleProps {
   sdk: HermesPluginSdk;
-  item: UserItem | AssistantItem | ToolItem | NoticeItem;
+  item: TimelineItem;
   locale: Locale;
   /** Per-message actions. Absent on a transcript that cannot act (a read-only view). */
   onEdit?: (itemId: string, text: string) => void;
@@ -446,6 +447,156 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
   );
 }
 
+/**
+ * One `delegate_task` batch.
+ *
+ * Collapsed, it is one line: how many children, how many finished. Expanded, one
+ * row per child with its goal and status, and each row expands again onto what
+ * that child is actually doing — the last tool, the recent progress lines and,
+ * once it finished, its summary. Concurrency is the reason this is a batch card
+ * instead of one card per child: three children running at once must read as
+ * three rows on one card, not three cards interleaved with the parent's tools.
+ */
+function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: SubagentsItem; locale: Locale }) {
+  const { React } = sdk;
+  const { useState } = sdk.hooks;
+  const t = messagesFor(locale);
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const done = item.children.filter((child) => isSubagentTerminal(child.status)).length;
+  const total = item.children.length;
+  const running = item.children.some((child) => child.status === "running" || child.status === "queued");
+  const failed = item.children.some(
+    (child) => child.status === "failed" || child.status === "error" || child.status === "timeout",
+  );
+  const stripe = failed
+    ? "var(--color-destructive)"
+    : running
+      ? "var(--color-ring)"
+      : "var(--color-border)";
+
+  const toneOf = (status: string): string => {
+    if (status === "running") return "var(--color-primary)";
+    if (status === "failed" || status === "error" || status === "timeout" || status === "interrupted") {
+      return "var(--color-destructive)";
+    }
+    return "var(--color-muted-foreground)";
+  };
+
+  const childRow = (child: SubagentChild) => {
+    const isOpen = Boolean(expanded[child.key]);
+    const duration = formatDuration(child.durationS);
+    const detail: Array<ReturnType<typeof React.createElement>> = [];
+    if (child.lastTool) {
+      detail.push(
+        React.createElement(
+          "div",
+          { key: "tool", className: "hb-sub-detail" },
+          `${toolLabel(child.lastTool)}${child.toolCount ? ` · ${t.subagentTools(child.toolCount)}` : ""}`,
+        ),
+      );
+    }
+    if (child.thinking && !child.summary) {
+      detail.push(
+        React.createElement("div", { key: "think", className: "hb-sub-detail hb-sub-think" }, child.thinking),
+      );
+    }
+    if (child.progress.length) {
+      detail.push(
+        React.createElement(
+          "div",
+          { key: "progress", className: "hb-sub-progress" },
+          child.progress.map((line, index) =>
+            React.createElement("div", { key: `p${index}`, className: "hb-sub-line" }, line),
+          ),
+        ),
+      );
+    }
+    if (child.summary) {
+      detail.push(
+        React.createElement("div", { key: "summary", className: "hb-sub-summary" }, child.summary),
+      );
+    }
+    if (child.tokens && (child.tokens.input || child.tokens.output)) {
+      detail.push(
+        React.createElement(
+          "div",
+          { key: "tokens", className: "hb-sub-detail" },
+          `${child.tokens.input ?? 0} → ${child.tokens.output ?? 0} tokens`,
+        ),
+      );
+    }
+    const files = [...(child.filesWritten ?? []), ...(child.filesRead ?? [])];
+    if (files.length) {
+      detail.push(
+        React.createElement(
+          "div",
+          { key: "files", className: "hb-sub-detail" },
+          files.slice(0, 6).join(" · ") + (files.length > 6 ? " …" : ""),
+        ),
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { key: child.key, className: "hb-sub-child", "data-hb": "subagent-row", "data-status": child.status },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "hb-sub-row",
+          "data-hb": "subagent-row-toggle",
+          "data-open": isOpen ? "true" : "false",
+          "aria-expanded": isOpen ? "true" : "false",
+          onClick: () => setExpanded((prev) => ({ ...prev, [child.key]: !prev[child.key] })),
+        },
+        React.createElement("span", { className: "hb-sub-caret" }, isOpen ? "▾" : "▸"),
+        React.createElement("span", { className: "hb-sub-index" }, `${child.taskIndex + 1}`),
+        React.createElement(
+          "span",
+          { className: "hb-sub-goal hb-truncate" },
+          child.goal || t.subagents,
+        ),
+        React.createElement("span", { className: "hb-sub-status", style: { color: toneOf(child.status) } },
+          t.subagentStatus(child.status)),
+        child.status === "running"
+          ? React.createElement("span", { className: "hb-caret hb-sub-live", style: { color: "var(--color-primary)" } }, "●")
+          : null,
+        duration
+          ? React.createElement("span", { className: "hb-sub-duration tabular-nums" }, duration)
+          : null,
+      ),
+      isOpen && detail.length
+        ? React.createElement("div", { className: "hb-sub-body" }, detail)
+        : null,
+    );
+  };
+
+  return React.createElement(
+    "div",
+    { className: "hb-sub-card", "data-hb": "subagent-card", style: { borderLeftColor: stripe } },
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "hb-sub-head",
+        "data-hb": "subagent-toggle",
+        "data-open": open ? "true" : "false",
+        "aria-expanded": open ? "true" : "false",
+        onClick: () => setOpen((v: boolean) => !v),
+      },
+      React.createElement("span", { className: "hb-sub-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-sub-title" }, t.subagents),
+      running
+        ? React.createElement("span", { className: "hb-caret hb-sub-live", style: { color: "var(--color-primary)" } }, "●")
+        : null,
+      React.createElement("span", { className: "hb-sub-count" }, t.subagentProgress(done, total)),
+    ),
+    open ? React.createElement("div", { className: "hb-sub-list" }, item.children.map(childRow)) : null,
+  );
+}
+
 function NoticeRow({ sdk, item }: { sdk: HermesPluginSdk; item: NoticeItem }) {
   const { React } = sdk;
   return React.createElement(
@@ -477,6 +628,8 @@ export function Bubble(props: BubbleProps) {
       });
     case "tool":
       return ToolCard({ sdk, item });
+    case "subagents":
+      return SubagentsCard({ sdk, item, locale });
     case "notice":
       return NoticeRow({ sdk, item });
   }

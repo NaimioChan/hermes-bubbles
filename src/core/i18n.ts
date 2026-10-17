@@ -116,6 +116,23 @@ export interface Messages {
   queued: string;
   fileReadFailed: string;
   sessionNotReady: string;
+  /** The task-list panel (`todo.updated`). */
+  todos: string;
+  todoProgress: (done: number, total: number) => string;
+  todoEmpty: string;
+  /** Delegated children (`subagent.*`). */
+  subagents: string;
+  subagentProgress: (done: number, total: number) => string;
+  subagentTools: (n: number) => string;
+  subagentStatus: (status: string) => string;
+  /** Desktop notifications. */
+  notifyApprovalTitle: string;
+  notifyClarifyTitle: string;
+  notifyDoneTitle: string;
+  notifyFailedTitle: string;
+  notifyOnTitle: string;
+  notifyOffTitle: string;
+  notifyBlockedTitle: string;
 }
 
 const EN: Messages = {
@@ -187,6 +204,29 @@ const EN: Messages = {
   queued: "Queued — sends when the current turn ends",
   fileReadFailed: "Could not read the file",
   sessionNotReady: "Session is not ready yet",
+  todos: "Tasks",
+  todoProgress: (done, total) => `${done}/${total} done`,
+  todoEmpty: "No tasks yet",
+  subagents: "Subagents",
+  subagentProgress: (done, total) => `${done}/${total} finished`,
+  subagentTools: (n) => `${n} tools`,
+  subagentStatus: (status) =>
+    ({
+      queued: "queued",
+      running: "running",
+      completed: "done",
+      failed: "failed",
+      error: "error",
+      timeout: "timed out",
+      interrupted: "interrupted",
+    })[status] ?? status,
+  notifyApprovalTitle: "Hermes needs your confirmation",
+  notifyClarifyTitle: "Hermes is asking a question",
+  notifyDoneTitle: "Hermes finished",
+  notifyFailedTitle: "Hermes stopped with an error",
+  notifyOnTitle: "Desktop notifications on (only while this window is in the background)",
+  notifyOffTitle: "Desktop notifications off",
+  notifyBlockedTitle: "Notifications are blocked in the browser settings",
 };
 
 const ZH: Messages = {
@@ -258,6 +298,29 @@ const ZH: Messages = {
   queued: "已排队，当前任务结束后发送",
   fileReadFailed: "读取文件失败",
   sessionNotReady: "会话尚未建立",
+  todos: "任务清单",
+  todoProgress: (done, total) => `完成 ${done}/${total}`,
+  todoEmpty: "暂无任务",
+  subagents: "子代理",
+  subagentProgress: (done, total) => `完成 ${done}/${total}`,
+  subagentTools: (n) => `${n} 次工具`,
+  subagentStatus: (status) =>
+    ({
+      queued: "排队中",
+      running: "运行中",
+      completed: "已完成",
+      failed: "失败",
+      error: "出错",
+      timeout: "超时",
+      interrupted: "已中断",
+    })[status] ?? status,
+  notifyApprovalTitle: "Hermes 需要你确认",
+  notifyClarifyTitle: "Hermes 有问题要问你",
+  notifyDoneTitle: "Hermes 已完成",
+  notifyFailedTitle: "Hermes 出错停止",
+  notifyOnTitle: "桌面通知已开启（仅窗口不在前台时弹出）",
+  notifyOffTitle: "桌面通知已关闭",
+  notifyBlockedTitle: "浏览器里已阻止通知权限",
 };
 
 const CATALOG: Record<Locale, Messages> = { en: EN, zh: ZH };

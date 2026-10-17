@@ -9,6 +9,7 @@
  */
 
 import type { AssistantItem, Timeline, TimelineItem, ToolItem, Usage } from "./types";
+import { reduceTodos } from "./reduce";
 
 export interface TranscriptMessage {
   role?: string;
@@ -145,6 +146,8 @@ export interface LiveSessionSnapshot {
   messages?: TranscriptMessage[];
   message_count?: number;
   running?: boolean | null;
+  /** Authoritative todo snapshot; attached by the backend on resume. */
+  todo_state?: { todos?: unknown; revision?: number } | null;
   info?: {
     model?: string;
     provider?: string;
@@ -158,6 +161,9 @@ export interface LiveSessionSnapshot {
 /** Build a full timeline from a `session.create` / `session.resume` / `session.activate` result. */
 export function timelineFromSnapshot(snapshot: LiveSessionSnapshot, now = Date.now()): Timeline {
   const info = snapshot.info ?? {};
+  // Go through the same reducer the live event does, so a resumed session's
+  // panel and a streaming one's cannot disagree about what a snapshot means.
+  const todo = reduceTodos(null, (snapshot.todo_state ?? {}) as Record<string, unknown>) ?? null;
   return {
     items: projectHistory(snapshot.messages ?? [], now),
     meta: {
@@ -171,6 +177,7 @@ export function timelineFromSnapshot(snapshot: LiveSessionSnapshot, now = Date.n
       usage: info.usage ?? null,
       status: "",
       connected: true,
+      todo,
     },
   };
 }

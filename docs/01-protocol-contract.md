@@ -121,7 +121,10 @@
 
 ### `session.resume`
 
-参数 `{session_id, omit_messages?, inline_images?}` → `LiveSessionSnapshot`（含 `messages`、`info`、`running`、`pending_approval`、`open_requests`）。
+参数 `{session_id, omit_messages?, inline_images?}` → `LiveSessionSnapshot`（含 `messages`、`info`、`running`、`pending_approval`、`open_requests`、`todo_state`）。
+
+`todo_state` = `{todos:[…], revision}`，与 `todo.updated` 同形，只在后端有持久化快照时出现
+（`tool_progress._attach_todo_state`）。没这个键**不代表**清单为空，插件不能拿它清空面板。
 
 ### `prompt.submit`
 
@@ -276,7 +279,30 @@
 | `tool.complete` | `{tool_id, name, args?, duration_s?, result?, summary?, result_text?, inline_diff?, todos?, labels?}` | 按 `tool_id` 找到卡片，填结果，标 ok/error |
 | `tool.generating` | `{name}` | 忽略（只是模型在吐参数） |
 | `tool.output_risk` | `{tool_id, name, risk, findings, redacted}` | 在工具卡上加一条风险提示 |
-| `todo.updated` | `{...}` | 忽略（v0.1 不做 todo 面板） |
+| `todo.updated` | `{todos:[{id, content, status, parent?}], revision}` | **整体替换**任务清单（`meta.todo`）。`revision` 单调，旧值丢弃 |
+
+### 子代理（`delegate_task` 的每个子任务）
+
+六个事件共用一套 payload（`tui_gateway/contracts/events.py:SubagentEventPayload`，生产者在
+`tools/delegate_tool_progress.py::_ChildProgressRelay`）。**同一次 `delegate_task` 的所有子代理是一张卡**，
+并发子代理只是这张卡上的多行。
+
+| 事件 | 何时来 | 插件行为 |
+|---|---|---|
+| `subagent.spawn_requested` | `delegate_task` 接受了子目标，子代理还没启动 | 建卡片行，状态 `queued` |
+| `subagent.start` | 子代理开始跑 | 该行 → `running` |
+| `subagent.progress` | 子代理的工具名批处理（每 5 个一批） | 追加一行进度（保留最近 6 行） |
+| `subagent.thinking` | 子代理的推理片段（隐藏推理时后端不给 `text`） | 只留尾部 240 字，一行预览 |
+| `subagent.tool` | 子代理调了一个工具 | 更新 `lastTool`、`tool_count`，追加预览 |
+| `subagent.complete` | 子代理结束（终态含 `completed/failed/error/timeout/interrupted`） | 该行 → 终态，填 `summary`、`duration_seconds`、`input/output_tokens`、`output_tail` |
+
+公共字段：`goal` `task_count` `task_index`，以及可选的身份字段 `subagent_id` `parent_id`
+`child_session_id` `delegation_id` `depth` `model` `toolsets`。
+
+**聚合规则**（`src/core/reduce.ts::upsertSubagent`）：先按 `subagent_id` 找已有的行（每一帧都带它，
+所以晚到的帧一定回到自己的行），再按 `delegation_id` 找同批次的卡，两者都没有的旧 emitter
+则并进「最后一个还没收满、还没结束」的卡。全部子代理进入终态时把卡标为 `finishedAt`，
+之后的新一批不会再并进去。
 
 ### 生命周期
 
@@ -291,6 +317,11 @@
 ### 客户端本地（非后端）
 
 这些是客户端自己造的，用来统一走同一条 handler 流：`gateway.reconnecting`、`gateway.protocol_error`、`gateway.closed`。
+
+桌面通知不是协议的一部分：controller 把「回合结束」与「有审批/提问待回答」包成 `TurnNotice`
+交给页面（`setNoticeSink`），页面按 `document.visibilityState` / `hasFocus` 与浏览器通知权限决定
+是否调 `new Notification(...)`（`src/core/notify.ts` 定策略，`src/ui/notifier.ts` 碰 DOM）。
+窗口在前台时不弹，这是唯一的行为约定。
 
 ## 6. 服务端请求（要插件回答）
 
@@ -348,6 +379,9 @@ grep -n "class StreamDeltaPayload" -A 8 tui_gateway/contracts/events.py
 grep -n "class MessageCompletePayload" -A 22 tui_gateway/contracts/events.py
 grep -n "class ToolStartPayload" -A 12 tui_gateway/contracts/events.py
 grep -n "class ToolCompletePayload" -A 14 tui_gateway/contracts/events.py
+grep -n "class TodoUpdatedPayload" -A 6 tui_gateway/contracts/events.py
+grep -n "class SubagentEventPayload" -A 30 tui_gateway/contracts/events.py
+grep -n "todo_state" tui_gateway/contracts/sessions.py
 ```
 
 把结果与本文档 §4–§7 对照；有出入就改文档，再改代码。

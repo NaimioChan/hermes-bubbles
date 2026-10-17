@@ -17,6 +17,9 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Streaming bubbles | Done | `message.delta` appends into the current bubble, with a blinking caret while the turn is live |
 | Markdown replies | Done | Headings, bold/italic/strikethrough, inline code, fenced blocks with a language label and copy button, nested lists, quotes, rules, tables with alignment. Unclosed fences and lone `**` render as half-finished rather than throwing |
 | Tool cards | Done | `tool_id` pairs start/complete; collapsed by default, showing type, summary and duration |
+| Task list | Done | `todo.updated` snapshots render as a panel above the composer; collapsible, and the collapsed state is remembered. A tool call seals the reply bubble, so text after a tool starts a new bubble below the card instead of growing the one above it |
+| Subagents | Done | One `delegate_task` batch is one card: concurrent children are rows on it, each expanding to its last tool, recent progress and summary |
+| Desktop notifications | Done | Pending approvals/clarify and finished turns ring the desktop **only while the window is in the background**; switch in the tab strip, permission asked on the first send |
 | Session history | Done | `session.history` projects into the same bubble structure, so a reload keeps the conversation |
 | Session management | Done | Rename and delete from the history panel, which also shows a status lamp: lit = open in a tab, pulsing = running |
 | Tabs survive navigation | Done | Switch to Config and back — open tabs and in-flight replies are still there |
@@ -124,9 +127,9 @@ The protocol is Hermes' internal implementation with no OpenAPI description, so 
 ## Verification
 
 ```bash
-npm test                  # 397 unit tests, 19 files, no browser
+npm test                  # 431 unit tests, 21 files, no browser
 npm run typecheck         # tsc --noEmit
-node scripts/verify.mjs   # 64 checks against a real dashboard (needs one on 9119)
+node scripts/verify.mjs   # 72 checks against a real dashboard (needs one on 9119)
 node scripts/audit-classes.mjs
 ```
 

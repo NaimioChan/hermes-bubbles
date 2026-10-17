@@ -8,7 +8,22 @@
  * Field semantics are documented in `docs/01-protocol-contract.md` §5.
  */
 
-import { findTool, lastAssistant, openAssistant, type AssistantItem, type Timeline, type TimelineItem, type ToolItem, type Usage } from "./types";
+import {
+  findTool,
+  isSubagentTerminal,
+  lastAssistant,
+  openAssistant,
+  type AssistantItem,
+  type SubagentChild,
+  type SubagentStatus,
+  type SubagentsItem,
+  type Timeline,
+  type TimelineItem,
+  type TodoEntry,
+  type TodoState,
+  type ToolItem,
+  type Usage,
+} from "./types";
 
 export interface GatewayEvent {
   type: string;
@@ -102,6 +117,223 @@ function toolFromStart(event: GatewayEvent): ToolItem {
     args: p.args,
     argsText: str(p.args_text) || undefined,
   };
+}
+
+/** How many progress lines a child keeps; older ones scroll out of the card. */
+const MAX_PROGRESS_LINES = 6;
+
+function todoEntry(value: unknown): TodoEntry | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const id = str(row.id);
+  const content = str(row.content);
+  if (!id || !content) return null;
+  const parent = str(row.parent);
+  return { id, content, status: (str(row.status) || "pending").toLowerCase(), parent: parent || undefined };
+}
+
+/**
+ * Apply a `todo.updated` snapshot.
+ *
+ * The frame is the WHOLE list, not a diff, and `revision` is monotonic per
+ * session — a late frame from a reconnect must not roll the panel backwards.
+ * `{todos: [], revision: 0}` is the unused store's placeholder rather than a
+ * clear, so it is ignored the same way the backend ignores it.
+ */
+export function reduceTodos(current: TodoState | null, payload: Record<string, unknown>): TodoState | undefined {
+  if (!Array.isArray(payload.todos)) return undefined;
+  const revision = num(payload.revision) ?? 0;
+  if (current && revision < current.revision) return undefined;
+  const todos = payload.todos.map(todoEntry).filter((entry): entry is TodoEntry => entry !== null);
+  if (!todos.length && revision === 0) return undefined;
+  return { todos, revision };
+}
+
+const SUBAGENT_STATUSES: readonly SubagentStatus[] = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "error",
+  "timeout",
+  "interrupted",
+];
+
+function subagentStatusOf(value: unknown): SubagentStatus | undefined {
+  const raw = str(value).toLowerCase();
+  return (SUBAGENT_STATUSES as readonly string[]).includes(raw) ? (raw as SubagentStatus) : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  return out.length ? out : undefined;
+}
+
+function outputTailOf(value: unknown): SubagentChild["outputTail"] {
+  if (!Array.isArray(value)) return undefined;
+  const rows = value
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+    .map((row) => ({
+      tool: str(row.tool),
+      preview: str(row.preview),
+      isError: Boolean(row.is_error),
+    }))
+    .filter((row) => row.tool || row.preview);
+  return rows.length ? rows.slice(-6) : undefined;
+}
+
+function batchKeyOf(p: Record<string, unknown>): string {
+  const delegation = str(p.delegation_id);
+  if (delegation) return delegation;
+  const parent = str(p.parent_id);
+  return parent ? `flat:${parent}` : "flat";
+}
+
+function mergeChild(
+  prev: SubagentChild | null,
+  type: string,
+  p: Record<string, unknown>,
+  key: string,
+  taskIndex: number,
+): SubagentChild {
+  const base: SubagentChild =
+    prev ??
+    {
+      key,
+      taskIndex,
+      goal: "",
+      status: "queued",
+      toolCount: 0,
+      lastTool: "",
+      progress: [],
+      thinking: "",
+    };
+  const next: SubagentChild = { ...base, progress: base.progress.slice() };
+
+  const goal = str(p.goal);
+  if (goal) next.goal = goal;
+  const model = str(p.model);
+  if (model) next.model = model;
+  const toolsets = stringList(p.toolsets);
+  if (toolsets) next.toolsets = toolsets;
+  const toolCount = num(p.tool_count);
+  if (toolCount !== undefined) next.toolCount = toolCount;
+  const filesRead = stringList(p.files_read);
+  if (filesRead) next.filesRead = filesRead;
+  const filesWritten = stringList(p.files_written);
+  if (filesWritten) next.filesWritten = filesWritten;
+  const input = num(p.input_tokens);
+  const output = num(p.output_tokens);
+  if (input !== undefined || output !== undefined) {
+    next.tokens = { input: input ?? base.tokens?.input, output: output ?? base.tokens?.output };
+  }
+
+  switch (type) {
+    case "subagent.start":
+      next.status = "running";
+      break;
+    case "subagent.progress": {
+      const line = str(p.text);
+      if (line) next.progress = [...base.progress, line].slice(-MAX_PROGRESS_LINES);
+      break;
+    }
+    case "subagent.thinking": {
+      // Only the tail matters: a child's reasoning arrives in hundreds of
+      // fragments and the card shows what it is on right now, not a transcript.
+      const text = str(p.text);
+      if (text) next.thinking = text.length > 240 ? `…${text.slice(-240)}` : text;
+      break;
+    }
+    case "subagent.tool": {
+      const tool = str(p.tool_name) || str(p.name);
+      if (tool) next.lastTool = tool;
+      const preview = str(p.tool_preview) || str(p.text);
+      if (preview) next.progress = [...base.progress, preview].slice(-MAX_PROGRESS_LINES);
+      break;
+    }
+    case "subagent.complete": {
+      next.status = subagentStatusOf(p.status) ?? "completed";
+      const summary = str(p.summary) || str(p.text);
+      if (summary) next.summary = summary;
+      const duration = num(p.duration_seconds);
+      if (duration !== undefined) next.durationS = duration;
+      const tail = outputTailOf(p.output_tail);
+      if (tail) next.outputTail = tail;
+      break;
+    }
+    default:
+      // `subagent.spawn_requested`: the child is announced but not yet running.
+      break;
+  }
+  return next;
+}
+
+/**
+ * Fold one `subagent.*` frame into the timeline.
+ *
+ * A batch is one `delegate_task` call, so all of its children belong on one
+ * card; concurrent children merely fill rows on that card. Identity comes from
+ * `subagent_id` first (every frame carries it, so a late frame always finds its
+ * own row), then `delegation_id` (the batch the backend stamped), then — for
+ * emitters that send neither — the newest batch that still has an empty slot.
+ */
+export function upsertSubagent(items: readonly TimelineItem[], event: GatewayEvent): TimelineItem[] {
+  const p = event.payload ?? {};
+  const type = event.type;
+  const key = str(p.subagent_id) || `idx:${num(p.task_index) ?? 0}`;
+  const batchKey = batchKeyOf(p);
+  const taskCount = num(p.task_count) ?? 1;
+  const taskIndex = num(p.task_index) ?? 0;
+  const anonymous = batchKey.startsWith("flat");
+
+  let found = -1;
+  for (let i = items.length - 1; i >= 0 && found < 0; i -= 1) {
+    const item = items[i];
+    if (item?.kind !== "subagents") continue;
+    if (item.children.some((child) => child.key === key)) found = i;
+  }
+  if (found < 0) {
+    for (let i = items.length - 1; i >= 0 && found < 0; i -= 1) {
+      const item = items[i];
+      if (item?.kind !== "subagents") continue;
+      if (anonymous) {
+        // No batch id: only a batch that is still taking children can be this
+        // one, so a second wave never merges into a finished card.
+        if (!item.finishedAt && item.children.length < item.taskCount) found = i;
+      } else if (item.batchKey === batchKey && !item.finishedAt) {
+        found = i;
+      }
+    }
+  }
+
+  const prev = found >= 0 ? (items[found] as SubagentsItem) : null;
+  const base: SubagentsItem =
+    prev ?? {
+      kind: "subagents",
+      id: nextId("subagents"),
+      at: Date.now(),
+      batchKey,
+      taskCount,
+      depth: num(p.depth),
+      children: [],
+    };
+  const existing = base.children.find((child) => child.key === key) ?? null;
+  const child = mergeChild(existing, type, p, key, taskIndex);
+  const children = existing
+    ? base.children.map((row) => (row.key === key ? child : row))
+    : [...base.children, child].sort((a, b) => a.taskIndex - b.taskIndex);
+  const done = children.length > 0 && children.every((row) => isSubagentTerminal(row.status));
+  const next: SubagentsItem = {
+    ...base,
+    children,
+    finishedAt: done ? (base.finishedAt ?? Date.now()) : undefined,
+  };
+
+  if (found < 0) return [...items, next];
+  const copy = items.slice();
+  copy[found] = next;
+  return copy;
 }
 
 function resultTextOf(p: Record<string, unknown>): string | undefined {
@@ -273,7 +505,11 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
 
     case "tool.start": {
       const tool = toolFromStart(event);
-      return { items: [...items, tool], meta };
+      // A call ends the current text segment. The model's words before a tool
+      // and its words after it are two bubbles with the card between them;
+      // without this seal the post-tool reply keeps appending to the bubble
+      // above the card, so the answer looks buried under the tool calls.
+      return { items: [...sealAssistant(items), tool], meta };
     }
 
     case "tool.complete": {
@@ -315,6 +551,20 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       const updated: ToolItem = { ...existing, risk: str(p.risk) || "unknown" };
       return { items: items.map((item) => (item === existing ? updated : item)), meta };
     }
+
+    case "todo.updated": {
+      const todo = reduceTodos(meta.todo, p);
+      if (todo === undefined) return timeline;
+      return { items, meta: { ...meta, todo } };
+    }
+
+    case "subagent.spawn_requested":
+    case "subagent.start":
+    case "subagent.progress":
+    case "subagent.thinking":
+    case "subagent.tool":
+    case "subagent.complete":
+      return { items: upsertSubagent(items, event), meta };
 
     case "status.update": {
       const text = str(p.text);

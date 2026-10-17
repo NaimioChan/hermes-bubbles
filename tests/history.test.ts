@@ -125,4 +125,21 @@ describe("timelineFromSnapshot", () => {
     const timeline = timelineFromSnapshot({ session_id: "s", running: false, info: { running: true } });
     expect(timeline.meta.running).toBe(true);
   });
+
+  it("restores the task list from todo_state", () => {
+    const timeline = timelineFromSnapshot({
+      session_id: "s",
+      todo_state: { revision: 3, todos: [{ id: "a", content: "写测试", status: "completed" }] },
+    });
+    expect(timeline.meta.todo).toEqual({
+      revision: 3,
+      todos: [{ id: "a", content: "写测试", status: "completed", parent: undefined }],
+    });
+  });
+
+  it("leaves the task list null when the snapshot has none", () => {
+    expect(timelineFromSnapshot({ session_id: "s" }).meta.todo).toBeNull();
+    // The unused store's placeholder is not a list either.
+    expect(timelineFromSnapshot({ session_id: "s", todo_state: { revision: 0, todos: [] } }).meta.todo).toBeNull();
+  });
 });

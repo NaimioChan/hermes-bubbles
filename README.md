@@ -1,176 +1,158 @@
 # hermes-bubbles
 
-Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页。
+A bubble-style chat page for the **Hermes** web dashboard (`hermes dashboard`).
 
-内置的 `/chat` 是一个 xterm.js 终端，接 `/api/pty` 跑真的 TUI，所以它天生是终端长相：字符流、等宽字体、没有消息边界。这个插件把 `/chat` 换成原生气泡消息流——助手回答、工具调用、审批卡片各自成块，流式输出直接长在当前气泡里。
+The built-in `/chat` is an xterm.js terminal wired to `/api/pty`, running the real TUI — so it looks like a terminal: a character stream, monospace text, no message boundaries. This plugin replaces it with a native message stream where each reply, tool call and approval prompt is its own block, and streaming output grows inside the bubble it belongs to.
 
-数据不走 PTY，走仪表盘自带的 `tui_gateway` JSON-RPC WebSocket（`/api/ws`），也就是桌面端用的那条。所以拿到的是结构化事件：`message.delta` 是一个 token 块，`tool.start` / `tool.complete` 是一对可配对的调用，`approval` 是要用户回答的请求。
+It does not go through a PTY. It speaks the dashboard's own `tui_gateway` JSON-RPC socket (`/api/ws`) — the same channel the desktop app uses — so it receives structured events: `message.delta` is a token chunk, `tool.start`/`tool.complete` are a pair to correlate, `approval` is a request that must be answered.
 
-![气泡聊天页](docs/assets/chat-bubbles.png)
+![hermes-bubbles chat page](docs/assets/hero.png)
 
-打开的会话是顶部一排页签，历史会话在右侧面板（可收起），中间是转写区：气泡、工具卡片、半显式可展开的思考过程，底部输入框带附件、模型、思考强度与实时指标。
+Open sessions are tabs along the top, stored sessions live in a collapsible panel on the right, and the transcript in the middle holds bubbles, tool cards, a semi-explicit reasoning block, and a locator rail for jumping back to something you said earlier.
 
-![斜杠命令菜单](docs/assets/slash-menu.png)
+## Features
 
-## 快速开始
+| Feature | Status | Notes |
+|---|---|---|
+| Streaming bubbles | Done | `message.delta` appends into the current bubble, with a blinking caret while the turn is live |
+| Markdown replies | Done | Headings, bold/italic/strikethrough, inline code, fenced blocks with a language label and copy button, nested lists, quotes, rules, tables with alignment. Unclosed fences and lone `**` render as half-finished rather than throwing |
+| Tool cards | Done | `tool_id` pairs start/complete; collapsed by default, showing type, summary and duration |
+| Session history | Done | `session.history` projects into the same bubble structure, so a reload keeps the conversation |
+| Session management | Done | Rename and delete from the history panel, which also shows a status lamp: lit = open in a tab, pulsing = running |
+| Tabs survive navigation | Done | Switch to Config and back — open tabs and in-flight replies are still there |
+| Approval & clarify cards | Done | Both render from the server's own `choices`; `multi_select` is joined into the string the wire expects; one option per line |
+| Message actions | Done | Timestamp, branch in new chat, copy, regenerate — matching the desktop app |
+| Edit a sent message | Done | Edit a user bubble and sending rewrites the turn from there, truncating what followed |
+| Mid-turn input | Done | Send while a turn runs; the backend queues, steers or redirects, and the result is reported inline |
+| Multi-session | Done | One socket carries several sessions; events are routed by `session_id`, each tab has its own timeline |
+| Locator rail | Done | One tick per user message down the right edge; hover to preview, click to jump |
+| Slash commands | Done | `/` opens a menu; the catalog is fetched once and filtered locally, not truncated |
+| Attachments | Done | `+`, drag-drop and paste; routed to `image.attach_bytes` / `pdf.attach` / `file.attach` |
+| Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers |
+| Live metrics | Done | Context bar and percentage, cache hit rate, output speed, cost, updating from `session.usage` |
+| Interface language | Done | English by default; follows the dashboard's language switch without a reload |
+
+## Requirements
+
+- Hermes Agent web dashboard, tested against **0.22.2**
+- Node 20+ to build (developed on 24.21.0)
+
+## Install
 
 ```bash
-npm install --include=dev      # Windows 上 NODE_ENV=production 会静默跳过 devDependencies
-npm test                       # 109 项，纯逻辑，不起浏览器
-npm run install-plugin         # 构建 + 装进 $HERMES_HOME/plugins/hermes-bubbles/dashboard/
+git clone https://github.com/NaimioChan/hermes-bubbles
+cd hermes-bubbles
+npm install --include=dev      # on Windows, NODE_ENV=production silently skips devDependencies
+npm test
+npm run install-plugin         # builds and copies into $HERMES_HOME/plugins/hermes-bubbles/dashboard/
 ```
 
-装完打开 `http://127.0.0.1:9119/chat`。仪表盘不用重启，但插件是**用户插件**，得先在 `config.yaml` 的 `plugins.enabled` 里登记：
+Then register it — a user plugin is discovered but **not loaded** until it is named in `plugins.enabled`:
 
 ```bash
-hermes config set plugins.enabled '["homeassistant","hermes-bubbles"]'
+hermes config set plugins.enabled '["hermes-bubbles"]'
 curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/plugins/rescan
 ```
 
-（`<token>` 从仪表盘页面源码里的 `window.__HERMES_SESSION_TOKEN__` 取。）
+`<token>` is `window.__HERMES_SESSION_TOKEN__` from the dashboard page. No restart needed. Open `http://127.0.0.1:9119/chat`.
 
-## 能力
-
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| 流式气泡 | 已交付 | `message.delta` 逐块追加到当前气泡，末尾带闪烁光标 |
-| 工具卡片 | 已交付 | 按 `tool_id` 配对 start/complete，运行中展开、完成后折叠，左侧状态色条 |
-| 历史恢复 | 已交付 | `session.history` 投影成同样的气泡结构，刷新后不丢 |
-| 审批卡片 | 已交付 | `approval` 服务端请求渲染成允许/拒绝按钮，直接回帧 |
-| clarify 卡片 | 已交付 | 同上，按 `qid` 回答案 |
-| 多轮续聊 | 已交付 | 一个会话内连续发消息；`session.create` 一次，之后复用 runtime id |
-| 停止 | 已交付 | `session.interrupt`，失败也会本地封口气泡 |
-| Markdown 回复 | 已交付 | 助手气泡按 markdown 渲染：标题、粗斜体、删除线、行内码、围栏代码块（带语言标签）、有序/无序列表（可嵌套）、引用、分隔线、表格（带对齐）；流式过程中遇到未闭合的围栏或标记不会崩，按半成品渲染 |
-| 斜杠命令 | 已交付 | `/` 唤起菜单，目录一次拉全后本地过滤（不截断）；`command.dispatch` 的六种指令都接了 |
-| 会话列表与切换 | 已交付 | 侧栏两段：打开中的 tab 与历史会话，可新建、切换、关闭、重开 |
-| 多开会话 | 已交付 | 一条 socket 承载多个会话，事件按 `session_id` 分流，每个 tab 独立时间线 |
-| 附件 | 已交付 | `+` 按钮与拖放/粘贴；按类型走 `image.attach_bytes` / `pdf.attach` / `file.attach` |
-| `@` 路径引用 | 已交付 | `complete.path` 补全 |
-| 模型选择 | 已交付 | `model.options` 列表 + `config.set`；会话级切换，贵的模型会回报确认要求 |
-| 思考强度 | 已交付 | 七档 `config.set key=reasoning scope=session` |
-| 思考过程半显式 | 已交付 | 流式时显示最后一行 + 光标，结束后收成一行摘要，可展开全文 |
-| 实时指标 | 已交付 | 上下文条 + 占用百分比、缓存命中率、输出速度、花费，随 `session.usage` 更新 |
-| 会话保持 | 已交付 | 切到 dashboard 其他页面再回到 chat，打开的页签与进行中的回复都还在（controller 跨路由存活，不再随卸载销毁） |
-| 定位器 | 已交付 | 聊天区右侧一条窄轨道，每条你自己发的消息一个刻度；悬停显示开头几个字，点击滚到那条消息 |
-| 空状态可输入 | 已交付 | 关掉所有页签后输入框仍可用，发送会自动新建会话 |
-| 会话管理 | 已交付 | 历史面板每行可重命名、删除，并带一个状态灯：亮起＝该会话已在页签中打开，闪烁＝正在运行（走 REST `PATCH` / `DELETE /api/sessions/{id}`，与桌面端一致）；删除后会回查确认，不信任 REST 的 `ok` |
-| 编辑已发送消息 | 已交付 | 用户气泡上悬停出现编辑；改完发送会从该轮重写（`prompt.submit` + `truncate_before_row_id` + `confirm_truncate`），后续内容一并截断 |
-| 消息操作 | 已交付 | 回复气泡右下角：时间戳、在新对话中分支、复制、重新生成（朗读与回应表情按你的要求不做），对齐桌面端 |
-| 审批 / 选择题 | 已交付 | `approval` 与 `clarify` 两张卡；选择项取自服务端下发的 `choices`（不再自己写死），`multi_select` 合并成字符串提交，未答完不可提交 |
-| 界面语言 | 已交付 | 默认英语；跟随仪表盘的语言切换自动改变，无需刷新 |
-| 中途 steer | 已交付 | 运行中仍可发送；后端按 `prompt.submit` 的 busy 路径决定排队 / 插入 / 改向，页面把结果显示成一行提示 |
-| 会话删除 / 重命名 | 未开工 | `session.delete` / `session.title` 已有契约 |
-
-## 架构
+## How it works
 
 ```
 src/
-├── core/          纯逻辑，无 DOM 无 socket，全部可单测
-│   ├── types.ts       时间线模型（气泡 / 工具卡 / 提示 / 用量）
-│   ├── reduce.ts      事件 → 时间线
-│   ├── history.ts     历史行 → 时间线
-│   ├── sessions.ts    多会话 store：tab、事件分流、历史替换
-│   ├── slash.ts       斜杠 token / 补全 / dispatch 解析、推理档位
-│   ├── attachments.ts 附件队列、@ token、体积与类型筛查
-│   ├── metrics.ts     用量指标格式化与压力分级
-│   └── dedupe.ts      跨 socket 重复投递闸门
-├── gateway/       传输
-│   ├── channel.ts     JSON-RPC 通道（请求 / 事件 / 服务端请求）
-│   └── client.ts      socket 生命周期 + 重连退避 + ensureOpen
+├── core/          pure logic — no DOM, no sockets, fully unit-tested
+│   ├── types.ts        timeline model (bubbles, tool cards, notices, usage)
+│   ├── reduce.ts       events → timeline
+│   ├── history.ts      stored rows → timeline
+│   ├── sessions.ts     multi-session store: tabs, event routing, history replay
+│   ├── markdown.ts     Markdown → node tree (never HTML)
+│   ├── rail.ts         locator-rail geometry
+│   ├── requests.ts     approval / clarify parsing and answer shaping
+│   ├── slash.ts        slash token, completion, dispatch parsing
+│   ├── attachments.ts  attachment queue and size/type screening
+│   ├── metrics.ts      usage formatting and pressure grading
+│   ├── i18n.ts         string catalog and timestamp formatting
+│   └── dedupe.ts       cross-socket duplicate gate
+├── gateway/       transport
+│   ├── channel.ts      JSON-RPC channel (requests, events, server→client requests)
+│   └── client.ts       socket lifecycle, reconnect backoff, ensureOpen
 ├── app/
-│   └── controller.ts  会话控制：RPC 网关、路由、模型切换、附件、重同步
-├── ui/            渲染
-│   ├── ChatPage.ts    页面骨架与状态接线
-│   ├── SessionSidebar.ts  会话列表（打开中 / 历史）
-│   ├── Composer.ts    输入框、斜杠菜单、附件托盘、指标条
-│   ├── ModelPicker.ts 模型与思考强度选择器
-│   ├── Bubble.ts      消息块与可展开的思考过程
-│   ├── format.ts      纯展示逻辑（工具名、截断、耗时）
-│   └── style.css      变量驱动的少量样式
-└── index.ts       注册入口
+│   ├── controller.ts   session control: RPC, routing, models, attachments, resync
+│   └── persistent.ts   the controller outlives a route change
+├── ui/            rendering
+│   ├── ChatPage.ts     page skeleton and wiring
+│   ├── TabStrip.ts     open sessions
+│   ├── HistoryPanel.ts stored sessions, rename/delete, status lamp
+│   ├── Composer.ts     input, slash menu, attachment tray, metrics
+│   ├── Bubble.ts       message blocks and the reasoning disclosure
+│   ├── Markdown.ts     renders the node tree via React.createElement
+│   ├── LocatorRail.ts  the jump rail
+│   ├── RequestCards.ts approval and clarify cards
+│   ├── ModelPicker.ts  model and reasoning picker
+│   └── style.css       the small amount of hand-written CSS
+└── index.ts       registration entry
 ```
 
-`core/` 和 `ui/format.ts` 里不许出现 `window` / `document` / `WebSocket`，这是能对着一堆边界情况写单测的前提。传输层通过构造参数注入 socket 工厂，测试用假 socket 驱动整条链路。
+Nothing in `core/` may reference `window`, `document`, `WebSocket` or `fetch` — that is what makes the edge cases testable. The transport takes an injected socket factory, so tests drive the whole chain with a fake socket.
 
-契约文档：`docs/01-protocol-contract.md`。协议是 Hermes 的内部实现，没有 OpenAPI 描述，所以那份文档记了核对基线（hermes-agent `0.22.2`，commit `d923a5eb487`）和一份升级后重跑的核对清单。
+The protocol is Hermes' internal implementation with no OpenAPI description, so `docs/01-protocol-contract.md` records the version it was verified against (hermes-agent `0.22.2`, commit `d923a5eb487`) and a checklist to re-run after an upgrade.
 
-## 命令
-
-| 想做什么 | 命令 |
-|---|---|
-| 单测 | `npm test` |
-| 类型检查 | `npm run typecheck` |
-| 构建 | `npm run build` |
-| 构建 + 安装 | `npm run install-plugin` |
-| 对着真仪表盘验收 | `node scripts/verify.mjs`（需要仪表盘在 9119 上跑着） |
-| 看某次会话的 DOM | `node scripts/probe-turn.mjs` |
-
-## 验证
-
-- `npm test` — 254 项，覆盖归约、历史投影、多会话分流、斜杠解析与补全、附件队列、用量指标、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（含多开、模型切换、附件、重连与重同步），以及一条**源码级守卫**（钩子不得出现在提前 return 之后——React #310 就是它漏掉的）。
-- `node scripts/verify.mjs` — 24 项，对**真实仪表盘**跑：插件接管 `/chat`、内置 xterm 消失、主题变量生效、后端能力探针通过、无人工操作下输入框自行就绪、`/` 唤起并按字过滤命令、接受补全后 token 被替换、侧栏两段渲染、新建 tab、`+` 与文件输入、模型选择器列出真实 provider、思考强度档位、跑完一轮后指标条出现、控制台无报错。跑的是真模型真往返。
-
-验收截图由该脚本产出，落在 `.cache/shots/`。
-
-## 兼容性
-
-| 项 | 实测值 |
-|---|---|
-| hermes-agent | 0.22.2（commit `d923a5eb487`） |
-| 后端声明的方法 / 事件 | 257 / 77 |
-| 插件 SDK 契约版本 | 1.1.0 |
-| 需要的 RPC | `session.create` `session.resume` `session.list` `session.history` `prompt.submit` `session.interrupt` |
-| 需要的事件 | `message.start` `message.delta` `message.interim` `message.complete` `reasoning.delta` `tool.start` `tool.complete` `status.update` `session.usage` `session.title` `session.info` `notice` `error` |
-| 需要的服务端请求 | `approval` `clarify` |
-| Node | 24.21.0 |
-| 打包产物 | 112.5 KiB（不含 React） |
-
-插件的后端路由 `/api/plugins/hermes-bubbles/capabilities` 会在页面渲染前问一次后端「这些方法/事件还在不在」，缺任何一条就报出缺的名字。协议漂移时它会先坏在明处，而不是渲染出一个空对话。
-
-## 界面语言
-
-默认英语（Hermes 自身 `display.language` 的默认值就是 `en`），并跟随仪表盘切换：插件读 `localStorage['hermes-locale']` 与 `<html lang>` 两个信号，监听 `storage` 事件与 `<html lang>` 的变化，所以在仪表盘里换语言即刻生效、不用刷新。文案集中在 `src/core/i18n.ts`，目前中英两套。
-
-（`SDK.useI18n` 在插件里拿不到值——它只是对宿主某个 context 的 `useContext`，而那个 context 插件 import 不到，只会永远返回 provider 的默认值，且切换后不更新。所以自带一份小目录。）
-
-## 回复的 Markdown
-
-助手气泡的文本走自带的解析器，没有第三方依赖，也不拼 HTML 字符串：
-
-- `src/core/markdown.ts` — 纯函数，字符串进、节点树出，无 DOM，可单测（48 条）。
-- `src/ui/Markdown.ts` — 把节点树用 `React.createElement` 渲染出来。全流程没有 `innerHTML`，文本由 React 转义，注入这一类问题不存在而不是被净化掉。链接仍过 `safeHref()`，只放行 `http/https/mailto/tel` 与相对路径。
-
-刻意不支持 setext 标题（`标题` 下面一行 `---`）——模型都写 `##`，而把裸 `---` 当标题惹的麻烦多得多，它按分隔线处理（和 CommonMark 一致）。
-
-行内代码、代码块都跟随气泡前景色（行内代码对比度实测 8.72:1）。时间戳按毫秒渲染，本地时区。代码块右上角有复制按钮，剪贴板不可用时退回 `execCommand`。
-
-命令/工具卡片一律默认折叠，只显示一行摘要（类型、摘要、耗时），点开才看输出。审批与选择题的选项**每行一个、占满宽度**——之前用 `flex-wrap` 排，三个短选项会挤在同一行。这两点都需要显式覆盖宿主的全局 `code` 规则——它按标签名匹配，会给 `<pre>` 里的 `<code>` 套上内联代码的浅底黑字样式，既让块缩到文字宽度，又让文字看不清。
-
-解析器要能跑**半句话**：每个流式增量都会重解整条消息，所以未闭合的围栏（按代码块渲染）、单独的 `**`、还没等到分隔行的表格都是正常输入。测试里有一条性质检查：对一条完整消息的**每个前缀**都跑一遍，不允许抛异常。
-
-## 样式约束：只用宿主 CSS 里已有的类
-
-插件渲染在仪表盘**预编译**好的 Tailwind 产物里，那份 CSS 只包含仪表盘自己源码用过的类。我们新造一个它没有的类，**不会报错、不会有警告，就是那条属性完全不生效**。这一条踩出过三个可见 bug：`resize-none`（输入框保留原生缩放手柄）、`max-h-[70vh]`（模型选择器没有高度上限）、`text-[0.625rem]`（用量行按 15px 基准渲染）。
-
-所以：新样式一律写进 `src/ui/style.css`，作为显式的 `hb-` 类。
+## Verification
 
 ```bash
-node scripts/audit-classes.mjs   # 列出所有「用了但宿主 CSS 里没有、也不会报错」的类
+npm test                  # 397 unit tests, 19 files, no browser
+npm run typecheck         # tsc --noEmit
+node scripts/verify.mjs   # 64 checks against a real dashboard (needs one on 9119)
+node scripts/audit-classes.mjs
 ```
 
-`tests/layout-classes.test.ts` 会守这条：`hb-` 类必须在自己的样式表里有定义，非 `hb-` 类必须在宿主 CSS 里存在（宿主没装时回退到一份实测过的白名单，保证新克隆也能跑）。
+`npm test` covers event reduction, history projection, multi-session routing, Markdown parsing (including a property check that **every prefix** of a streamed message parses), slash completion, the attachment queue, usage metrics, deduplication, the JSON-RPC channel, and the controller — plus four source-level guards:
 
-CSS 变量同理，而且失败方式更隐蔽：宿主**从不定义** `--color-foreground` 和 `--color-background`（0.22.2 实测，23 个 `--color-*` 里没有这两个）。`var(--undefined)` 不报错，整条声明在计算值阶段被丢掉，元素静默继承或者透出背景——`--color-background` 曾让代码块和审批卡变成全透明。`tests/theme-vars.test.ts` 逐个核对，离线回退白名单。
+- `hook-order` — a hook after an early `return` throws React #310 and blanks the page; neither types nor logic tests can see it.
+- `layout-classes` — the plugin renders inside the dashboard's *precompiled* Tailwind bundle, so a class the host never used applies **nothing at all**, silently.
+- `theme-vars` — likewise for CSS variables; the host genuinely does not define `--color-foreground` or `--color-background`.
+- `architecture` — `core/` stays DOM-free and no component uses `innerHTML`.
 
-## 已知限制
+`scripts/verify.mjs` drives a real browser against a live gateway: it types, sends, streams, opens menus, switches tabs, renames and deletes sessions, navigates away and back, and measures computed styles. Checks that cannot be meaningful in a given run (the model happened not to emit a code block) report `SKIP` rather than passing vacuously.
 
-- **用户插件要手动登记。** 仪表盘只加载 `plugins.enabled` 里的用户插件，装完不登记就只是被发现、不加载。内置插件没这个门槛。
-- **服务端请求只接了 approval 和 clarify。** `vault.unlock_prompt`、`sudo`、`secret` 这些一律回 `-32601`，后端会快速失败而不是等满超时——这是有意的，但意味着这些流程在这个页面上走不通。
-- **没有会话列表。** 打开页面就是新会话；历史恢复指的是同一会话刷新后不丢，不是能在会话之间切。
-- **`useSyncExternalStore` 不在 SDK 的 hooks 白名单里**，得从 `SDK.React` 上取。SDK 的 `hooks` 是个精选子集，不是 React 全量。
-- **协议无版本保证。** 这套 JSON-RPC 是内部实现，`hermes update` 后可能漂移；`capabilities` 路由是第一道闸，`docs/01-protocol-contract.md` 的核对清单是第二道。
-- 工具结果里只有 `write_file` / `patch` / `skill_manage` 三个带原始 `content`（后端投影如此），其余工具的历史行只有一行摘要，展开也看不到完整输出。
+`scripts/verify-clarify.mjs` is an on-demand check for the request cards, kept separate because it depends on the model choosing to call `clarify` — a check that depends on that would fail at random.
 
-## 许可
+## Design notes
+
+**The host's CSS is the floor, not a framework.** The plugin renders inside the dashboard's precompiled stylesheet, which only contains the classes the dashboard's own source used. Anything invented that the host lacks fails silently — no error, no warning, the property just never applies. Three visible bugs came from exactly that (`resize-none`, `max-h-[70vh]`, `text-[0.625rem]`). New styles go into `src/ui/style.css` as explicit `hb-` classes, and `audit-classes.mjs` lists anything that would silently do nothing.
+
+Tag-level host rules intrude too: a global `code { display: inline; color: var(--background) }` lands on the `<code>` inside every `<pre>`, which both shrank code blocks to their text width and painted them near-invisible. Overriding per class is the fix.
+
+**Markdown never becomes HTML.** The parser emits a node tree and the renderer builds elements with `React.createElement`, so text is escaped by React and HTML injection is removed rather than sanitised around. The parser is also built to run on *half a sentence*: every streaming delta re-parses the whole message, so an unclosed fence, a lone `**` or a table whose separator row has not arrived are normal inputs.
+
+**One unit, stated once.** Timeline timestamps are milliseconds everywhere. The backend sends seconds, and exactly one function scales them on the way in. Mixing that up is why a 02:46 turn once displayed as 19:32.
+
+**The controller outlives the page.** Navigating to another dashboard tab unmounts this one. Disposing the controller there would close the socket and every open session, so it is a document-level singleton: unmount releases a reference, remount reuses the instance. A blocking `approval` or `clarify` that arrives while the page is unmounted is parked and replayed, not refused — the backend waits up to an hour for an answer and "the user was on another tab" is not a refusal.
+
+## Compatibility
+
+| | |
+|---|---|
+| hermes-agent | 0.22.2 (commit `d923a5eb487`) |
+| Plugin SDK contract | 1.1.0 |
+| Node | 24.21.0 (developed) |
+| Bundle | ~180 KiB, React not included |
+| Backend route | `/api/plugins/hermes-bubbles/capabilities` |
+
+The backend route asks once, before the page renders, whether every method and event it needs still exists. When the protocol drifts it fails loudly with the missing names instead of rendering an empty conversation.
+
+## Limitations
+
+- **User plugins must be registered by hand.** The dashboard only loads what is in `plugins.enabled`.
+- **Only `approval` and `clarify` are handled** among server→client requests. `sudo`, `secret`, vault prompts and the like get `-32601`, which fails fast rather than hanging — deliberate, but those flows do not work on this page.
+- **No protocol version guarantee.** This JSON-RPC surface is an internal implementation and may drift with `hermes update`; the capabilities route is the first gate, the contract document the second.
+- **UI state does not survive a full page reload.** Open tabs persist across dashboard navigation, not across a browser refresh.
+- **Tool history is lossy.** The backend only carries raw content for `write_file`, `patch` and `skill_manage`; other tools keep a one-line summary.
+
+## License
 
 MIT
+
+---
+
+中文版：[README.zh-CN.md](README.zh-CN.md)

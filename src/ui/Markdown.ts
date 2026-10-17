@@ -14,6 +14,7 @@
  * not contain the utilities this needs (AGENTS.md 铁律 11).
  */
 
+import { messagesFor, type Locale } from "../core/i18n";
 import type { MdBlock, MdInline } from "../core/markdown";
 import { parseMarkdown } from "../core/markdown";
 import type * as ReactNS from "react";
@@ -33,8 +34,14 @@ const HEADING_SIZE: Record<number, string> = {
 
 interface Ctx {
   React: HermesPluginSdk["React"];
+  /** Hooks come from the SDK — the bundle ships without React (AGENTS.md 铁律 3). */
+  hooks: HermesPluginSdk["hooks"];
   /** Links open in a new tab; the dashboard is a local app and links leave it. */
   onOpenLink: (href: string) => void;
+  /** Clipboard fallback for a frame that denies `navigator.clipboard`. */
+  fallbackCopy: (text: string) => boolean;
+  copyCodeLabel: string;
+  copiedLabel: string;
 }
 
 function renderInline(ctx: Ctx, nodes: MdInline[], keyPrefix: string): ReactNS.ReactNode[] {
@@ -89,6 +96,30 @@ function renderInline(ctx: Ctx, nodes: MdInline[], keyPrefix: string): ReactNS.R
   });
 }
 
+/**
+ * Copy without the Clipboard API.
+ *
+ * `document.execCommand("copy")` is deprecated but is the only path left in a
+ * frame that denies `navigator.clipboard`, and a block that cannot be copied at
+ * all is worse than one copied through a deprecated call.
+ */
+function fallbackCopy(text: string): boolean {
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 function caretNode(ctx: Ctx, key: string): ReactNS.ReactNode {
   return ctx.React.createElement(
     "span",
@@ -98,6 +129,90 @@ function caretNode(ctx: Ctx, key: string): ReactNS.ReactNode {
       style: { color: "var(--color-primary)", marginLeft: "0.1em" },
     },
     "▌",
+  );
+}
+
+/**
+ * One fenced block, with a copy button pinned to its corner.
+ *
+ * A component rather than inline markup: the button needs its own "copied"
+ * state, and `renderBlocks` re-runs on every streaming delta — inline state would
+ * reset mid-stream and the confirmation would flicker away.
+ */
+function CodeBlock({
+  ctx,
+  value,
+  lang,
+}: {
+  ctx: Ctx;
+  value: string;
+  lang: string;
+}): ReactNS.ReactNode {
+  const { React } = ctx;
+  const { useState } = ctx.hooks;
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const copy = () => {
+    const done = () => {
+      setCopied(true);
+      setFailed(false);
+      window.setTimeout(() => setCopied(false), 1500);
+    };
+    const fail = () => {
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 1500);
+    };
+    // `writeText` rejects for reasons that have nothing to do with permission:
+    // an unfocused document (a background tab, a headless browser) rejects with
+    // "Document is not focused". Report failure only when BOTH paths fail —
+    // `execCommand` still works in those cases and silently is not good enough.
+    const viaFallback = () => (ctx.fallbackCopy(value) ? done() : fail());
+    try {
+      const writing = navigator.clipboard?.writeText(value);
+      if (writing) writing.then(done).catch(viaFallback);
+      else viaFallback();
+    } catch {
+      viaFallback();
+    }
+  };
+
+  return React.createElement(
+    "div",
+    { className: "hb-md-codeblock" },
+    React.createElement(
+      "div",
+      { className: "hb-md-codebar" },
+      lang
+        ? React.createElement(
+            "span",
+            { className: "hb-md-code-lang", style: { color: "var(--color-muted-foreground)" } },
+            lang,
+          )
+        : null,
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          // Localized label, plus the glyph as its own confirmation state.
+          title: ctx.copyCodeLabel,
+          "aria-label": ctx.copyCodeLabel,
+          "data-hb": "copy-code",
+          "data-copied": copied ? "true" : "false",
+          className: "hb-code-copy",
+          onClick: copy,
+        },
+        copied ? ctx.copiedLabel : failed ? "!" : "⧉",
+      ),
+    ),
+    React.createElement(
+      "pre",
+      {
+        className: "hb-pre hb-md-pre",
+        style: { maxHeight: CODE_MAX_HEIGHT, overflow: "auto" },
+      },
+      React.createElement("code", null, value),
+    ),
   );
 }
 
@@ -133,25 +248,12 @@ function renderBlocks(ctx: Ctx, blocks: MdBlock[], keyPrefix = "b", caret = fals
       }
 
       case "code":
-        return React.createElement(
-          "div",
-          { key, className: "hb-md-codeblock" },
-          block.lang
-            ? React.createElement(
-                "div",
-                { className: "hb-md-code-lang", style: { color: "var(--color-muted-foreground)" } },
-                block.lang,
-              )
-            : null,
-          React.createElement(
-            "pre",
-            {
-              className: "hb-pre hb-md-pre",
-              style: { maxHeight: CODE_MAX_HEIGHT, overflow: "auto" },
-            },
-            React.createElement("code", null, block.value),
-          ),
-        );
+        return React.createElement(CodeBlock, {
+          key,
+          ctx,
+          value: block.value,
+          lang: block.lang,
+        });
 
       case "list": {
         const tag = block.ordered ? "ol" : "ul";
@@ -281,19 +383,26 @@ export function Markdown({
   sdk,
   text,
   caret = false,
+  locale = "en",
 }: {
   sdk: HermesPluginSdk;
   text: string;
   caret?: boolean;
+  locale?: Locale;
 }) {
   const { React } = sdk;
   const { useMemo } = sdk.hooks;
+  const t = messagesFor(locale);
 
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   if (!blocks.length) return null;
 
   const ctx: Ctx = {
     React,
+    hooks: sdk.hooks,
+    fallbackCopy,
+    copyCodeLabel: t.copyCode,
+    copiedLabel: t.copied,
     onOpenLink: (href: string) => {
       try {
         window.open(href, "_blank", "noopener,noreferrer");

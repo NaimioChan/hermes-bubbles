@@ -671,6 +671,58 @@ async function main() {
     await sleep(200);
     await sleep(600);
 
+    // ── item 3 (this round): approval/clarify choices stack one per line ────
+    // Measured on a controlled sample with the real classes: the card only shows
+    // when the model chooses to ask, and a check that depends on that would fail
+    // at random.
+    const choiceLayout = await session.evaluate(`(() => {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;left:-9999px;top:0;width:700px';
+      host.innerHTML = '<div class="hb-choice-col">'
+        + '<button class="hb-action-btn-text hb-choice-row">选项一</button>'
+        + '<button class="hb-action-btn-text hb-choice-row">选项二</button>'
+        + '<button class="hb-action-btn-text hb-choice-row">选项三</button></div>';
+      document.body.appendChild(host);
+      const btns = [...host.querySelectorAll('.hb-choice-row')];
+      const rects = btns.map((b) => b.getBoundingClientRect());
+      const out = {
+        options: btns.length,
+        distinctRows: new Set(rects.map((r) => Math.round(r.top))).size,
+        allFullWidth: rects.every((r) => Math.round(r.width) > 200),
+        direction: getComputedStyle(btns[0].parentElement).flexDirection,
+      };
+      host.remove();
+      return out;
+    })()`);
+    check(
+      "every choice sits on its own line, full width",
+      choiceLayout !== null && choiceLayout.options === 3 && choiceLayout.distinctRows === 3
+        && choiceLayout.allFullWidth === true && choiceLayout.direction === "column",
+      JSON.stringify(choiceLayout),
+    );
+
+    // ── item 5 (this round): a copy button on code blocks ──────────────────
+    const codeCopy = await session.evaluate(`(() => {
+      const blocks = [...document.querySelectorAll('.hb-md-codeblock')];
+      if (!blocks.length) return { blocks: 0 };
+      return {
+        blocks: blocks.length,
+        buttons: blocks.filter((b) => b.querySelector('[data-hb="copy-code"]')).length,
+        labelled: Boolean(blocks[0].querySelector('[data-hb="copy-code"]')?.getAttribute('title')),
+      };
+    })()`);
+    // A code block only exists if the model emitted one; treat "none on screen" as
+    // a skip rather than a failure, and say so.
+    if (codeCopy.blocks > 0) {
+      check(
+        "every code block carries a copy button",
+        codeCopy.buttons === codeCopy.blocks && codeCopy.labelled === true,
+        JSON.stringify(codeCopy),
+      );
+    } else {
+      console.log("SKIP  code-block copy button — no code block in this run's replies");
+    }
+
     // ── item 4: inline code contrast ───────────────────────────────────────
     // The chip painted (a background was set) while the TEXT stayed at the host's
     // near-background colour, so it was unreadable. Assert a real contrast ratio
@@ -985,6 +1037,26 @@ async function main() {
       );
     }
 
+    // ── item 4 (this round): tool cards start collapsed ────────────────────
+    const toolCards = await session.evaluate(`(() => {
+      const toggles = [...document.querySelectorAll('[data-hb="tool-toggle"]')];
+      if (!toggles.length) return { cards: 0 };
+      return {
+        cards: toggles.length,
+        collapsed: toggles.filter((t) => t.getAttribute("data-open") === "false").length,
+        ariaMatches: toggles.every((t) => t.getAttribute("aria-expanded") === t.getAttribute("data-open")),
+      };
+    })()`);
+    if (toolCards.cards > 0) {
+      check(
+        "tool cards render collapsed by default",
+        toolCards.collapsed === toolCards.cards && toolCards.ariaMatches === true,
+        JSON.stringify(toolCards),
+      );
+    } else {
+      console.log("SKIP  tool cards — this run produced no tool calls");
+    }
+
     // ── item 5: usage line size + reasoning spacing ────────────────────────
     // Measured here: this is the first point where the focused tab actually has a
     // finished turn to measure.
@@ -1033,6 +1105,160 @@ async function main() {
       if (line.includes("extension://")) return false;
       return true;
     };
+    // ── item 1 (this round): the locator rail ──────────────────────────────
+    // The rail needs at least two user messages (jumping between one is pointless),
+    // so make sure the transcript has two before measuring it.
+    const userCount = await session.evaluate(
+      `document.querySelectorAll('[data-hb="user-actions"]').length`,
+    );
+    if (typeof userCount === "number" && userCount < 2) {
+      await session.evaluate(`(() => {
+        const ta = document.querySelector('textarea');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(ta, '再补一句，让轨道有两个定位点');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        return 'sent';
+      })()`);
+      for (let i = 0; i < 40; i += 1) {
+        await sleep(1200);
+        const ready = await session.evaluate(`(() => {
+          const b = document.querySelector('[data-hb="primary-action"]');
+          return Boolean(b) && !b.disabled && b.getAttribute('title') === 'Send';
+        })()`);
+        if (ready) break;
+      }
+      await sleep(1500);
+    }
+
+    const rail = await session.evaluate(`(() => {
+      const el = document.querySelector('[data-hb="locator-rail"]');
+      if (!el) return { present: false };
+      const ticks = [...el.querySelectorAll('[data-hb-tick]')];
+      const scroller = document.querySelector('[data-hb="transcript"]');
+      const rr = el.getBoundingClientRect();
+      const sr = scroller.getBoundingClientRect();
+      return {
+        present: true,
+        ticks: ticks.length,
+        userBubbles: document.querySelectorAll('[data-hb="user-actions"]').length,
+        // Pinned to the transcript's right edge, not floating in the content column.
+        hugsRightEdge: rr.left >= sr.right - 40,
+      };
+    })()`);
+    check("the locator rail renders beside the transcript", rail.present === true, JSON.stringify(rail));
+    check(
+      "the rail has one tick per user message and sits on the right edge",
+      rail.present === true && rail.ticks === rail.userBubbles && rail.ticks >= 2 && rail.hugsRightEdge === true,
+      JSON.stringify(rail),
+    );
+
+    // Every tick must address a real element, or "jump" is a no-op by construction.
+    const railAnchors = await session.evaluate(`(() => {
+      const el = document.querySelector('[data-hb="locator-rail"]');
+      if (!el) return { error: 'no rail' };
+      const ids = [...el.querySelectorAll('[data-hb-tick]')].map((t) => t.getAttribute('data-hb-tick'));
+      const sc = document.querySelector('[data-hb="transcript"]');
+      const missing = ids.filter((id) => !sc.querySelector('[data-hb-item="' + CSS.escape(id) + '"]'));
+      return { ticks: ids.length, missing: missing.length, scrollable: sc.scrollHeight > sc.clientHeight };
+    })()`);
+    check(
+      "every rail tick addresses a real bubble",
+      railAnchors !== null && railAnchors.ticks > 0 && railAnchors.missing === 0,
+      JSON.stringify(railAnchors),
+    );
+
+    // The jump itself is only observable when there is something to scroll. This
+    // run's own transcript is short, so say so rather than assert a no-op.
+    if (railAnchors !== null && railAnchors.scrollable === true) {
+      const railJump = await session.evaluate(`(async () => {
+        const sc = document.querySelector('[data-hb="transcript"]');
+        const el = document.querySelector('[data-hb="locator-rail"]');
+        if (!sc || !el) return { error: 'missing' };
+        sc.scrollTop = sc.scrollHeight;
+        await new Promise((r) => setTimeout(r, 300));
+        const before = sc.scrollTop;
+        el.querySelectorAll('[data-hb-tick]')[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 1000));
+        return { moved: Math.round(before - sc.scrollTop) };
+      })()`, { awaitPromise: true });
+      check(
+        "clicking a rail tick scrolls the transcript",
+        railJump !== null && typeof railJump.moved === "number" && railJump.moved > 0,
+        JSON.stringify(railJump),
+      );
+    } else {
+      console.log("SKIP  rail jump — this run's transcript is shorter than the viewport, so there is nothing to scroll");
+    }
+
+    // ── item 2 (this round): the composer survives closing every tab ───────
+    // Runs LAST in this block because it destroys the open transcript, so it is
+    // followed by a fresh session for anything below it.
+    // One click, one render: React batches state updates, so a synchronous loop
+    // would close the same tab repeatedly and leave the rest open.
+    let closedAll = 0;
+    for (let i = 0; i < 20; i += 1) {
+      const clicked = await session.evaluate(`(() => {
+        const btn = document.querySelector('[data-hb="tab-close"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()`);
+      if (!clicked) break;
+      closedAll += 1;
+      await sleep(400);
+    }
+    await sleep(1200);
+    const noTabs = await session.evaluate(`(() => {
+      const ta = document.querySelector('textarea');
+      return {
+        tabs: document.querySelectorAll('[data-hb="tab"]').length,
+        composerPresent: Boolean(ta),
+        disabled: ta ? ta.disabled : null,
+      };
+    })()`);
+    check(
+      "with every tab closed the composer stays usable",
+      closedAll > 0 && noTabs.tabs === 0 && noTabs.composerPresent === true && noTabs.disabled === false,
+      JSON.stringify({ closedAll, ...noTabs }),
+    );
+
+    // Typing must enable Send, and sending must mint a session by itself.
+    const sentFromNothing = await session.evaluate(`(async () => {
+      const ta = document.querySelector('textarea');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, '关掉所有页签之后发的消息');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      const btn = document.querySelector('[data-hb="primary-action"]');
+      const beforeTabs = document.querySelectorAll('[data-hb="tab"]').length;
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return { beforeTabs, sendEnabled: btn ? !btn.disabled : false };
+    })()`, { awaitPromise: true });
+
+    let sessionMinted = false;
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(1000);
+      sessionMinted = await session.evaluate(`document.querySelectorAll('[data-hb="tab"]').length > 0`);
+      if (sessionMinted) break;
+    }
+    check(
+      "sending with no tab open creates a session automatically",
+      sentFromNothing.sendEnabled === true && sentFromNothing.beforeTabs === 0 && sessionMinted === true,
+      JSON.stringify({ ...sentFromNothing, sessionMinted }),
+    );
+
+    // The transcript for later checks needs content again.
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(1200);
+      const ready = await session.evaluate(`(() => {
+        const b = document.querySelector('[data-hb="primary-action"]');
+        return Boolean(b) && !b.disabled && b.getAttribute('title') === 'Send';
+      })()`);
+      if (ready) break;
+    }
+    await sleep(1500);
+
     const consoleErrors = session.consoleLines.filter(
       (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),
     );

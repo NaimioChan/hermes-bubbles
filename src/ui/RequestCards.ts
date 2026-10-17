@@ -104,7 +104,7 @@ export function ApprovalCard({
         : null,
       React.createElement(
         "div",
-        { className: "hb-stack-gap flex flex-wrap gap-2" },
+        { className: "hb-stack-gap hb-choice-col" },
         view.choices.map((choice) =>
           React.createElement(
             "button",
@@ -112,7 +112,7 @@ export function ApprovalCard({
               key: choice,
               type: "button",
               "data-hb-choice": choice,
-              className: "hb-action-btn-text",
+              className: "hb-action-btn-text hb-choice-row",
               style: {
                 background: choice === "deny" ? "var(--color-muted)" : "var(--color-primary)",
                 color:
@@ -180,7 +180,7 @@ export function ClarifyCard({
           q.choices.length
             ? React.createElement(
                 "div",
-                { className: "hb-mt-sm flex flex-wrap gap-2" },
+                { className: "hb-mt-sm hb-choice-col" },
                 q.choices.map((choice) =>
                   React.createElement(
                     "button",
@@ -189,7 +189,7 @@ export function ClarifyCard({
                       type: "button",
                       "data-hb-choice": choice,
                       "data-hb-selected": on.includes(choice) ? "true" : "false",
-                      className: "hb-action-btn-text",
+                      className: "hb-action-btn-text hb-choice-row",
                       style: {
                         background: on.includes(choice) ? "var(--color-primary)" : "var(--color-muted)",
                         color: on.includes(choice)

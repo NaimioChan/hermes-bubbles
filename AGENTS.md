@@ -43,7 +43,9 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 17. **`@` 不是补全入口。** 后端 `complete.path` 期望的 `word` **包含**开头的 `@`（`is_context = word.startswith("@")`），早期客户端发的是去掉 `@` 的查询，所以永远匹配不上。功能已按用户要求移除，`@` 当普通字符；文件用 `+` 按钮走 `file.attach`。别再加回来，除非同时把 `@` 带上。
 18. **时间线的时间戳一律是毫秒。** `at` / `completedAt` 是 `Date.now()` 的量级，格式化函数**不做**任何缩放；后端给的是秒，只在数据进入模型的那一处（`core/history.ts::timestampOf`）乘一次 1000。这条踩过：三处各按自己的假设缩放，结果 02:46 的任务显示成 19:32。
 19. **改存量会话走 REST，不走 `session.*` 的写接口。** 重命名用 `PATCH /api/sessions/{id}`、删除用 `DELETE /api/sessions/{id}`（桌面端同款）。`session.title` 只认**活跃**会话，为拿 runtime id 而 resume 会让该行变成活跃，之后 `session.delete` 以 4023 拒绝；而 REST DELETE 对活跃会话会**返回 `{ok:true}` 却删不掉**（行会被重新持久化），所以删完必须回查 `session.list` 确认，不能信返回值。REST 与 `session.list` 是**不同的库**，校验要用 `session.list`。
-20. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+20. **列表型选项用 `flex-direction: column`，不用 `flex-wrap`。** `flex-wrap` 只在容器边缘换行，几个短选项就挤在同一行；每行一个是要么全换、要么不换的语义，用列。行内再配 `width:100%` 与左对齐，否则看起来像一堆药丸。
+21. **空状态不是死状态。** 关掉所有页签时 `activeTimeline` 是空的占位，它的 `meta.connected` 恒为 false——直接拿它当输入框可用性会让整个输入区变灰。判断能否输入看**socket**（`getConnection().state`），`send()` 在没有活动页签时先 `newSession()`。
+22. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 
 ## 禁区
 

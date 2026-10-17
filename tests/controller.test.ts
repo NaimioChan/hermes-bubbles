@@ -974,3 +974,46 @@ describe("edit a sent message", () => {
     expect(activeTimeline(controller.getSnapshot()).items.map((i) => i.id)).toEqual(before);
   });
 });
+
+describe("sending with no tabs open", () => {
+  it("mints a session and submits when every tab was closed", async () => {
+    const { controller, socket } = await connectAndOpen();
+
+    // Close the only tab: the dashboard now has no active session.
+    const key = controller.getSnapshot().activeKey as string;
+    controller.closeSession(key);
+    expect(controller.getSnapshot().activeKey).toBeNull();
+    expect(controller.getSnapshot().tabs).toHaveLength(0);
+
+    const before = socket.frames().filter((f) => f.method === "session.create").length;
+    const sent = controller.send("关掉标签后发的话");
+    await tick();
+
+    // A session must be minted before anything is submitted.
+    const created = socket.frames().filter((f) => f.method === "session.create").length;
+    expect(created).toBeGreaterThan(before);
+    socket.replyTo("session.create", {
+      session_id: "runtime-new",
+      stored_session_id: "20261017_130000_new",
+      messages: [],
+      info: { model: "m", provider: "p", running: false },
+    });
+    await tick();
+    await tick();
+    socket.replyTo("prompt.submit", { user_row_id: 99 });
+    await sent;
+
+    const submit = socket.frames().filter((f) => f.method === "prompt.submit").at(-1);
+    expect((submit?.params as Record<string, unknown>).text).toBe("关掉标签后发的话");
+    expect((submit?.params as Record<string, unknown>).session_id).toBe("runtime-new");
+  });
+
+  it("does not mint a session for an empty send", async () => {
+    const { controller, socket } = await connectAndOpen();
+    controller.closeSession(controller.getSnapshot().activeKey as string);
+
+    await controller.send("   ");
+    expect(socket.frames().some((f) => f.method === "session.create")).toBe(true); // only the initial one
+    expect(socket.frames().filter((f) => f.method === "session.create")).toHaveLength(1);
+  });
+});

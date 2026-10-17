@@ -8,6 +8,36 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-17 14:25 · hermes · 定位轨道、空状态输入、选项换行、卡片默认折叠、代码复制
+
+- 改：新增 `src/core/rail.ts` + `src/ui/LocatorRail.ts` + `tests/rail.test.ts`；`controller.ts`（无页签时 send 先建会话）；`ChatPage.ts`（轨道挂载、`data-hb-item` 锚点、`composerConnected`）；`Bubble.ts`（工具卡默认折叠）；`RequestCards.ts` + `style.css`（选项改为列布局）；`Markdown.ts`（代码块复制按钮 + 剪贴板回退）
+- 验证：`npm test` 387 passed（18 文件）；`npx tsc --noEmit` 干净；`node scripts/verify.mjs` 60/60；`node scripts/audit-classes.mjs` 0 缺失
+- 遗留：无
+
+### 定位器
+右侧一条窄轨道，每条用户消息一个刻度。位置是**按序号等分**而不是按时间或滚动高度——找的是「我说的第 N 件事」，等分才好瞄；按高度比例会让长会话的刻度全挤成一坨。刻度超过 120 个时抽样绘制，但保留最后一条，点击时用 `nearestTick` 算最近的刻度，所以抽样不影响精度。实测：12 条用户消息、12 个刻度，点第一个把滚动从 103277 拉到 5073。
+
+挂载位置踩了一次：一开始放在内容列（`mx-auto max-w-[860px]`）里，结果轨道浮在页面中间。它必须挂在**滚动容器的兄弟节点**上、贴着右边，所以给滚动区加了层 `relative` 包裹，轨道作为第二个子元素。
+
+### 空状态可输入
+关掉所有页签后 `activeTimeline` 返回的是空占位，`meta.connected` 恒为 false，输入框直接变灰。判定改成看**连接状态**（没页签时用 `getConnection().state`），并且 `send()` 在没有 activeKey 时先 `newSession()` 再提交。
+
+### 选项换行
+原来是 `flex flex-wrap`，只在容器边缘换行，三个短选项就挤在一行。改成 `flex-direction: column` + `width: 100%` + 左对齐。验收里用真实类名造三个选项量：3 行、每个宽度 700（满宽）。
+
+### 工具卡默认折叠
+`useState(item.status === "running")` → `useState(false)`。跑长任务时十几个工具卡全展开会把转写区冲垮；头部仍显示类型/摘要/耗时，扫一眼就知道发生了什么。
+
+### 代码块复制
+按钮放在语言标签同一行的右侧（`hb-md-codebar`），不浮在代码上。做成独立组件而不是内联标记：`renderBlocks` 每次流式增量都重跑，内联的「已复制」状态会被重置。
+
+剪贴板这里差点误判：headless 里 `navigator.clipboard.writeText` 以「Document is not focused」拒绝，按钮显示 `!`，看起来像坏了。实测 `document.execCommand("copy")` 在同样环境可用，所以拒绝时回退而不是直接报失败；在真正聚焦的窗口里 `writeText` 正常，剪贴板里读回了代码块原文。
+
+### 测试自身的坑（又是三个）
+1. 关页签用同步循环点 20 次——React 会批处理，实际只关掉一个。改成一次点击一次 await。
+2. 新增的检查插在脚本中段，会破坏后面依赖「最后一条是助手回复」的断言。挪到末尾。
+3. 轨道要 ≥2 条用户消息才渲染，而那次运行只有 1 条；补一发构造出第二个定位点再测，并给「转写区不够高、没什么可滚」的情况补 SKIP 而不是假失败。
+
 ## 2026-10-17 13:05 · hermes · 会话管理、编辑重发、时间戳、行内代码
 
 - 改：新增 `src/core/requests.ts` 之外的 `editTargetFor` / `forgetStoredSession` / `retitleStoredSession`（`core/sessions.ts`）；`controller.ts` 加 `deleteStoredSession` / `renameStoredSession` / `editAndResend` / `fetchJSON`（REST 通道）；`Bubble.ts` 用户气泡加编辑；`HistoryPanel.ts` 加改名/删除；`Composer.ts` 加编辑态；`style.css` 行内代码配色

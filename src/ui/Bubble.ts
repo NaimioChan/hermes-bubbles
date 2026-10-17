@@ -311,7 +311,7 @@ function AssistantBubble({
       },
       // The reply is Markdown. The caret rides inside the last block so a slow
       // first token reads as work rather than a hang, without pushing a line.
-      React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming) }),
+      React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming), locale }),
     ),
     item.error
       ? React.createElement(
@@ -350,9 +350,11 @@ function AssistantBubble({
 function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
   const { React } = sdk;
   const { useState } = sdk.hooks;
-  // Running tools are open (the user is watching); finished ones collapse so a
-  // long chain stays scannable.
-  const [open, setOpen] = useState(item.status === "running");
+  // Collapsed by default, running or not. A turn with a dozen tool calls is
+  // unreadable when each one expands its own output; the header still shows the
+  // language, the summary and the duration, so the chain stays scannable and the
+  // user opens only what they care about.
+  const [open, setOpen] = useState(false);
   const preview = toolPreview(item.resultText);
   const stripe =
     item.status === "error"
@@ -387,6 +389,9 @@ function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
         type: "button",
         className: "flex w-full cursor-pointer items-center gap-2 text-left",
         style: { color: "var(--color-card-foreground)" },
+        "data-hb": "tool-toggle",
+        "data-open": open ? "true" : "false",
+        "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
       React.createElement("span", null, open ? "▾" : "▸"),

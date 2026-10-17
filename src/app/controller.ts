@@ -269,6 +269,11 @@ export class ChatController {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    // With every tab closed there is no session to attach to. The composer stays
+    // live in that state (a dashboard with no chat open is not a dead input box),
+    // so sending mints a session first.
+    if (!this.state.activeKey) await this.newSession();
+
     const command = parseCommandInput(trimmed);
     if (command) {
       await this.dispatchCommand(command.name, command.arg);

@@ -20,6 +20,7 @@ import { ChatController, type ModelOptionProvider, type ServerRequestCard } from
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
 import { HistoryPanel, type StoredSession } from "./HistoryPanel";
+import { LocatorRail } from "./LocatorRail";
 import { ModelPicker } from "./ModelPicker";
 import { ApprovalCard, ClarifyCard, approvalResult } from "./RequestCards";
 import { TabStrip } from "./TabStrip";
@@ -61,6 +62,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // and resubmits instead of appending.
   const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const timeline = activeTimeline(state);
@@ -308,6 +310,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
   const tabs: readonly SessionTab[] = state.tabs;
   const activeStoredId = tabs.find((t2) => t2.key === state.activeKey)?.storedId ?? null;
+  // With no tab open the active timeline is an empty placeholder whose
+  // `connected` is false — which would disable the composer and leave a closed
+  // dashboard with a dead input box. The SOCKET is what decides whether input is
+  // possible, not whether a tab happens to be focused.
+  const socketOpen = controller.getConnection().state === "open";
+  const composerConnected = tabs.length === 0 ? socketOpen : timeline.meta.connected;
   const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
 
   return React.createElement(
@@ -338,7 +346,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         { className: "flex min-h-0 flex-1 flex-col" },
         React.createElement(
           "div",
-          { className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll" },
+          { className: "relative flex min-h-0 flex-1" },
+        React.createElement(
+          "div",
+          {
+            className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll",
+            ref: scrollerRef,
+            "data-hb": "transcript",
+          },
           React.createElement(
             "div",
             { className: "mx-auto flex flex-col", style: { maxWidth: "860px" } },
@@ -349,7 +364,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                   t.empty,
                 )
               : timeline.items.map((item: TimelineItem) =>
-                  React.createElement("div", { key: item.id, className: "hb-bubble-gap" },
+                  React.createElement(
+                    "div",
+                    {
+                      key: item.id,
+                      className: "hb-bubble-gap",
+                      // Anchor for the locator rail's scroll-to.
+                      "data-hb-item": item.id,
+                    },
                     React.createElement(Bubble, {
                       sdk,
                       item,
@@ -396,6 +418,13 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
             React.createElement("div", { ref: bottomRef }),
           ),
         ),
+        React.createElement(LocatorRail, {
+          sdk,
+          locale,
+          items: timeline.items,
+          scrollerRef,
+        }),
+        ),
 
         React.createElement(Composer, {
           sdk,
@@ -404,7 +433,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           onCancelEdit: () => setEditing(null),
           running: timeline.meta.running,
           status,
-          connected: timeline.meta.connected,
+          connected: composerConnected,
           usage: timeline.meta.usage,
           model: modelChoice.model || timeline.meta.model,
           provider: modelChoice.provider || timeline.meta.provider,

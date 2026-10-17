@@ -1,0 +1,14 @@
+name: hermes-bubbles
+version: "1.0.0"
+description: "A bubble-style chat page for the Hermes web dashboard: replaces the built-in xterm terminal chat with a structured message stream (streaming bubbles, markdown, tool cards, approval/clarify cards, session tabs, history with status lamps). Speaks the dashboard's tui_gateway JSON-RPC socket, not a PTY."
+author: NaimioChan
+kind: standalone
+requires_hermes: ">=0.22.2"
+
+# The dashboard's plugin scanner only walks `<plugins root>/<name>/dashboard/`,
+# so the built bundle is committed in that shape. Catalogue installs pin a commit
+# and run nothing, so the bundle has to be in the tree.
+provides_tools: []
+provides_hooks: []
+provides_middleware: []
+requires_env: []

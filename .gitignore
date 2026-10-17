@@ -2,6 +2,12 @@
 # plugin directory by `npm run install-plugin`. Never edit by hand.
 dist/
 
+# ...except the copy the dashboard actually loads. A plugin catalogue install
+# checks out an exact commit and runs no build step, so the bundle has to be in
+# the tree. `npm run install-plugin` writes these files.
+!/dashboard/
+!/dashboard/**
+
 # Verification artifacts: screenshots and run logs. The README references one
 # screenshot; keep the directory out of the repo and re-run the verifier to
 # regenerate it.
@@ -11,3 +17,7 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Python bytecode from the root __init__.py
+__pycache__/
+*.pyc

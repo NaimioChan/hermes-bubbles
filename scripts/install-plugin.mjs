@@ -34,16 +34,22 @@ async function main() {
     return;
   }
 
+  // Repository copy: the dashboard plugin scanner looks for
+  // `<plugins root>/<name>/dashboard/manifest.json`, and a catalogue install
+  // checks out a commit without running a build, so this copy is committed.
+  const repoDashboard = join(projectRoot, "dashboard");
   const dashboardDir = join(hermesHome(), "plugins", PLUGIN_NAME, "dashboard");
   // The manifest's paths are relative to `dashboard/` (entry: "dist/index.js"),
   // so the bundle keeps its `dist/` subdirectory. Flattening it here would make
   // every declared path a 404.
-  await rm(dashboardDir, { recursive: true, force: true });
-  await mkdir(join(dashboardDir, "dist"), { recursive: true });
-  await cp(join(dist, "index.js"), join(dashboardDir, "dist", "index.js"));
-  await cp(join(dist, "style.css"), join(dashboardDir, "dist", "style.css"));
-  await cp(join(dist, "manifest.json"), join(dashboardDir, "manifest.json"));
-  await cp(join(dist, "plugin_api.py"), join(dashboardDir, "plugin_api.py"));
+  for (const target of [repoDashboard, dashboardDir]) {
+    await rm(target, { recursive: true, force: true });
+    await mkdir(join(target, "dist"), { recursive: true });
+    await cp(join(dist, "index.js"), join(target, "dist", "index.js"));
+    await cp(join(dist, "style.css"), join(target, "dist", "style.css"));
+    await cp(join(dist, "manifest.json"), join(target, "manifest.json"));
+    await cp(join(dist, "plugin_api.py"), join(target, "plugin_api.py"));
+  }
 
   const files = await readdir(dashboardDir, { recursive: true });
   console.log(`installed → ${dashboardDir}`);

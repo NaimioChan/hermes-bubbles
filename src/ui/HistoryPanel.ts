@@ -7,6 +7,7 @@
 
 import { messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
+import { ProjectList, type ProjectListProps } from "./ProjectList";
 
 export interface StoredSession {
   id: string;
@@ -16,10 +17,18 @@ export interface StoredSession {
   message_count: number;
 }
 
+/** Which body the panel shows: the flat recent list, or projects. */
+export type HistoryMode = "recent" | "projects";
+
 export interface HistoryPanelProps {
   sdk: HermesPluginSdk;
   locale: Locale;
   open: boolean;
+  mode: HistoryMode;
+  onModeChange: (mode: HistoryMode) => void;
+  /** Everything the project view needs, minus sdk/locale (this component adds those). */
+  projectView: Omit<ProjectListProps, "sdk" | "locale">;
+  onRefreshProjects: () => void;
   sessions: readonly StoredSession[];
   loading: boolean;
   activeStoredId: string | null;
@@ -40,7 +49,7 @@ export interface HistoryPanelProps {
   onClose: () => void;
 }
 
-function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Locale): string {
+export function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Locale): string {
   if (!seconds) return "";
   const ms = seconds * 1000;
   try {
@@ -98,7 +107,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
             title: t.refreshTitle,
             className: "cursor-pointer px-1.5 text-xs",
             style: { color: "var(--color-muted-foreground)" },
-            onClick: props.onRefresh,
+            onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh,
           },
           "⟳",
         ),
@@ -116,7 +125,42 @@ export function HistoryPanel(props: HistoryPanelProps) {
       ),
     ),
 
+    // Recent vs Projects. Two words, not icons: the difference is a grouping
+    // rule, and a glyph pair would need a legend.
     React.createElement(
+      "div",
+      { className: "hb-proj-tabs shrink-0" },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          "data-hb": "history-mode-recent",
+          "data-active": props.mode === "recent" ? "true" : "false",
+          className: "hb-proj-tab",
+          onClick: () => props.onModeChange("recent"),
+        },
+        t.recent,
+      ),
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          "data-hb": "history-mode-projects",
+          "data-active": props.mode === "projects" ? "true" : "false",
+          className: "hb-proj-tab",
+          onClick: () => props.onModeChange("projects"),
+        },
+        t.projects,
+      ),
+    ),
+
+    props.mode === "projects"
+      ? React.createElement(ProjectList, {
+          sdk: props.sdk,
+          locale: props.locale,
+          ...props.projectView,
+        })
+      : React.createElement(
       "div",
       { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
       props.loading
@@ -267,6 +311,6 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   : null,
               );
             }),
-    ),
+        ),
   );
 }

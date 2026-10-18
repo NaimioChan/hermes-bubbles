@@ -130,6 +130,15 @@ export interface Messages {
   workspaceApply: string;
   workspaceSessionCwd: string;
   workspaceLoadFailed: string;
+  /** History panel: the flat recent list vs the project tree. */
+  recent: string;
+  projects: string;
+  newChatInProject: string;
+  ungrouped: string;
+  noProjects: string;
+  projectsFailed: string;
+  projectSessionCount: (n: number) => string;
+  showAllSessions: string;
   reasoning: string;
   reasoningLow: string;
   reasoningMedium: string;
@@ -269,6 +278,14 @@ const EN: Messages = {
   workspaceApply: "Use",
   workspaceSessionCwd: "This chat's directory",
   workspaceLoadFailed: "Could not list workspaces",
+  recent: "Recent",
+  projects: "Projects",
+  newChatInProject: "New chat here",
+  ungrouped: "Ungrouped",
+  noProjects: "No projects yet",
+  projectsFailed: "Could not load projects",
+  projectSessionCount: (n) => `${n} ${n === 1 ? "session" : "sessions"}`,
+  showAllSessions: "Show all",
   reasoning: "Reasoning",
   reasoningLow: "Low",
   reasoningMedium: "Medium",
@@ -412,6 +429,14 @@ const ZH: Messages = {
   workspaceApply: "使用",
   workspaceSessionCwd: "本对话所在目录",
   workspaceLoadFailed: "无法列出工作区",
+  recent: "最近",
+  projects: "项目",
+  newChatInProject: "在此新建对话",
+  ungrouped: "未归类",
+  noProjects: "还没有项目",
+  projectsFailed: "加载项目失败",
+  projectSessionCount: (n) => `${n} 个会话`,
+  showAllSessions: "展开全部",
   reasoning: "思考",
   reasoningLow: "低",
   reasoningMedium: "中",

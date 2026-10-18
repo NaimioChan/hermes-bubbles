@@ -139,6 +139,14 @@ var HermesBubbles = (() => {
     workspaceApply: "Use",
     workspaceSessionCwd: "This chat's directory",
     workspaceLoadFailed: "Could not list workspaces",
+    recent: "Recent",
+    projects: "Projects",
+    newChatInProject: "New chat here",
+    ungrouped: "Ungrouped",
+    noProjects: "No projects yet",
+    projectsFailed: "Could not load projects",
+    projectSessionCount: (n) => `${n} ${n === 1 ? "session" : "sessions"}`,
+    showAllSessions: "Show all",
     reasoning: "Reasoning",
     reasoningLow: "Low",
     reasoningMedium: "Medium",
@@ -280,6 +288,14 @@ var HermesBubbles = (() => {
     workspaceApply: "\u4F7F\u7528",
     workspaceSessionCwd: "\u672C\u5BF9\u8BDD\u6240\u5728\u76EE\u5F55",
     workspaceLoadFailed: "\u65E0\u6CD5\u5217\u51FA\u5DE5\u4F5C\u533A",
+    recent: "\u6700\u8FD1",
+    projects: "\u9879\u76EE",
+    newChatInProject: "\u5728\u6B64\u65B0\u5EFA\u5BF9\u8BDD",
+    ungrouped: "\u672A\u5F52\u7C7B",
+    noProjects: "\u8FD8\u6CA1\u6709\u9879\u76EE",
+    projectsFailed: "\u52A0\u8F7D\u9879\u76EE\u5931\u8D25",
+    projectSessionCount: (n) => `${n} \u4E2A\u4F1A\u8BDD`,
+    showAllSessions: "\u5C55\u5F00\u5168\u90E8",
     reasoning: "\u601D\u8003",
     reasoningLow: "\u4F4E",
     reasoningMedium: "\u4E2D",
@@ -1480,6 +1496,61 @@ var HermesBubbles = (() => {
     return value ? { cwd: value, cwd_explicit: true } : {};
   }
 
+  // src/core/projects.ts
+  function projectRows(tree2) {
+    const projects = [...tree2?.projects ?? []];
+    const rows = projects.map((project) => ({
+      project,
+      preview: [...project.previewSessions ?? []],
+      workspace: projectWorkspacePath(project)
+    }));
+    rows.sort((a, b) => {
+      if (Boolean(a.project.isNoProject) !== Boolean(b.project.isNoProject)) {
+        return a.project.isNoProject ? 1 : -1;
+      }
+      const byActive = (b.project.lastActive ?? 0) - (a.project.lastActive ?? 0);
+      if (byActive !== 0) return byActive;
+      return a.project.label.localeCompare(b.project.label);
+    });
+    return rows;
+  }
+  function projectWorkspacePath(project) {
+    if (project.isNoProject) return "";
+    const direct = (project.path ?? "").trim();
+    if (direct) return direct;
+    for (const repo of project.repos ?? []) {
+      const path = (repo.path ?? "").trim();
+      if (path) return path;
+    }
+    return "";
+  }
+  function sessionsOfProject(project) {
+    if (!project) return [];
+    const byId = /* @__PURE__ */ new Map();
+    const push = (row) => {
+      if (!row?.id) return;
+      const existing = byId.get(row.id);
+      if (existing) {
+        byId.set(row.id, { ...existing, ...Object.fromEntries(Object.entries(row).filter(([, v]) => v != null)) });
+        return;
+      }
+      byId.set(row.id, row);
+    };
+    for (const repo of project.repos ?? []) {
+      for (const lane of repo.groups ?? []) {
+        for (const session of lane.sessions ?? []) push(session);
+      }
+    }
+    for (const session of project.previewSessions ?? []) push(session);
+    const rows = [...byId.values()];
+    rows.sort((a, b) => lastActiveOf(b) - lastActiveOf(a));
+    return rows;
+  }
+  function lastActiveOf(row) {
+    const value = row.last_active ?? row.started_at ?? 0;
+    return Number.isFinite(value) ? Number(value) : 0;
+  }
+
   // src/gateway/channel.ts
   var DEFAULT_REQUEST_TIMEOUT_MS = 12e4;
   var DEFAULT_HEARTBEAT_INTERVAL_MS = 15e3;
@@ -2033,6 +2104,30 @@ var HermesBubbles = (() => {
       const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
       const payload = await this.fetchJSON(path, { method: "GET" });
       return payload ?? {};
+    }
+    // ── projects ─────────────────────────────────────────────────────────────
+    /**
+     * Projects + their recent sessions, from the tree the desktop sidebar uses.
+     *
+     * `hydrate` is off in this call and the preview is deliberately tiny: the
+     * backend resolves a git branch per distinct session cwd, and asking for the
+     * whole tree on a Windows checkout is seconds, not milliseconds. The drill-in
+     * (`projectSessions`) is what pays for the rest, one project at a time.
+     */
+    async projectsTree(previewLimit = 2, sessionLimit = 2e3) {
+      const result = await this.rpc("projects.tree", {
+        preview_limit: previewLimit,
+        session_limit: sessionLimit
+      });
+      return result ?? {};
+    }
+    /** One project's lanes, fully hydrated (every session, not just the preview). */
+    async projectSessions(projectId, sessionLimit = 300) {
+      const result = await this.rpc("projects.project_sessions", {
+        project_id: projectId,
+        session_limit: sessionLimit
+      });
+      return result?.project ?? null;
     }
     /**
      * Attach to a stored session.
@@ -4549,6 +4644,161 @@ var HermesBubbles = (() => {
     };
   }
 
+  // src/ui/ProjectList.tsx
+  function ProjectList(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    const { useState } = sdk.hooks;
+    const t = messagesFor(props.locale);
+    const [expanded, setExpanded] = useState({});
+    const toggle = (row) => {
+      const id = row.project.id;
+      const next = !expanded[id];
+      setExpanded((prev) => ({ ...prev, [id]: next }));
+      if (next && !props.sessionCache[id]) props.onExpand(id);
+    };
+    const sessionRow = (row) => {
+      const isOpen = props.openStoredIds.includes(row.id);
+      const isBusy = props.busyStoredIds.includes(row.id);
+      const isActive = row.id === props.activeStoredId;
+      const title = row.title || row.id.slice(0, 8);
+      return React.createElement(
+        "div",
+        {
+          key: row.id,
+          "data-hb": "project-session",
+          className: "hb-proj-session",
+          title: row.preview || title,
+          style: { background: isActive ? "var(--color-muted)" : "transparent" },
+          onClick: () => props.onOpen(row.id)
+        },
+        React.createElement(
+          "span",
+          { className: "hb-proj-session-title" },
+          row.title || t.untitled
+        ),
+        isOpen ? React.createElement("span", {
+          className: isBusy ? "hb-dot hb-caret" : "hb-dot",
+          "data-hb": "session-active",
+          "data-state": isBusy ? "busy" : "open",
+          title: isBusy ? t.sessionRunning : t.sessionOpen,
+          style: {
+            width: "0.4rem",
+            height: "0.4rem",
+            borderRadius: "9999px",
+            background: "var(--color-primary)",
+            opacity: isActive ? 1 : 0.45
+          }
+        }) : null,
+        React.createElement(
+          "span",
+          { className: "hb-proj-session-time", style: { color: "var(--color-muted-foreground)" } },
+          relativeTime(lastActiveOf(row), sdk, props.locale)
+        )
+      );
+    };
+    if (props.loading) {
+      return React.createElement(
+        "div",
+        { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
+        t.historyLoading
+      );
+    }
+    if (props.failed) {
+      return React.createElement(
+        "div",
+        { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
+        t.projectsFailed
+      );
+    }
+    if (props.rows.length === 0) {
+      return React.createElement(
+        "div",
+        { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
+        t.noProjects
+      );
+    }
+    return React.createElement(
+      "div",
+      { "data-hb": "project-list", className: "hb-proj-list" },
+      props.rows.map((row) => {
+        const id = row.project.id;
+        const isOpen = Boolean(expanded[id]);
+        const hydrated = props.sessionCache[id];
+        const sessions = isOpen && hydrated ? hydrated : row.preview;
+        const count = row.project.sessionCount ?? row.project.sessionIds?.length ?? sessions.length;
+        const more = count > sessions.length;
+        const label = row.project.isNoProject ? t.ungrouped : row.project.label;
+        return React.createElement(
+          "div",
+          { key: id, className: "hb-proj" },
+          React.createElement(
+            "div",
+            { className: "hb-proj-head" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "project-toggle",
+                "data-open": isOpen ? "true" : "false",
+                className: "hb-proj-toggle",
+                title: label,
+                onClick: () => toggle(row)
+              },
+              React.createElement("span", { className: "hb-proj-caret" }, isOpen ? "\u25BE" : "\u25B8"),
+              React.createElement(
+                "span",
+                {
+                  className: "hb-proj-name",
+                  style: {
+                    color: row.project.isNoProject ? "var(--color-muted-foreground)" : "var(--color-card-foreground)"
+                  }
+                },
+                label
+              ),
+              React.createElement("span", { className: "hb-proj-count" }, String(count))
+            ),
+            // "New chat here" is the reason this view exists beyond being a list:
+            // it aims the next session at the project's folder.
+            row.workspace ? React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "project-new-chat",
+                "data-hb-path": row.workspace,
+                className: "hb-proj-new",
+                title: `${t.newChatInProject}: ${row.workspace}`,
+                "aria-label": t.newChatInProject,
+                onClick: () => props.onNewChat(row.workspace)
+              },
+              "\uFF0B"
+            ) : null
+          ),
+          props.loadingProjectId === id && isOpen && !hydrated ? React.createElement(
+            "div",
+            { className: "hb-text-micro hb-proj-note", style: { color: "var(--color-muted-foreground)" } },
+            t.historyLoading
+          ) : null,
+          sessions.length ? React.createElement(
+            "div",
+            { className: "hb-proj-body" },
+            sessions.map((session) => sessionRow(session))
+          ) : null,
+          isOpen && more && !hydrated ? React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "project-expand",
+              className: "hb-proj-more",
+              onClick: () => props.onExpand(id)
+            },
+            `${t.showAllSessions} \xB7 ${t.projectSessionCount(count)}`
+          ) : null
+        );
+      })
+    );
+  }
+
   // src/ui/HistoryPanel.ts
   function relativeTime(seconds, sdk, locale) {
     if (!seconds) return "";
@@ -4601,7 +4851,7 @@ var HermesBubbles = (() => {
               title: t.refreshTitle,
               className: "cursor-pointer px-1.5 text-xs",
               style: { color: "var(--color-muted-foreground)" },
-              onClick: props.onRefresh
+              onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh
             },
             "\u27F3"
           ),
@@ -4618,7 +4868,39 @@ var HermesBubbles = (() => {
           )
         )
       ),
+      // Recent vs Projects. Two words, not icons: the difference is a grouping
+      // rule, and a glyph pair would need a legend.
       React.createElement(
+        "div",
+        { className: "hb-proj-tabs shrink-0" },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "history-mode-recent",
+            "data-active": props.mode === "recent" ? "true" : "false",
+            className: "hb-proj-tab",
+            onClick: () => props.onModeChange("recent")
+          },
+          t.recent
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "history-mode-projects",
+            "data-active": props.mode === "projects" ? "true" : "false",
+            className: "hb-proj-tab",
+            onClick: () => props.onModeChange("projects")
+          },
+          t.projects
+        )
+      ),
+      props.mode === "projects" ? React.createElement(ProjectList, {
+        sdk: props.sdk,
+        locale: props.locale,
+        ...props.projectView
+      }) : React.createElement(
         "div",
         { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
         props.loading ? React.createElement(
@@ -5748,6 +6030,12 @@ var HermesBubbles = (() => {
     const [workspaces, setWorkspaces] = useState(null);
     const [workspaceLoading, setWorkspaceLoading] = useState(false);
     const [workspaceFailed, setWorkspaceFailed] = useState(false);
+    const [historyMode, setHistoryMode] = useState("recent");
+    const [projectTree, setProjectTree] = useState(null);
+    const [projectsLoading, setProjectsLoading] = useState(false);
+    const [projectsFailed, setProjectsFailed] = useState(false);
+    const [projectSessionCache, setProjectSessionCache] = useState({});
+    const [loadingProjectId, setLoadingProjectId] = useState(null);
     const [editing, setEditing] = useState(null);
     const [notifyOn, setNotifyOn] = useState(() => notifyEnabled());
     const [notifyPermission, setNotifyPermission] = useState(
@@ -5823,6 +6111,34 @@ var HermesBubbles = (() => {
     const onRescanWorkspaces = useCallback(() => {
       void loadWorkspaces(true);
     }, [loadWorkspaces]);
+    const loadProjects = useCallback(() => {
+      setProjectsLoading(true);
+      return controller.projectsTree().then((tree2) => {
+        setProjectTree(tree2);
+        setProjectsFailed(false);
+      }).catch(() => setProjectsFailed(true)).finally(() => setProjectsLoading(false));
+    }, [controller]);
+    useEffect(() => {
+      if (historyMode !== "projects" || projectTree !== null) return;
+      void loadProjects();
+    }, [historyMode, projectTree, loadProjects]);
+    const loadProjectSessions = useCallback(
+      (projectId) => {
+        setLoadingProjectId(projectId);
+        controller.projectSessions(projectId).then((project) => {
+          setProjectSessionCache((prev) => ({ ...prev, [projectId]: sessionsOfProject(project) }));
+        }).catch(() => setProjectSessionCache((prev) => ({ ...prev, [projectId]: [] }))).finally(() => setLoadingProjectId((current) => current === projectId ? null : current));
+      },
+      [controller]
+    );
+    const projectViewRows = useMemo(() => projectRows(projectTree), [projectTree]);
+    const onNewChatInProject = useCallback(
+      (workspace) => {
+        controller.setWorkspace(workspace);
+        controller.newSession().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      },
+      [controller]
+    );
     useEffect(() => {
       bottomRef.current?.scrollIntoView({ block: "end" });
     }, [timeline.items.length, timeline.items.at(-1)]);
@@ -6118,6 +6434,24 @@ var HermesBubbles = (() => {
           sdk,
           locale,
           open: historyOpen,
+          mode: historyMode,
+          onModeChange: setHistoryMode,
+          onRefreshProjects: () => {
+            void loadProjects();
+          },
+          projectView: {
+            rows: projectViewRows,
+            loading: projectsLoading,
+            failed: projectsFailed,
+            activeStoredId,
+            openStoredIds: tabs.map((tab) => tab.storedId).filter((id) => Boolean(id)),
+            busyStoredIds: tabs.filter((tab) => running.includes(tab.key)).map((tab) => tab.storedId).filter((id) => Boolean(id)),
+            sessionCache: projectSessionCache,
+            loadingProjectId,
+            onExpand: loadProjectSessions,
+            onOpen: (id) => onOpenStored(id, ""),
+            onNewChat: onNewChatInProject
+          },
           sessions: stored,
           loading: loadingStored,
           activeStoredId,

@@ -8,6 +8,15 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 23:34 · hermes · 历史面板加「项目」视图（两层，带新建对话）
+
+- 背景：用户要桌面端那样按项目看历史会话。定了三条：只做两层（项目 → 会话，泳道砍掉）、保留平铺列表改成两个页签、项目行加「在此新建对话」。双语言界面同步适配。
+- 改：新增 `core/projects.ts`（树排序：Home 桶垫底；`projectWorkspacePath` = project.path → 第一个 repo.path；`sessionsOfProject` 拍平 lane 并按 id 去重、按 last_active 倒序）；`app/controller.ts`（`projectsTree(preview_limit 2, session_limit 2000)`、`projectSessions(id, 300)`，均走 `rpc()`）；`core/i18n.ts`（recent/projects/newChatInProject/ungrouped/noProjects/projectsFailed/projectSessionCount/showAllSessions，en + zh）；新增 `ui/ProjectList.tsx`（项目行 + 计数 + ＋按钮 + 展开后的会话行 + 状态灯 + 展开全部）；`ui/HistoryPanel.ts`（顶部页签 `history-mode-*`，刷新按钮按当前页签分派，`relativeTime` 改为导出复用）；`ui/ChatPage.ts`（懒加载树、按项目缓存 drill-in、`onNewChatInProject` 先 `setWorkspace` 再 `newSession`）；`ui/style.css`（`hb-proj-*` 全套）；`tests/projects.test.ts` 新增 13 条、`tests/controller.test.ts` 加 3 条；`scripts/verify.mjs` 加 6 条实测断言；`docs/01-protocol-contract.md`（`projects.tree` / `projects.project_sessions` 形状与成本）、`GLOSSARY.md`、`README.zh-CN.md`
+- 验证：`npx tsc --noEmit` 干净；`npx vitest run` 512 passed（24 文件）；`node scripts/audit-classes.mjs` 172/172；`node scripts/verify.mjs` 87/87（真仪表盘：页签切换、3 个项目行「hermes-bubbles / personal-translation / Ungrouped 106」、2 个＋按钮、展开出 4 条会话、切回最近 40 行）；`.cache/probe-projects.mjs` 端到端确认：点项目行的＋ → 发一条 → `state.db` 最新会话 cwd 正是该项目路径
+- 遗留：AGENTS.md 里「data-hb 钩子清单」那条想补上 `project-*` 钩子，写入被审批拦截（超时未确认），铁律 27 已落，清单待用户同意后再补。项目视图暂不支持改名/删除（留在最近页签），也没有搜索框。
+
+---
+
 ## 2026-10-18 23:01 · hermes · 工作区选择：输入框下方的小按钮
 
 - 背景：仪表盘自带 `/chat` 有工作区选择器，气泡插件接管 `/chat` 后没有，于是每个新对话都落在 dashboard 进程的启动目录，且没有入口指定。用户要求「输入框下面加一个小按钮，新建对话时选工作目录」。

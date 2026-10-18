@@ -22,11 +22,12 @@ import {
   writeStoredWorkspace,
   type WorkspacesPayload,
 } from "../core/workspaces";
+import { projectRows, sessionsOfProject, type ProjectSessionRow, type ProjectsTree } from "../core/projects";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { createControllerHolder } from "../app/persistent";
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
-import { HistoryPanel, type StoredSession } from "./HistoryPanel";
+import { HistoryPanel, type HistoryMode, type StoredSession } from "./HistoryPanel";
 import { LocatorRail } from "./LocatorRail";
 import { ModelPicker } from "./ModelPicker";
 import { ApprovalCard, ClarifyCard, approvalResult } from "./RequestCards";
@@ -131,6 +132,16 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceFailed, setWorkspaceFailed] = useState(false);
+  // History panel: flat recents vs project grouping. The tree is fetched lazily
+  // (its first read git-probes every distinct session cwd on the host).
+  const [historyMode, setHistoryMode] = useState<HistoryMode>("recent");
+  const [projectTree, setProjectTree] = useState<ProjectsTree | null>(null);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const [projectSessionCache, setProjectSessionCache] = useState<
+    Record<string, ProjectSessionRow[] | undefined>
+  >({});
+  const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
   // Set while an existing user message is being rewritten: Send then truncates
   // and resubmits instead of appending.
   const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
@@ -282,6 +293,56 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onRescanWorkspaces = useCallback(() => {
     void loadWorkspaces(true);
   }, [loadWorkspaces]);
+
+  // ── project grouping (history panel) ─────────────────────────────────────
+
+  const loadProjects = useCallback(() => {
+    setProjectsLoading(true);
+    return controller
+      .projectsTree()
+      .then((tree) => {
+        setProjectTree(tree);
+        setProjectsFailed(false);
+      })
+      .catch(() => setProjectsFailed(true))
+      .finally(() => setProjectsLoading(false));
+  }, [controller]);
+
+  // Lazy by design: the tree's first read resolves a git branch for every
+  // distinct session cwd on the host, which is seconds on a big checkout. Paying
+  // it when the tab is opened is fine; paying it on every page load is not.
+  useEffect(() => {
+    if (historyMode !== "projects" || projectTree !== null) return;
+    void loadProjects();
+  }, [historyMode, projectTree, loadProjects]);
+
+  const loadProjectSessions = useCallback(
+    (projectId: string) => {
+      setLoadingProjectId(projectId);
+      controller
+        .projectSessions(projectId)
+        .then((project) => {
+          setProjectSessionCache((prev) => ({ ...prev, [projectId]: sessionsOfProject(project) }));
+        })
+        .catch(() => setProjectSessionCache((prev) => ({ ...prev, [projectId]: [] })))
+        .finally(() => setLoadingProjectId((current) => (current === projectId ? null : current)));
+    },
+    [controller],
+  );
+
+  const projectViewRows = useMemo(() => projectRows(projectTree), [projectTree]);
+
+  const onNewChatInProject = useCallback(
+    (workspace: string) => {
+      // Aim the next session at the project's folder, then open it: the same
+      // preference the workspace chip writes, so the chip's label follows.
+      controller.setWorkspace(workspace);
+      controller
+        .newSession()
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
 
   // ── transcript scroll ───────────────────────────────────────────────────
   useEffect(() => {
@@ -673,6 +734,27 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         sdk,
         locale,
         open: historyOpen,
+        mode: historyMode,
+        onModeChange: setHistoryMode,
+        onRefreshProjects: () => {
+          void loadProjects();
+        },
+        projectView: {
+          rows: projectViewRows,
+          loading: projectsLoading,
+          failed: projectsFailed,
+          activeStoredId,
+          openStoredIds: tabs.map((tab) => tab.storedId).filter((id): id is string => Boolean(id)),
+          busyStoredIds: tabs
+            .filter((tab) => running.includes(tab.key))
+            .map((tab) => tab.storedId)
+            .filter((id): id is string => Boolean(id)),
+          sessionCache: projectSessionCache,
+          loadingProjectId,
+          onExpand: loadProjectSessions,
+          onOpen: (id: string) => onOpenStored(id, ""),
+          onNewChat: onNewChatInProject,
+        },
         sessions: stored,
         loading: loadingStored,
         activeStoredId,

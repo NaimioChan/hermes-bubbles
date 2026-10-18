@@ -1203,3 +1203,35 @@ describe("workspace", () => {
     expect(activeTimeline(controller.getSnapshot()).meta.cwd).toBe("/home/me/code/dawview");
   });
 });
+
+describe("projects", () => {
+  it("asks for a shallow tree: two previews, no hydration", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.projectsTree();
+    await tick();
+    const frame = socket.frames().filter((f) => f.method === "projects.tree").at(-1);
+    expect(frame?.params).toEqual({ preview_limit: 2, session_limit: 2000 });
+    socket.replyTo("projects.tree", { projects: [], active_id: null, scoped_session_ids: [] });
+    expect(await pending).toEqual({ projects: [], active_id: null, scoped_session_ids: [] });
+  });
+
+  it("drills into one project by id", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.projectSessions("p_1");
+    await tick();
+    const frame = socket.frames().filter((f) => f.method === "projects.project_sessions").at(-1);
+    expect(frame?.params).toEqual({ project_id: "p_1", session_limit: 300 });
+    socket.replyTo("projects.project_sessions", {
+      project: { id: "p_1", label: "Hermes", repos: [], previewSessions: [] },
+    });
+    expect((await pending)?.id).toBe("p_1");
+  });
+
+  it("returns null when the drill-in has no project", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.projectSessions("gone");
+    await tick();
+    socket.replyTo("projects.project_sessions", { project: null });
+    expect(await pending).toBeNull();
+  });
+});

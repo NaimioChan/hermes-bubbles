@@ -35,6 +35,7 @@ import { parseCommandInput, parseDispatch, type DispatchResult } from "../core/s
 import type { TurnNotice } from "../core/notify";
 import type { TimelineItem } from "../core/types";
 import { createCwdParams, type WorkspacesPayload } from "../core/workspaces";
+import type { ProjectNode, ProjectsTree } from "../core/projects";
 import type { ServerRequest } from "../gateway/channel";
 import { GatewayClient, type ConnectionState } from "../gateway/client";
 
@@ -254,6 +255,33 @@ export class ChatController {
     const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
     const payload = await this.fetchJSON<WorkspacesPayload>(path, { method: "GET" });
     return payload ?? {};
+  }
+
+  // ── projects ─────────────────────────────────────────────────────────────
+
+  /**
+   * Projects + their recent sessions, from the tree the desktop sidebar uses.
+   *
+   * `hydrate` is off in this call and the preview is deliberately tiny: the
+   * backend resolves a git branch per distinct session cwd, and asking for the
+   * whole tree on a Windows checkout is seconds, not milliseconds. The drill-in
+   * (`projectSessions`) is what pays for the rest, one project at a time.
+   */
+  async projectsTree(previewLimit = 2, sessionLimit = 2000): Promise<ProjectsTree> {
+    const result = await this.rpc<ProjectsTree>("projects.tree", {
+      preview_limit: previewLimit,
+      session_limit: sessionLimit,
+    });
+    return result ?? {};
+  }
+
+  /** One project's lanes, fully hydrated (every session, not just the preview). */
+  async projectSessions(projectId: string, sessionLimit = 300): Promise<ProjectNode | null> {
+    const result = await this.rpc<{ project: ProjectNode | null }>("projects.project_sessions", {
+      project_id: projectId,
+      session_limit: sessionLimit,
+    });
+    return result?.project ?? null;
   }
 
   /**

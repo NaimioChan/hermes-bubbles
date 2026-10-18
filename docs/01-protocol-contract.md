@@ -134,6 +134,25 @@
 
 `SessionListRow`: `id`（stored id）、`resolved_id`、`title`、`preview`、`started_at`（unix 秒）、`message_count`、`source`。
 
+### `projects.tree`
+
+参数 `{preview_limit, session_limit}`（`ProfileParams` 另加 `profile`）→ `{projects: ProjectTreeNode[], active_id, scoped_session_ids}`。
+
+这是桌面端侧栏那棵树：`projects` 里每个节点是显式项目、自动发现的 git 仓库，或 `__no_project__`（`isNoProject: true`，label 由后端写成 `"Home"`——**界面上的「未归类」由客户端按 locale 覆盖**）。节点字段：
+
+- `{id, label, path, color, icon, isAuto, isNoProject, sessionCount, lastActive, totalTokens, totalCostUsd}`
+- `repos: [{id, label, path, sessionCount, groups: [{id, label, path, isMain, isKanban, isGit, sessions}]}]` —— `hydrate=false` 时 `sessions` 为空数组
+- `previewSessions: ProjectTreeSession[]` —— 就是 `_project_tree_row` 的字段（`id` / `title` / `preview` / `started_at` / `last_active` / `message_count` / `cwd` / `git_branch` / `git_repo_root` / `model` / 用量）+ `profile`
+- `sessionIds: string[]`
+
+`preview_limit` 默认 3、`session_limit` 默认 2000。这个调用在后端要**对每个不同的会话 cwd 做一次 git probe**（Windows 上首次可能是秒级），所以插件只在打开「项目」页签时拉一次，且 `preview_limit: 2`；`hydrate` 在 `projects.tree` 里恒为 `false`。
+
+### `projects.project_sessions`
+
+参数 `{project_id, session_limit}` → `{project: ProjectTreeNode | null}`，同上的树但**只含一个项目且 hydration 打开**（该项目的每条 lane 都带 `sessions`）。`session_limit` 默认 5000，插件用 300。`project_id` 为空回 `5063`；找不到该 id 时 `project` 是 `null`。
+
+分组的客户端口径（`core/projects.ts`）：只做两层，把 lane 拍平后按 `id` 去重、按 `last_active` 倒序；Home 桶永远排最后；「在此新建对话」用的路径是 `project.path` → 第一个 `repos[].path` → 空（Home 桶没有路径，按钮不出）。
+
 ### `session.history`
 
 参数 `{session_id}`（stored id 或 runtime id）→ `{count, messages: TranscriptMessage[]}`。

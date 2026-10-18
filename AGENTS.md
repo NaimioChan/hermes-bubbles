@@ -50,6 +50,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 24. **写进注入脚本的正则用 `String.raw`。** `verify.mjs` 的表达式是模板字符串，`\/` 与 `\s` 会被当成转义消费掉，`/\/config/` 会变成 `//config/`（行注释），整段代码被注释掉后报 `Unexpected token`。这个坑排查了三轮才定位，代价很高。
 25. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
 26. **工作区是偏好，不是会话属性。** 选中的目录只在 `session.create` 那一刻变成会话的 `cwd`；已存在的会话改不了目录（后端在会话行上钉死了）。所以状态放在 `MultiState.workspace`（下一个新对话用），不要塞进 `SessionTab`；`send()` 在没有页签时也会 `newSession()`，这条路必须拿到同一个答案。列表走 REST `/api/chat/workspaces`（与仪表盘自带选择器同源），写入用 `{cwd, cwd_explicit: true}`——少了 `cwd_explicit`，网关探不到路径时会静默丢掉工作区。
+27. **历史面板分「最近 / 项目」两段，项目视图只做两层。** 后端 `projects.tree` 给的是 project → repo → lane（分支/worktree/kanban）→ session，插件把 lane 拍平（`core/projects.ts`），因为这里不驱动 worktree，多一层只多一级缩进。`projects.tree` 会在宿主上对每个不同的 cwd 做 git probe，所以**只在打开项目页签时拉一次**（`preview_limit: 2`），展开单个项目才 `projects.project_sessions`。Home 桶（`isNoProject`）显示成按 locale 的「未归类」，且不给「新建对话」按钮——它没有路径。改名/删除只留在最近页签，项目视图不做第二套内联编辑器。
 
 ## 禁区
 

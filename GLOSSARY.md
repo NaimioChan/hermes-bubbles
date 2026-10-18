@@ -53,3 +53,7 @@
 ## 工作区（workspace）
 
 一个宿主机上的绝对路径，作为**下一个新对话**的起始目录，存在 `MultiState.workspace` 里，按 profile 记在 localStorage。**不是** 打开中会话的属性：会话的工作目录在 `session.create` 那一刻由后端钉在会话行上（`SessionMeta.cwd`），之后改不了。面板里同时出现两者时，那个只读的「本对话所在目录」说的是后者。
+
+## 项目视图（project view）
+
+历史面板的另一段（「最近 / 项目」页签的后者），按后端 `projects.tree` 分组，只做两层：项目 → 会话。**不是**桌面端侧栏的完整树——分支 / worktree / kanban 泳道在这里被拍平成一个列表，因为这个插件不驱动 worktree。没有工作区的会话进 `__no_project__` 桶，界面叫「未归类」（后端那个节点的 label 是英文 "Home"，由客户端按 locale 覆盖）。

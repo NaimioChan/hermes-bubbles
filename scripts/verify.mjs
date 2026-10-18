@@ -1657,6 +1657,88 @@ async function main() {
       JSON.stringify(wsRestored),
     );
 
+    // ── history: recent vs projects ────────────────────────────────────────
+    // The project tree is the one call in this suite that can take seconds on
+    // the host (it git-probes every distinct session cwd), so it gets its own
+    // generous wait rather than the shared 2s default.
+    if (!(await session.evaluate(`Boolean(document.querySelector('[data-hb="history-panel"]'))`))) {
+      await session.evaluate(`document.querySelector('[data-hb="history-toggle"]').click()`);
+      await sleep(400);
+    }
+
+    const modeTabs = await session.evaluate(`(() => {
+      const recent = document.querySelector('[data-hb="history-mode-recent"]');
+      const projects = document.querySelector('[data-hb="history-mode-projects"]');
+      return { recent: Boolean(recent), projects: Boolean(projects), active: recent ? recent.dataset.active : null };
+    })()`);
+    check(
+      "history panel offers a Recent / Projects switch, starting on Recent",
+      modeTabs.recent === true && modeTabs.projects === true && modeTabs.active === "true",
+      JSON.stringify(modeTabs),
+    );
+
+    await session.evaluate(`document.querySelector('[data-hb="history-mode-projects"]').click()`);
+    const projectsSeen = await waitForOr(session, `Boolean(document.querySelector('[data-hb="project-list"]'))`, {
+      timeout: 30000,
+      label: "project list",
+    });
+    check("the Projects tab renders the project list", projectsSeen, projectsSeen ? undefined : "tree never arrived");
+
+    if (projectsSeen) {
+      const shape = await session.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-hb="project-toggle"]')];
+        const news = [...document.querySelectorAll('[data-hb="project-new-chat"]')];
+        return {
+          rows: rows.length,
+          names: rows.map((el) => el.textContent.trim()).filter(Boolean).slice(0, 4),
+          news: news.length,
+          path: news.length ? news[0].dataset.hbPath : null,
+        };
+      })()`);
+      check(
+        "project rows carry a label and a count",
+        Number(shape.rows) >= 1 && Array.isArray(shape.names) && shape.names.length >= 1,
+        JSON.stringify(shape),
+      );
+      check(
+        '"new chat here" is offered per project, aimed at a real path',
+        Number(shape.news) >= 1 && typeof shape.path === "string" && shape.path.length > 2,
+        JSON.stringify({ news: shape.news, path: shape.path }),
+      );
+
+      // Expand up to three projects; the drill-in is what carries the sessions.
+      await session.evaluate(`(() => {
+        const toggles = [...document.querySelectorAll('[data-hb="project-toggle"]')];
+        for (const el of toggles.slice(0, 3)) if (el.dataset.open !== "true") el.click();
+      })()`);
+      const sessionsSeen = await waitForOr(
+        session,
+        `document.querySelectorAll('[data-hb="project-session"]').length > 0`,
+        { timeout: 30000, label: "project sessions" },
+      );
+      const sessionCount = await session.evaluate(
+        `document.querySelectorAll('[data-hb="project-session"]').length`,
+      );
+      check(
+        "expanding a project reveals its sessions",
+        sessionsSeen && Number(sessionCount) >= 1,
+        `${sessionCount} session row(s)`,
+      );
+    }
+
+    await session.evaluate(`document.querySelector('[data-hb="history-mode-recent"]').click()`);
+    await sleep(300);
+    const backToRecent = await session.evaluate(`(() => ({
+      list: Boolean(document.querySelector('[data-hb="project-list"]')),
+      active: (document.querySelector('[data-hb="history-mode-recent"]') || {}).dataset?.active,
+      rows: document.querySelectorAll('[data-hb="rename-session"]').length,
+    }))()`);
+    check(
+      "switching back to Recent restores the flat list",
+      backToRecent.list === false && backToRecent.active === "true",
+      JSON.stringify(backToRecent),
+    );
+
     const consoleErrors = session.consoleLines.filter(
       (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),
     );

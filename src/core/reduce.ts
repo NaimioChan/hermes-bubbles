@@ -53,6 +53,35 @@ function num(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** Same words, ignoring the whitespace a streamed sentence can differ in. */
+function sameText(a: string, b: string): boolean {
+  const norm = (value: string) => value.replace(/\s+/g, " ").trim();
+  const left = norm(a);
+  return left.length > 0 && left === norm(b);
+}
+
+/**
+ * The reply this turn already produced, even when a block sits after it.
+ *
+ * `openAssistant` only sees the bubble still receiving deltas. A trailing
+ * thinking block seals that bubble, so it is no longer "open" — and treating the
+ * turn as having produced no text is what made `message.complete` append the
+ * reply a second time. Bounded at the turn's own user row so a text-less turn
+ * cannot merge into the previous answer.
+ */
+function turnAssistant(items: readonly TimelineItem[]): AssistantItem | null {
+  let turnStart = -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i]?.kind === "user") {
+      turnStart = i;
+      break;
+    }
+  }
+  const last = lastAssistant(items);
+  if (!last) return null;
+  return items.lastIndexOf(last) > turnStart ? last : null;
+}
+
 function replaceLast(items: TimelineItem[], item: TimelineItem): TimelineItem[] {
   const next = items.slice();
   for (let i = next.length - 1; i >= 0; i -= 1) {
@@ -461,7 +490,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       // `streaming`, and a plain "last assistant" search could reach back into
       // a previous turn when this one produced no text at all. Seal and finish
       // in ONE pass — sealing first would replace the object and break identity.
-      const target = openAssistant(settled);
+      const target = openAssistant(settled) ?? turnAssistant(settled);
       // The turn ended: stamp it for the timestamp and duration lines. `at` is
       // the turn's start and is the wrong number to print under a reply.
       const completedAt = Date.now();
@@ -528,12 +557,25 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       };
     }
 
-    case "reasoning.delta":
-    case "reasoning.available": {
+    case "reasoning.delta": {
       const text = str(p.text);
       if (!text) return timeline;
       // A thinking block that starts once the reply has begun splits the reply:
       // the words on either side are two segments with the block between them.
+      return { items: appendReasoning(sealAssistant(items), text), meta };
+    }
+
+    case "reasoning.available": {
+      const text = str(p.text);
+      if (!text) return timeline;
+      // Some builds relay the FINISHED REPLY through this frame at the end of a
+      // turn (observed on hermes-agent 0.21.7: `reasoning.available` at seq N
+      // carried the same text as the `message.complete` right after it). It is
+      // not reasoning — taking it as one puts the answer in a thinking block and
+      // seals the reply, after which `message.complete` appends the answer a
+      // second time. Nothing to add if the reply already says this.
+      const reply = lastAssistant(items);
+      if (reply && sameText(reply.text, text)) return timeline;
       return { items: appendReasoning(sealAssistant(items), text), meta };
     }
 

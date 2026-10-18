@@ -86,6 +86,39 @@ describe("streaming", () => {
     expect(t.meta.usage).toEqual(usage);
     expect(t.items[0]).toMatchObject({ usage });
   });
+
+  it("does not append the reply a second time when a block sealed the bubble", () => {
+    // The bug that showed the answer twice: text streamed, then a trailing
+    // thinking block sealed the bubble, so `openAssistant` no longer saw it and
+    // the complete frame's own `text` was appended as a second bubble.
+    const t = feed(
+      appendUser(emptyTimeline, "跑一下"),
+      delta("我先看一下。", 1),
+      { type: "tool.start", payload: { tool_id: "t1", name: "terminal" }, seq: 2 },
+      { type: "tool.complete", payload: { tool_id: "t1", result: { output: "hi", exit_code: 0 } }, seq: 3 },
+      { type: "reasoning.delta", payload: { text: "收个尾" }, seq: 4 },
+      { type: "message.complete", payload: { text: "我先看一下。", status: "complete" }, seq: 5 },
+    );
+    const replies = t.items.filter((item) => item.kind === "assistant");
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ text: "我先看一下。", streaming: false });
+    expect(replies[0]).toMatchObject({ completedAt: expect.any(Number) });
+  });
+
+  it("still opens a bubble for a text-less turn instead of merging into the last reply", () => {
+    let t = feed(
+      appendUser(emptyTimeline, "第一轮"),
+      delta("上一轮的回答", 1),
+      { type: "message.complete", payload: { text: "", status: "complete" }, seq: 2 },
+    );
+    t = feed(
+      appendUser(t, "第二轮"),
+      { type: "reasoning.delta", payload: { text: "只想不说" }, seq: 3 },
+      { type: "message.complete", payload: { text: "这轮补上的回答", status: "complete" }, seq: 4 },
+    );
+    const replies = t.items.filter((item) => item.kind === "assistant").map((item) => (item as { text: string }).text);
+    expect(replies).toEqual(["上一轮的回答", "这轮补上的回答"]);
+  });
 });
 
 describe("interim segments", () => {
@@ -161,6 +194,32 @@ describe("reasoning", () => {
     );
     expect(t.items).toHaveLength(1);
     expect(t.items[0]).toMatchObject({ kind: "reasoning", streaming: false });
+  });
+
+  it("ignores a reasoning.available that just relays the finished reply", () => {
+    // hermes-agent 0.21.7 sends the turn's final text through this frame right
+    // before message.complete. Taking it as reasoning put the answer in a
+    // thinking block and sealed the reply, which produced the second bubble.
+    const t = feed(
+      emptyTimeline,
+      delta("命令跑完了。", 1),
+      { type: "reasoning.available", payload: { text: "命令跑完了。" }, seq: 2 },
+      { type: "message.complete", payload: { text: "命令跑完了。", status: "complete" }, seq: 3 },
+    );
+    expect(t.items.filter((item) => item.kind === "reasoning")).toHaveLength(0);
+    const replies = t.items.filter((item) => item.kind === "assistant") as Array<{ text: string; streaming: boolean }>;
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ text: "命令跑完了。", streaming: false });
+  });
+
+  it("still takes a genuinely different reasoning.available as a thinking block", () => {
+    const t = feed(emptyTimeline, delta("答复", 1), {
+      type: "reasoning.available",
+      payload: { text: "非流式 provider 的整块推理" },
+      seq: 2,
+    });
+    const blocks = t.items.filter((item) => item.kind === "reasoning") as Array<{ text: string }>;
+    expect(blocks.map((item) => item.text)).toEqual(["非流式 provider 的整块推理"]);
   });
 
   it("ignores empty reasoning chunks", () => {

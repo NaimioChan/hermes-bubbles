@@ -8,6 +8,14 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 13:55 · hermes · 一轮结束后回复气泡重复
+
+- 现象：整轮跑完后回复气泡出现两份，刷新页面从历史打开只剩一份。
+- 根因：后端在一轮末尾发的 `reasoning.available` 里塞的是**最终回复原文**（0.22.2 / `d923a5eb487` 实测，`_relay_thinking` 走的就是这个事件名），紧跟其后的 `message.complete` 带同样的 `text`。按协议把 `reasoning.available` 当推理处理 → 先给回答开一块「思考」并把回复气泡封口；`message.complete` 于是找不到 open 气泡，走 `finalText` 兜底又追加一个气泡。历史投影按库里的行还原，所以刷新后正常。
+- 改：`core/reduce.ts`（`reasoning.available` 与 `reasoning.delta` 拆开：前者文本与已上屏回复相同则整帧忽略；`message.complete` 的兜底目标改成 `openAssistant ?? turnAssistant`，`turnAssistant` 以最后一条 user 行为界，尾部思考块封了口也算本轮，但不会并进上一轮的回答）；`tests/reduce.test.ts` 加三条回归；`docs/01-protocol-contract.md` 记下这个例外与兜底口径
+- 验证：`npx tsc --noEmit` 干净；`npx vitest run` 464 passed；`node scripts/audit-classes.mjs` 170/170；`node scripts/verify.mjs` 77/77；另用 `.cache/probe-dup.mjs` 抓真实帧复现+验收，修前 DOM 是 `user → reasoning → tool → assistant → reasoning → assistant`（两个 53–56 字相同回复），修后 `user → reasoning → tool → assistant`
+- 遗留：`verify.mjs` 的「删除历史行」在两次跑里失败过一次（`gone: false`），属于铁律 19 那条「REST DELETE 对活跃会话返回 ok 却删不掉」，与本改动无关
+
 ## 2026-10-18 13:25 · hermes · 剩余中文文案收进 i18n 目录（#6 / #7）
 
 - 背景：合并外部 PR #8（用量读数与指标 tooltip 走目录，作者 jcrabapple）后，补齐它刻意没收的那部分；issue #6 的清单与 #7 的 tab 标题哨兵一并做掉。

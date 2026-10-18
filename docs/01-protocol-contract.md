@@ -263,9 +263,9 @@
 | `message.start` | 无 | 开一个新助手气泡（streaming）。若上一轮还在 streaming，先封口 |
 | `message.delta` | `{text, rendered?, verbose?}` | `text` 追加到当前 streaming 气泡；没有则惰性创建 |
 | `message.interim` | `{text, already_streamed}` | 封口当前气泡（它已经通过 delta 可见了）。之后的新 delta 开新气泡 |
-| `message.complete` | `{text, usage?, status?, error?, partial?, reasoning?, billing?, failure_reason?}` | 收尾：`status:"error"` 时标错误；`text` 非空且当前气泡为空时用它兜底；`streaming=false`；记 usage |
+| `message.complete` | `{text, usage?, status?, error?, partial?, reasoning?, billing?, failure_reason?}` | 收尾：`status:"error"` 时标错误；`text` 只在**本轮**气泡没有正文时兜底（本轮气泡被尾部思考块封口了也算本轮，界碑是最后一条 user 行；不许越过它去并进上一轮的回答）；`streaming=false`；记 usage |
 | `reasoning.delta` | `{text, verbose?}` | 追加到当前**思考块**（`ReasoningItem`，时间线尾部独立的 reasoning 条目；回复已开始时先封口那条回复） |
-| `reasoning.available` | `{text, verbose?}` | 整块推理（非流式 provider），落在同一个思考块上 |
+| `reasoning.available` | `{text, verbose?}` | 整块推理（非流式 provider），落在同一个思考块上。**0.22.2 实测有例外**：一轮结束时后端也把**最终回复原文**塞进这一帧（`_relay_thinking` 走的是 `reasoning.available`），紧跟其后的 `message.complete` 带同样的 `text`。所以文本与已上屏的回复相同时整帧忽略——否则回答会先变成一块「思考」，再被 `message.complete` 追加成第二个气泡 |
 | `thinking.delta` | `{text}` | **不进时间线**。绝大多数是 spinner 重绘 |
 | `session.usage` | `{usage}` | 更新上下文占用条 |
 | `session.title` | `{session_id, title}` | 自动标题，更新会话列表 |

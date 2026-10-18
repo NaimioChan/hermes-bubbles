@@ -594,6 +594,23 @@ var HermesBubbles = (() => {
   function num(value) {
     return typeof value === "number" && Number.isFinite(value) ? value : void 0;
   }
+  function sameText(a, b) {
+    const norm = (value) => value.replace(/\s+/g, " ").trim();
+    const left = norm(a);
+    return left.length > 0 && left === norm(b);
+  }
+  function turnAssistant(items) {
+    let turnStart = -1;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i]?.kind === "user") {
+        turnStart = i;
+        break;
+      }
+    }
+    const last = lastAssistant(items);
+    if (!last) return null;
+    return items.lastIndexOf(last) > turnStart ? last : null;
+  }
   function replaceLast(items, item) {
     const next = items.slice();
     for (let i = next.length - 1; i >= 0; i -= 1) {
@@ -891,7 +908,7 @@ var HermesBubbles = (() => {
         const error = str(p.error) || str(p.failure_reason);
         const usage = p.usage ?? null;
         const settled = sealReasoning(items);
-        const target = openAssistant(settled);
+        const target = openAssistant(settled) ?? turnAssistant(settled);
         const completedAt = Date.now();
         const durationS = turnDuration(items, completedAt);
         let nextItems;
@@ -951,10 +968,16 @@ var HermesBubbles = (() => {
           }
         };
       }
-      case "reasoning.delta":
+      case "reasoning.delta": {
+        const text = str(p.text);
+        if (!text) return timeline;
+        return { items: appendReasoning(sealAssistant(items), text), meta };
+      }
       case "reasoning.available": {
         const text = str(p.text);
         if (!text) return timeline;
+        const reply = lastAssistant(items);
+        if (reply && sameText(reply.text, text)) return timeline;
         return { items: appendReasoning(sealAssistant(items), text), meta };
       }
       case "tool.start": {

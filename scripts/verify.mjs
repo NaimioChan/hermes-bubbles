@@ -23,7 +23,15 @@ mkdirSync(shots, { recursive: true });
 const DASHBOARD = process.env.HERMES_DASHBOARD_URL ?? "http://127.0.0.1:9119";
 const PORT = Number(process.env.CDP_PORT ?? 9225);
 const EDGE = process.env.EDGE_PATH ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
-const USER_DATA = join(process.env.LOCALAPPDATA ?? process.env.TEMP ?? ".", "Temp", "edge-cdp-bubbles");
+const USER_DATA = join(
+  process.env.LOCALAPPDATA ?? process.env.TEMP ?? ".",
+  "Temp",
+  // Per-run profile on purpose. A reused one accumulates stale tabs and a dead
+  // service worker, and a previous run's leftover browser on the same port made
+  // the whole suite fail at its very first check with "SDK exposed on window:
+  // false" — the page it attached to was not the one it navigated.
+  `edge-cdp-bubbles-${process.pid}`,
+);
 
 const results = [];
 let failures = 0;
@@ -1738,6 +1746,39 @@ async function main() {
       backToRecent.list === false && backToRecent.active === "true",
       JSON.stringify(backToRecent),
     );
+
+    // Both new surfaces must follow the dashboard language like everything else.
+    // The tree is already cached in page state, so this is a re-render, not a fetch.
+    await session.evaluate(`(() => {
+      localStorage.setItem('hermes-locale', 'zh');
+      document.documentElement.lang = 'zh';
+    })()`);
+    await sleep(1200);
+    await session.evaluate(`document.querySelector('[data-hb="history-mode-projects"]').click()`);
+    await sleep(2500);
+    const zhSurfaces = await session.evaluate(`JSON.stringify({
+      tabs: [...document.querySelectorAll('[data-hb^="history-mode-"]')].map((el) => el.textContent.trim()),
+      rows: [...document.querySelectorAll('[data-hb="project-toggle"]')].map((el) => el.textContent.trim()).slice(0, 4),
+      newChat: (document.querySelector('[data-hb="project-new-chat"]') || { title: '' }).title,
+      workspace: (document.querySelector('[data-hb="workspace-button"]') || { textContent: '' }).textContent,
+    })`);
+    check(
+      "the project view and the workspace chip follow the dashboard language (zh)",
+      zhSurfaces.includes("最近") &&
+        zhSurfaces.includes("项目") &&
+        zhSurfaces.includes("未归类") &&
+        zhSurfaces.includes("在此新建对话") &&
+        zhSurfaces.includes("默认目录"),
+      zhSurfaces,
+    );
+
+    await session.evaluate(`(() => {
+      localStorage.setItem('hermes-locale', 'en');
+      document.documentElement.lang = 'en';
+    })()`);
+    await sleep(1200);
+    await session.evaluate(`document.querySelector('[data-hb="history-mode-recent"]').click()`);
+    await sleep(300);
 
     const consoleErrors = session.consoleLines.filter(
       (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),

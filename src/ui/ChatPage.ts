@@ -16,6 +16,12 @@ import { messagesFor, type Locale } from "../core/i18n";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
 import type { TimelineItem } from "../core/types";
+import {
+  readStoredWorkspace,
+  workspaceOptions,
+  writeStoredWorkspace,
+  type WorkspacesPayload,
+} from "../core/workspaces";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { createControllerHolder } from "../app/persistent";
 import { Bubble } from "./Bubble";
@@ -41,6 +47,32 @@ import type { HermesPluginSdk } from "./sdk";
 
 let boundSdk: HermesPluginSdk | null = null;
 
+/** localStorage, or null when the browser refuses it (private mode / sandbox). */
+function storageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The management profile this page is served under.
+ *
+ * The dashboard routes a non-default profile as `/p/<name>/chat`; the default
+ * profile has no prefix. The workspace pick is stored per profile so two agents
+ * driving different repos do not fight over one key.
+ */
+function currentProfile(): string {
+  const match = /^\/p\/([^/]+)\//.exec(window.location.pathname);
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 /**
  * The chat controller for this document.
  *
@@ -51,7 +83,15 @@ let boundSdk: HermesPluginSdk | null = null;
  */
 const chatController = createControllerHolder<ChatController>(() => {
   if (!boundSdk) throw new Error("hermes-bubbles: controller acquired before the page mounted");
-  return new ChatController({ urlProvider: () => boundSdk!.buildWsUrl("/api/ws") });
+  const profile = currentProfile();
+  return new ChatController({
+    urlProvider: () => boundSdk!.buildWsUrl("/api/ws"),
+    // The workspace is a preference, not session state: restore it here so the
+    // very first `session.create` of this document already lands in the right
+    // directory instead of needing a second chat to take effect.
+    initialWorkspace: readStoredWorkspace(storageOrNull(), profile),
+    persistWorkspace: (cwd) => writeStoredWorkspace(storageOrNull(), profile, cwd),
+  });
 });
 
 function acquireController(sdk: HermesPluginSdk): ChatController {
@@ -85,6 +125,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
   const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
   const [reasoning, setReasoning] = useState("medium");
+  // Workspace picker: the host's project/repo list, plus its own load state.
+  // The pick itself lives in the controller (it has to survive a route change
+  // and outlive the tab it was made in); this is only the option list.
+  const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceFailed, setWorkspaceFailed] = useState(false);
   // Set while an existing user message is being rewritten: Send then truncates
   // and resubmits instead of appending.
   const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
@@ -202,6 +248,40 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       .catch(() => setStored([]))
       .finally(() => setLoadingStored(false));
   }, [controller]);
+
+  /**
+   * Load the workspace list.
+   *
+   * Best effort on purpose: a dashboard whose projects.db cannot be read (or a
+   * gateway that predates the endpoint) still has a usable chat page — the
+   * picker then offers the default directory and a typed path.
+   */
+  const loadWorkspaces = useCallback(
+    (scan: boolean) => {
+      setWorkspaceLoading(true);
+      return controller
+        .listWorkspaces(scan)
+        .then((payload) => {
+          setWorkspaces(payload);
+          setWorkspaceFailed(false);
+        })
+        .catch(() => setWorkspaceFailed(true))
+        .finally(() => setWorkspaceLoading(false));
+    },
+    [controller],
+  );
+
+  useEffect(() => {
+    void loadWorkspaces(false);
+  }, [loadWorkspaces]);
+
+  const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
+
+  const onPickWorkspace = useCallback((cwd: string) => controller.setWorkspace(cwd), [controller]);
+
+  const onRescanWorkspaces = useCallback(() => {
+    void loadWorkspaces(true);
+  }, [loadWorkspaces]);
 
   // ── transcript scroll ───────────────────────────────────────────────────
   useEffect(() => {
@@ -578,6 +658,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           onOpenModelPicker: openModelPicker,
           onPickReasoning,
           onError: setError,
+          workspace: state.workspace,
+          workspaceCurrent: timeline.meta.cwd,
+          workspaceOptions: wsOptions,
+          workspaceHome: workspaces?.home ?? "",
+          workspaceLoading,
+          workspaceFailed,
+          onPickWorkspace,
+          onRescanWorkspaces,
         }),
       ),
 

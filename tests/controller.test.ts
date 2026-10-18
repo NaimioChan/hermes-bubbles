@@ -1124,3 +1124,82 @@ describe("desktop notifications", () => {
     expect(notices).toHaveLength(1);
   });
 });
+
+describe("workspace", () => {
+  it("sends the picked workspace on session.create", async () => {
+    const persisted: string[] = [];
+    const { controller, socket } = await connectAndOpen({
+      initialWorkspace: "/home/me/code/daw",
+      persistWorkspace: (cwd) => persisted.push(cwd),
+    });
+
+    const create = socket.frames().find((frame) => frame.method === "session.create");
+    expect(create?.params).toMatchObject({
+      source: "desktop",
+      cwd: "/home/me/code/daw",
+      cwd_explicit: true,
+    });
+    // Restoring a stored pick is not a new pick: nothing to persist yet.
+    expect(persisted).toEqual([]);
+    expect(controller.getSnapshot().workspace).toBe("/home/me/code/daw");
+  });
+
+  it("sends no cwd at all when nothing is picked", async () => {
+    const { socket } = await connectAndOpen();
+    const create = socket.frames().find((frame) => frame.method === "session.create");
+    expect(create?.params).toEqual({ source: "desktop" });
+  });
+
+  it("applies a pick to the NEXT chat and persists it once", async () => {
+    const persisted: string[] = [];
+    const { controller, socket } = await connectAndOpen({
+      persistWorkspace: (cwd) => persisted.push(cwd),
+    });
+
+    controller.setWorkspace("/home/me/code/daw");
+    controller.setWorkspace("/home/me/code/daw");
+    expect(persisted).toEqual(["/home/me/code/daw"]);
+
+    const before = socket.frames().filter((frame) => frame.method === "session.create").length;
+    void controller.newSession();
+    await tick();
+    const creates = socket.frames().filter((frame) => frame.method === "session.create");
+    expect(creates.length).toBe(before + 1);
+    expect(creates.at(-1)?.params).toMatchObject({ cwd: "/home/me/code/daw", cwd_explicit: true });
+  });
+
+  it("trims a pasted path before storing it", async () => {
+    const persisted: string[] = [];
+    const { controller } = await connectAndOpen({ persistWorkspace: (cwd) => persisted.push(cwd) });
+    controller.setWorkspace("  /home/me/code/daw  ");
+    expect(controller.getSnapshot().workspace).toBe("/home/me/code/daw");
+    expect(persisted).toEqual(["/home/me/code/daw"]);
+  });
+
+  it("clears the pick when the default is chosen", async () => {
+    const persisted: string[] = [];
+    const { controller } = await connectAndOpen({
+      initialWorkspace: "/home/me/code/daw",
+      persistWorkspace: (cwd) => persisted.push(cwd),
+    });
+    controller.setWorkspace("");
+    expect(controller.getSnapshot().workspace).toBe("");
+    expect(persisted).toEqual([""]);
+  });
+
+  it("records the open session's own cwd from the snapshot", async () => {
+    const { controller, socket } = await connectAndOpen();
+    // A stored id the open tab does NOT already own: `openStored` would
+    // otherwise just refocus the existing tab and no snapshot would be bound.
+    const opened = controller.openStoredSession("20261015_090000_def", "old chat");
+    await tick();
+    socket.replyTo("session.resume", {
+      session_id: "runtime-2",
+      stored_session_id: "20261015_090000_def",
+      messages: [],
+      info: { cwd: "/home/me/code/dawview" },
+    });
+    await opened;
+    expect(activeTimeline(controller.getSnapshot()).meta.cwd).toBe("/home/me/code/dawview");
+  });
+});

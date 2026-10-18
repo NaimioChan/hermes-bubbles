@@ -8,6 +8,15 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 23:01 · hermes · 工作区选择：输入框下方的小按钮
+
+- 背景：仪表盘自带 `/chat` 有工作区选择器，气泡插件接管 `/chat` 后没有，于是每个新对话都落在 dashboard 进程的启动目录，且没有入口指定。用户要求「输入框下面加一个小按钮，新建对话时选工作目录」。
+- 改：新增 `core/workspaces.ts`（payload 整形成选项行、`~` 缩写、`baseName`、按 profile 的存储键读写、`createCwdParams`）；`core/sessions.ts`（`MultiState.workspace` + `withWorkspace`，所有构造 `MultiState` 的纯函数补上该字段）；`core/types.ts` / `core/history.ts`（`SessionMeta.cwd`，取自 snapshot 的 `info.cwd`）；`core/i18n.ts`（8 条文案 en + zh）；`app/controller.ts`（`initialWorkspace` / `persistWorkspace` 注入、`getWorkspace` / `setWorkspace` / `listWorkspaces`、`session.create` 带 `{cwd, cwd_explicit}`）；新增 `ui/WorkspacePicker.tsx`（chip + 面板：默认目录、项目/仓库行、自定义路径、重扫、只读的「本对话所在目录」）；`ui/Composer.ts`（chip 渲染在输入框与状态条之间）；`ui/ChatPage.ts`（`/p/<profile>/` 解析、localStorage 注入、列表加载与重扫）；`ui/style.css`（`hb-workspace-*` 全套）；`scripts/verify.mjs` 加四条实测断言；`tests/workspaces.test.ts` 新增，`tests/controller.test.ts` 加六条；`AGENTS.md`（钩子清单 + 铁律 26）、`GLOSSARY.md`、`README.zh-CN.md`、`docs/01-protocol-contract.md`（`cwd`/`cwd_explicit` 语义与 `/api/chat/workspaces` 形状）
+- 验证：`npx tsc --noEmit` 干净；`npx vitest run` 496 passed（23 文件）；`node scripts/audit-classes.mjs` 170/170；`node scripts/verify.mjs` 81/81（含 chip 渲染、面板行数、选中落 localStorage、选回默认清空）；另用 `.cache/probe-workspace-cwd.mjs` 端到端确认：选 `C:/Users/Naimio/projects/hermes-bubbles` → 新开对话 → 发一条 → `state.db` 最新会话行 `cwd` 正是该路径
+- 遗留：工作区选择目前只作用于「新建对话」；已存在会话的目录改不了（后端在会话行钉死），面板里以只读小字标出。分项目查看历史会话未做——后端已有 `projects.tree` / `projects.project_sessions` RPC 可直接喂，等设计定下来再动。
+
+---
+
 ## 2026-10-18 13:55 · hermes · 一轮结束后回复气泡重复
 
 - 现象：整轮跑完后回复气泡出现两份，刷新页面从历史打开只剩一份。

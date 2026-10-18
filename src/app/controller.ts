@@ -28,11 +28,13 @@ import {
   routeEvent,
   settleActive,
   timelineOf,
+  withWorkspace,
   type MultiState,
 } from "../core/sessions";
 import { parseCommandInput, parseDispatch, type DispatchResult } from "../core/slash";
 import type { TurnNotice } from "../core/notify";
 import type { TimelineItem } from "../core/types";
+import { createCwdParams, type WorkspacesPayload } from "../core/workspaces";
 import type { ServerRequest } from "../gateway/channel";
 import { GatewayClient, type ConnectionState } from "../gateway/client";
 
@@ -48,6 +50,10 @@ export interface ControllerOptions {
   urlProvider: () => Promise<string>;
   socketFactory?: (url: string) => WebSocket;
   onServerRequest?: (card: ServerRequestCard) => void;
+  /** Workspace restored from storage — the directory the next new chat starts in. */
+  initialWorkspace?: string;
+  /** Persist a workspace pick (the page backs this with localStorage). */
+  persistWorkspace?: (cwd: string) => void;
 }
 
 /** Server→client requests this page renders. Anything else is answered `-32601`. */
@@ -83,6 +89,8 @@ export class ChatController {
   private noticeSink: ((notice: TurnNotice) => void) | null = null;
   /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
   private http: ((path: string, init: RequestInit) => Promise<unknown>) | null = null;
+  /** Storage sink for workspace picks; absent means "this document only". */
+  private persistWorkspace: ((cwd: string) => void) | null = null;
 
   setHttpFetcher(fn: ((path: string, init: RequestInit) => Promise<unknown>) | null): void {
     this.http = fn;
@@ -96,6 +104,8 @@ export class ChatController {
 
   constructor(options: ControllerOptions) {
     this.cardSink = options.onServerRequest ?? null;
+    this.persistWorkspace = options.persistWorkspace ?? null;
+    this.state = { ...emptyMultiState, workspace: (options.initialWorkspace ?? "").trim() };
     this.client = new GatewayClient({
       urlProvider: options.urlProvider,
       socketFactory: options.socketFactory,
@@ -212,6 +222,40 @@ export class ChatController {
     await this.ensureSession();
   }
 
+  // ── workspace ────────────────────────────────────────────────────────────
+
+  /**
+   * The directory the next NEW chat starts in ("" = the gateway's default).
+   *
+   * Already-created sessions keep the cwd the backend stamped on them: changing
+   * this never moves a running conversation.
+   */
+  getWorkspace(): string {
+    return this.state.workspace;
+  }
+
+  /** Pick the workspace for the next new chat, and remember it. */
+  setWorkspace(cwd: string): void {
+    const next = (cwd ?? "").trim();
+    if (next === this.state.workspace) return;
+    this.setState(withWorkspace(this.state, next));
+    this.persistWorkspace?.(next);
+  }
+
+  /**
+   * Projects + discovered repos a fresh chat may start in.
+   *
+   * REST rather than RPC: `/api/chat/workspaces` is the same endpoint the
+   * dashboard's own `/chat` picker uses, so both surfaces offer one list. The
+   * payload is profile-scoped server-side; `scan` asks the host to re-walk its
+   * discovery roots first.
+   */
+  async listWorkspaces(scan = false): Promise<WorkspacesPayload> {
+    const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
+    const payload = await this.fetchJSON<WorkspacesPayload>(path, { method: "GET" });
+    return payload ?? {};
+  }
+
   /**
    * Attach to a stored session.
    *
@@ -267,7 +311,7 @@ export class ChatController {
     const method = tab.storedId ? "session.resume" : "session.create";
     const params = tab.storedId
       ? { session_id: tab.storedId, omit_messages: false }
-      : { source: "desktop" };
+      : { source: "desktop", ...createCwdParams(this.state.workspace) };
     const snapshot = await this.client.request<Record<string, unknown>>(method, params);
     this.setState(bindSnapshot(this.state, key, snapshot as never, { connected: this.connection === "open" }));
     return (snapshot as { session_id?: string }).session_id ?? null;

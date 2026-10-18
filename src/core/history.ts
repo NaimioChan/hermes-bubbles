@@ -162,6 +162,8 @@ export interface LiveSessionSnapshot {
     running?: boolean;
     reasoning_effort?: string;
     usage?: Usage | null;
+    /** The session's own working directory (absent when it has none). */
+    cwd?: string;
   } | null;
 }
 
@@ -180,6 +182,7 @@ export function timelineFromSnapshot(snapshot: LiveSessionSnapshot, now = Date.n
       model: info.model ?? "",
       provider: info.provider ?? "",
       reasoningEffort: info.reasoning_effort ?? "",
+      cwd: info.cwd ?? "",
       running: Boolean(info.running ?? snapshot.running),
       usage: info.usage ?? null,
       status: "",

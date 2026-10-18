@@ -245,6 +245,12 @@ export interface SessionMeta {
   provider: string;
   /** Reasoning level the route is using; "" when the session has not said. */
   reasoningEffort: string;
+  /**
+   * The session's own working directory, as the backend reported it at create /
+   * resume time. "" when it has none (the session runs in the launch directory,
+   * which the backend deliberately does not treat as a workspace).
+   */
+  cwd: string;
   running: boolean;
   usage: Usage | null;
   /** Last `status.update.text`, cleared when the turn ends. */
@@ -268,6 +274,7 @@ export const emptyMeta: SessionMeta = {
   model: "",
   provider: "",
   reasoningEffort: "",
+  cwd: "",
   running: false,
   usage: null,
   status: "",

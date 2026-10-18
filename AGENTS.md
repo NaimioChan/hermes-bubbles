@@ -38,7 +38,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 12. **运行中也要允许发消息。** Hermes 的行为是中途输入 = 打断修正，后端 `prompt.submit` 的 busy 路径会决定排队 / 插入 / 改向并在 `status` 里回报。别再把输入框禁用掉。
 13. **`src/core/markdown.ts` 是回复渲染的唯一来源。** 助手气泡的文本先解析成节点树（`src/core/markdown.ts`），再由 `src/ui/Markdown.ts` 用 `React.createElement` 渲染。**不许出现 `innerHTML` / `dangerouslySetInnerHTML`**——节点树让 React 负责转义，等于从根上删掉注入这一类问题，而不是在周边做净化。`tests/architecture.test.ts` 会拦。链接仍要过 `safeHref()`（React 不会替你拦 `javascript:` 协议）。
 14. **引 CSS 变量必须确认宿主真的定义了它，否则给 fallback。** 宿主从不定义 `--color-foreground` 与 `--color-background`（0.22.2 实测：23 个 `--color-*`，两个都不在其中）。`var(--undefined)` **不报错**，整条声明在计算值阶段被丢掉，元素静默继承或透出背景——`--color-background` 曾让代码块与审批卡变成全透明。`tests/theme-vars.test.ts` 对照真实编译产物查，离线时回退白名单。
-15. **文案不进测试断言。** 每个可点/可测的元素带一个 `data-hb="…"` 钩子（`tab` / `tab-new` / `history-toggle` / `history-panel` / `primary-action` / `stop-action` / `reasoning-toggle` / `message-actions` / `request-card` / `clarify-submit`），`scripts/verify.mjs` 只按钩子找元素。踩过一次：整套验收按中文文案选择器写，页面默认语言改成英语后 9 条断言集体失效——那是测试脆，不是功能坏。新增可交互元素时补一个钩子。
+15. **文案不进测试断言。** 每个可点/可测的元素带一个 `data-hb="…"` 钩子（`tab` / `tab-new` / `history-toggle` / `history-panel` / `primary-action` / `stop-action` / `reasoning-toggle` / `message-actions` / `request-card` / `clarify-submit` / `workspace-button` / `workspace-panel` / `workspace-option` / `workspace-custom-open` / `workspace-custom` / `workspace-apply` / `workspace-rescan`），`scripts/verify.mjs` 只按钩子找元素。踩过一次：整套验收按中文文案选择器写，页面默认语言改成英语后 9 条断言集体失效——那是测试脆，不是功能坏。新增可交互元素时补一个钩子。
 16. **默认语言是英语，并跟随仪表盘。** `display.language` 默认就是 `en`；插件从 `localStorage['hermes-locale']` 与 `<html lang>` 两个信号读当前语言（无 RPC 可问），并用 `storage` + `MutationObserver` 跟着切。文案集中在 `src/core/i18n.ts`，任何组件里不许再写裸字符串。
 17. **`@` 不是补全入口。** 后端 `complete.path` 期望的 `word` **包含**开头的 `@`（`is_context = word.startswith("@")`），早期客户端发的是去掉 `@` 的查询，所以永远匹配不上。功能已按用户要求移除，`@` 当普通字符；文件用 `+` 按钮走 `file.attach`。别再加回来，除非同时把 `@` 带上。
 18. **时间线的时间戳一律是毫秒。** `at` / `completedAt` 是 `Date.now()` 的量级，格式化函数**不做**任何缩放；后端给的是秒，只在数据进入模型的那一处（`core/history.ts::timestampOf`）乘一次 1000。这条踩过：三处各按自己的假设缩放，结果 02:46 的任务显示成 19:32。
@@ -49,6 +49,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 23. **页面卸载期间到达的服务端请求要暂存，不能回 `-32601`。** 后端会一直等到超时（clarify 是 3600s）。controller 现在把这类请求放进 `pendingCards`，重新挂载时由页面取走渲染。给 channel 的 fail-fast 是针对「永远不会答的客户端」，不是针对「刚好在两次挂载之间」。
 24. **写进注入脚本的正则用 `String.raw`。** `verify.mjs` 的表达式是模板字符串，`\/` 与 `\s` 会被当成转义消费掉，`/\/config/` 会变成 `//config/`（行注释），整段代码被注释掉后报 `Unexpected token`。这个坑排查了三轮才定位，代价很高。
 25. **契约文档先行。** 用到哪个 RPC / 事件，先写进 `docs/01-protocol-contract.md` 再写代码。协议是 Hermes 的内部实现，升级会漂移——契约文档要写清「从哪个版本核对过」。
+26. **工作区是偏好，不是会话属性。** 选中的目录只在 `session.create` 那一刻变成会话的 `cwd`；已存在的会话改不了目录（后端在会话行上钉死了）。所以状态放在 `MultiState.workspace`（下一个新对话用），不要塞进 `SessionTab`；`send()` 在没有页签时也会 `newSession()`，这条路必须拿到同一个答案。列表走 REST `/api/chat/workspaces`（与仪表盘自带选择器同源），写入用 `{cwd, cwd_explicit: true}`——少了 `cwd_explicit`，网关探不到路径时会静默丢掉工作区。
 
 ## 禁区
 

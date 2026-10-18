@@ -131,6 +131,14 @@ var HermesBubbles = (() => {
     submit: "Submit",
     attachFiles: "Add files",
     pickModel: "Model and reasoning",
+    workspace: "Workspace",
+    workspaceForNewChat: "Directory the next new chat starts in",
+    workspaceDefault: "Default directory",
+    workspaceRescan: "Rescan repositories",
+    workspaceCustom: "Custom path\u2026",
+    workspaceApply: "Use",
+    workspaceSessionCwd: "This chat's directory",
+    workspaceLoadFailed: "Could not list workspaces",
     reasoning: "Reasoning",
     reasoningLow: "Low",
     reasoningMedium: "Medium",
@@ -264,6 +272,14 @@ var HermesBubbles = (() => {
     submit: "\u63D0\u4EA4",
     attachFiles: "\u6DFB\u52A0\u6587\u4EF6",
     pickModel: "\u6A21\u578B\u4E0E\u601D\u8003\u5F3A\u5EA6",
+    workspace: "\u5DE5\u4F5C\u533A",
+    workspaceForNewChat: "\u4E0B\u4E00\u4E2A\u65B0\u5BF9\u8BDD\u7684\u8D77\u59CB\u76EE\u5F55",
+    workspaceDefault: "\u9ED8\u8BA4\u76EE\u5F55",
+    workspaceRescan: "\u91CD\u65B0\u626B\u63CF\u4ED3\u5E93",
+    workspaceCustom: "\u81EA\u5B9A\u4E49\u8DEF\u5F84\u2026",
+    workspaceApply: "\u4F7F\u7528",
+    workspaceSessionCwd: "\u672C\u5BF9\u8BDD\u6240\u5728\u76EE\u5F55",
+    workspaceLoadFailed: "\u65E0\u6CD5\u5217\u51FA\u5DE5\u4F5C\u533A",
     reasoning: "\u601D\u8003",
     reasoningLow: "\u4F4E",
     reasoningMedium: "\u4E2D",
@@ -555,6 +571,7 @@ var HermesBubbles = (() => {
     model: "",
     provider: "",
     reasoningEffort: "",
+    cwd: "",
     running: false,
     usage: null,
     status: "",
@@ -1211,6 +1228,7 @@ var HermesBubbles = (() => {
         model: info.model ?? "",
         provider: info.provider ?? "",
         reasoningEffort: info.reasoning_effort ?? "",
+        cwd: info.cwd ?? "",
         running: Boolean(info.running ?? snapshot.running),
         usage: info.usage ?? null,
         status: "",
@@ -1222,7 +1240,10 @@ var HermesBubbles = (() => {
   }
 
   // src/core/sessions.ts
-  var emptyMultiState = { sessions: {}, tabs: [], activeKey: null };
+  var emptyMultiState = { sessions: {}, tabs: [], activeKey: null, workspace: "" };
+  function withWorkspace(state, cwd) {
+    return state.workspace === cwd ? state : { ...state, workspace: cwd };
+  }
   var draftCounter = 0;
   function nextDraftKey() {
     draftCounter += 1;
@@ -1244,7 +1265,8 @@ var HermesBubbles = (() => {
     return {
       sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
       tabs: [...state.tabs, tab],
-      activeKey: key
+      activeKey: key,
+      workspace: state.workspace
     };
   }
   function bindSnapshot(state, key, snapshot, options = {}) {
@@ -1276,7 +1298,8 @@ var HermesBubbles = (() => {
     return {
       sessions,
       tabs,
-      activeKey: state.activeKey === key ? nextKey : state.activeKey
+      activeKey: state.activeKey === key ? nextKey : state.activeKey,
+      workspace: state.workspace
     };
   }
   function openStored(state, storedId, title) {
@@ -1286,7 +1309,8 @@ var HermesBubbles = (() => {
     return {
       sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
       tabs: [...state.tabs, { key, runtimeId: null, storedId, title, draft: false }],
-      activeKey: key
+      activeKey: key,
+      workspace: state.workspace
     };
   }
   function focus(state, key) {
@@ -1301,7 +1325,7 @@ var HermesBubbles = (() => {
     if (activeKey === key) {
       activeKey = tabs.length ? tabs[tabs.length - 1]?.key ?? null : null;
     }
-    return { sessions, tabs, activeKey };
+    return { sessions, tabs, activeKey, workspace: state.workspace };
   }
   function routeEvent(state, event, dedupe) {
     const isConnectionFrame = event.type === "gateway.ready" || event.type === "gateway.closed";
@@ -1386,6 +1410,74 @@ var HermesBubbles = (() => {
   }
   function retitleStoredSession(tabs, storedId, title) {
     return tabs.map((tab) => tab.storedId === storedId ? { ...tab, title } : tab);
+  }
+
+  // src/core/workspaces.ts
+  var WORKSPACE_STORAGE_PREFIX = "hermes-bubbles-workspace:";
+  function workspaceStorageKey(profile) {
+    return `${WORKSPACE_STORAGE_PREFIX}${profile ?? ""}`;
+  }
+  function readStoredWorkspace(storage, profile) {
+    if (!storage) return "";
+    try {
+      return storage.getItem(workspaceStorageKey(profile)) ?? "";
+    } catch {
+      return "";
+    }
+  }
+  function writeStoredWorkspace(storage, profile, cwd) {
+    if (!storage) return;
+    try {
+      const key = workspaceStorageKey(profile);
+      if (cwd) storage.setItem(key, cwd);
+      else storage.removeItem(key);
+    } catch {
+    }
+  }
+  function abbreviateHomePath(path, home) {
+    const trimmed = path.replace(/[\\/]+$/, "");
+    const root = (home ?? "").replace(/[\\/]+$/, "");
+    if (!root) return path;
+    if (trimmed === root) return "~";
+    const sep = trimmed.startsWith(`${root}/`) ? "/" : trimmed.startsWith(`${root}\\`) ? "\\" : null;
+    return sep ? `~${sep}${trimmed.slice(root.length + 1)}` : path;
+  }
+  function baseName(path) {
+    const parts = path.split(/[\\/]+/).filter(Boolean);
+    return parts[parts.length - 1] ?? path;
+  }
+  function workspaceOptions(data) {
+    if (!data) return [];
+    const home = data.home ?? "";
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    const push = (value, label) => {
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push({ value, label, hint: abbreviateHomePath(value, home) });
+    };
+    for (const project of data.projects ?? []) {
+      if (project.archived) continue;
+      const folders = project.folders?.length ? project.folders : project.primary_path ? [{ path: project.primary_path, label: null, is_primary: true }] : [];
+      for (const folder of folders) {
+        const suffix = folders.length > 1 ? ` \xB7 ${folder.label || baseName(folder.path)}` : "";
+        push(folder.path, `${project.name}${suffix}`);
+      }
+    }
+    const repos = [...data.repos ?? []].sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0));
+    for (const repo of repos) {
+      push(repo.root, repo.label || baseName(repo.root));
+    }
+    return out;
+  }
+  function workspaceLabel(cwd, options, home, defaultLabel) {
+    if (!cwd) return defaultLabel;
+    const hit = options.find((option) => option.value === cwd);
+    return hit ? hit.label : abbreviateHomePath(cwd, home);
+  }
+  function createCwdParams(cwd) {
+    const value = (cwd ?? "").trim();
+    return value ? { cwd: value, cwd_explicit: true } : {};
   }
 
   // src/gateway/channel.ts
@@ -1799,6 +1891,8 @@ var HermesBubbles = (() => {
     noticeSink = null;
     /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
     http = null;
+    /** Storage sink for workspace picks; absent means "this document only". */
+    persistWorkspace = null;
     setHttpFetcher(fn) {
       this.http = fn;
     }
@@ -1809,6 +1903,8 @@ var HermesBubbles = (() => {
     }
     constructor(options) {
       this.cardSink = options.onServerRequest ?? null;
+      this.persistWorkspace = options.persistWorkspace ?? null;
+      this.state = { ...emptyMultiState, workspace: (options.initialWorkspace ?? "").trim() };
       this.client = new GatewayClient({
         urlProvider: options.urlProvider,
         socketFactory: options.socketFactory,
@@ -1908,6 +2004,36 @@ var HermesBubbles = (() => {
       this.setState(openDraft(this.state));
       await this.ensureSession();
     }
+    // ── workspace ────────────────────────────────────────────────────────────
+    /**
+     * The directory the next NEW chat starts in ("" = the gateway's default).
+     *
+     * Already-created sessions keep the cwd the backend stamped on them: changing
+     * this never moves a running conversation.
+     */
+    getWorkspace() {
+      return this.state.workspace;
+    }
+    /** Pick the workspace for the next new chat, and remember it. */
+    setWorkspace(cwd) {
+      const next = (cwd ?? "").trim();
+      if (next === this.state.workspace) return;
+      this.setState(withWorkspace(this.state, next));
+      this.persistWorkspace?.(next);
+    }
+    /**
+     * Projects + discovered repos a fresh chat may start in.
+     *
+     * REST rather than RPC: `/api/chat/workspaces` is the same endpoint the
+     * dashboard's own `/chat` picker uses, so both surfaces offer one list. The
+     * payload is profile-scoped server-side; `scan` asks the host to re-walk its
+     * discovery roots first.
+     */
+    async listWorkspaces(scan = false) {
+      const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
+      const payload = await this.fetchJSON(path, { method: "GET" });
+      return payload ?? {};
+    }
     /**
      * Attach to a stored session.
      *
@@ -1952,7 +2078,7 @@ var HermesBubbles = (() => {
       if (!tab) return null;
       if (tab.runtimeId) return tab.runtimeId;
       const method = tab.storedId ? "session.resume" : "session.create";
-      const params = tab.storedId ? { session_id: tab.storedId, omit_messages: false } : { source: "desktop" };
+      const params = tab.storedId ? { session_id: tab.storedId, omit_messages: false } : { source: "desktop", ...createCwdParams(this.state.workspace) };
       const snapshot = await this.client.request(method, params);
       this.setState(bindSnapshot(this.state, key, snapshot, { connected: this.connection === "open" }));
       return snapshot.session_id ?? null;
@@ -3829,6 +3955,157 @@ var HermesBubbles = (() => {
     return "calm";
   }
 
+  // src/ui/WorkspacePicker.tsx
+  function WorkspacePicker(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    const { useState } = sdk.hooks;
+    const t = messagesFor(props.locale);
+    const [open, setOpen] = useState(false);
+    const [customOpen, setCustomOpen] = useState(false);
+    const [draft, setDraft] = useState(props.value);
+    const label = workspaceLabel(props.value, props.options, props.home, t.workspaceDefault);
+    const title = props.value ? `${t.workspaceForNewChat}: ${props.value}` : `${t.workspaceForNewChat}: ${t.workspaceDefault}`;
+    const choose = (cwd) => {
+      props.onPick(cwd);
+      setOpen(false);
+      setCustomOpen(false);
+    };
+    const commitDraft = () => {
+      const trimmed = draft.trim();
+      if (trimmed) choose(trimmed);
+    };
+    const row = (key, text, hint, active, onSelect, hook = "workspace-option") => React.createElement(
+      "button",
+      {
+        key,
+        type: "button",
+        "data-hb": hook,
+        title: hint || text,
+        className: "hb-workspace-row",
+        style: {
+          background: active ? "var(--color-accent, var(--color-muted))" : "transparent",
+          color: "var(--color-card-foreground)"
+        },
+        onClick: onSelect
+      },
+      React.createElement("span", { className: "hb-workspace-name" }, text),
+      hint ? React.createElement("span", { className: "hb-workspace-hint" }, hint) : null,
+      active ? React.createElement("span", { className: "hb-workspace-check" }, "\u2713") : null
+    );
+    return React.createElement(
+      "div",
+      { className: "hb-workspace-wrap" },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          "data-hb": "workspace-button",
+          title,
+          "aria-label": title,
+          "aria-expanded": open,
+          className: "hb-workspace-chip",
+          style: { color: "var(--color-muted-foreground)" },
+          onClick: () => {
+            setOpen((prev) => !prev);
+            setCustomOpen(false);
+            setDraft(props.value);
+          }
+        },
+        React.createElement("span", { className: "hb-workspace-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", { className: "hb-workspace-chip-label" }, label)
+      ),
+      // Backdrop: clicking anywhere outside closes, without a document listener
+      // that would have to be torn down on unmount.
+      open ? React.createElement("div", {
+        className: "hb-workspace-backdrop",
+        onClick: () => {
+          setOpen(false);
+          setCustomOpen(false);
+        }
+      }) : null,
+      open ? React.createElement(
+        "div",
+        { "data-hb": "workspace-panel", className: "hb-workspace-panel hb-scroll" },
+        React.createElement(
+          "div",
+          { className: "hb-workspace-head" },
+          React.createElement("span", null, t.workspace),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "workspace-rescan",
+              className: "hb-workspace-rescan",
+              title: t.workspaceRescan,
+              onClick: props.onRescan
+            },
+            props.loading ? "\u2026" : "\u27F3"
+          )
+        ),
+        props.failed ? React.createElement("div", { className: "hb-workspace-note" }, t.workspaceLoadFailed) : null,
+        row("ws-default", t.workspaceDefault, "", !props.value, () => choose("")),
+        props.options.map(
+          (option) => row(
+            `ws-${option.value}`,
+            option.label,
+            option.hint,
+            option.value === props.value,
+            () => choose(option.value)
+          )
+        ),
+        // A persisted path that is no longer in the list (repo deleted, scan
+        // off) still has to render as the selection instead of vanishing.
+        props.value && !props.options.some((option) => option.value === props.value) ? row("ws-stale", abbreviateHomePath(props.value, props.home), "", true, () => choose(props.value)) : null,
+        customOpen ? React.createElement(
+          "div",
+          { className: "hb-workspace-custom" },
+          React.createElement("input", {
+            autoFocus: true,
+            value: draft,
+            "data-hb": "workspace-custom",
+            placeholder: props.home ? `${props.home}/\u2026` : "/path/to/project",
+            className: "hb-workspace-input",
+            onChange: (event) => setDraft(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") commitDraft();
+              if (event.key === "Escape") setCustomOpen(false);
+            }
+          }),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "workspace-apply",
+              className: "hb-workspace-apply",
+              onClick: commitDraft
+            },
+            t.workspaceApply
+          )
+        ) : React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "workspace-custom-open",
+            className: "hb-workspace-row",
+            style: { color: "var(--color-muted-foreground)" },
+            onClick: () => {
+              setDraft(props.value);
+              setCustomOpen(true);
+            }
+          },
+          React.createElement("span", { className: "hb-workspace-name" }, t.workspaceCustom)
+        ),
+        // Read-only: the open chat cannot be moved, it was born in its cwd.
+        props.current && props.current !== props.value ? React.createElement(
+          "div",
+          { className: "hb-workspace-note", title: props.current },
+          `${t.workspaceSessionCwd}: ${abbreviateHomePath(props.current, props.home)}`
+        ) : null
+      ) : null
+    );
+  }
+
   // src/ui/Composer.ts
   var MENU_LIMIT = 200;
   var INPUT_MIN_PX = 32;
@@ -4216,6 +4493,21 @@ var HermesBubbles = (() => {
             )
           )
         ),
+        // The workspace chip sits directly under the box: it describes where the
+        // NEXT new chat will start, which is a composer-level affordance, not a
+        // transcript one.
+        React.createElement(WorkspacePicker, {
+          sdk,
+          locale: props.locale,
+          value: props.workspace,
+          current: props.workspaceCurrent,
+          options: props.workspaceOptions,
+          home: props.workspaceHome,
+          loading: props.workspaceLoading,
+          failed: props.workspaceFailed,
+          onPick: props.onPickWorkspace,
+          onRescan: props.onRescanWorkspaces
+        }),
         // ── status + metrics ─────────────────────────────────────────────────
         React.createElement(
           "div",
@@ -5402,9 +5694,33 @@ var HermesBubbles = (() => {
 
   // src/ui/ChatPage.ts
   var boundSdk = null;
+  function storageOrNull() {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+  function currentProfile() {
+    const match = /^\/p\/([^/]+)\//.exec(window.location.pathname);
+    if (!match?.[1]) return "";
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  }
   var chatController = createControllerHolder(() => {
     if (!boundSdk) throw new Error("hermes-bubbles: controller acquired before the page mounted");
-    return new ChatController({ urlProvider: () => boundSdk.buildWsUrl("/api/ws") });
+    const profile = currentProfile();
+    return new ChatController({
+      urlProvider: () => boundSdk.buildWsUrl("/api/ws"),
+      // The workspace is a preference, not session state: restore it here so the
+      // very first `session.create` of this document already lands in the right
+      // directory instead of needing a second chat to take effect.
+      initialWorkspace: readStoredWorkspace(storageOrNull(), profile),
+      persistWorkspace: (cwd) => writeStoredWorkspace(storageOrNull(), profile, cwd)
+    });
   });
   function acquireController(sdk) {
     boundSdk = sdk;
@@ -5429,6 +5745,9 @@ var HermesBubbles = (() => {
     const [providers, setProviders] = useState([]);
     const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
     const [reasoning, setReasoning] = useState("medium");
+    const [workspaces, setWorkspaces] = useState(null);
+    const [workspaceLoading, setWorkspaceLoading] = useState(false);
+    const [workspaceFailed, setWorkspaceFailed] = useState(false);
     const [editing, setEditing] = useState(null);
     const [notifyOn, setNotifyOn] = useState(() => notifyEnabled());
     const [notifyPermission, setNotifyPermission] = useState(
@@ -5486,6 +5805,24 @@ var HermesBubbles = (() => {
       setLoadingStored(true);
       controller.listSessions().then((rows) => setStored(rows)).catch(() => setStored([])).finally(() => setLoadingStored(false));
     }, [controller]);
+    const loadWorkspaces = useCallback(
+      (scan) => {
+        setWorkspaceLoading(true);
+        return controller.listWorkspaces(scan).then((payload) => {
+          setWorkspaces(payload);
+          setWorkspaceFailed(false);
+        }).catch(() => setWorkspaceFailed(true)).finally(() => setWorkspaceLoading(false));
+      },
+      [controller]
+    );
+    useEffect(() => {
+      void loadWorkspaces(false);
+    }, [loadWorkspaces]);
+    const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
+    const onPickWorkspace = useCallback((cwd) => controller.setWorkspace(cwd), [controller]);
+    const onRescanWorkspaces = useCallback(() => {
+      void loadWorkspaces(true);
+    }, [loadWorkspaces]);
     useEffect(() => {
       bottomRef.current?.scrollIntoView({ block: "end" });
     }, [timeline.items.length, timeline.items.at(-1)]);
@@ -5766,7 +6103,15 @@ var HermesBubbles = (() => {
             onRemoveAttachment,
             onOpenModelPicker: openModelPicker,
             onPickReasoning,
-            onError: setError
+            onError: setError,
+            workspace: state.workspace,
+            workspaceCurrent: timeline.meta.cwd,
+            workspaceOptions: wsOptions,
+            workspaceHome: workspaces?.home ?? "",
+            workspaceLoading,
+            workspaceFailed,
+            onPickWorkspace,
+            onRescanWorkspaces
           })
         ),
         React.createElement(HistoryPanel, {

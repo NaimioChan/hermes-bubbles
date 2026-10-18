@@ -49,3 +49,7 @@
 ## 契约（contract）
 
 `docs/01-protocol-contract.md` 描述的后端协议。**不是** 这个仓库定义的 API——它记录的是 Hermes 内部实现，升级会漂移，所以带核对基线。
+
+## 工作区（workspace）
+
+一个宿主机上的绝对路径，作为**下一个新对话**的起始目录，存在 `MultiState.workspace` 里，按 profile 记在 localStorage。**不是** 打开中会话的属性：会话的工作目录在 `session.create` 那一刻由后端钉在会话行上（`SessionMeta.cwd`），之后改不了。面板里同时出现两者时，那个只读的「本对话所在目录」说的是后者。

@@ -32,9 +32,22 @@ export interface MultiState {
   sessions: Record<string, Timeline>;
   tabs: SessionTab[];
   activeKey: string | null;
+  /**
+   * Workspace for the NEXT new chat (absolute host path, "" = server default).
+   *
+   * It lives on the store rather than on a tab because it has to outlive the tab
+   * it was picked in: `send()` mints a session when every tab is closed, and that
+   * path needs the same answer `newSession()` would have used.
+   */
+  workspace: string;
 }
 
-export const emptyMultiState: MultiState = { sessions: {}, tabs: [], activeKey: null };
+export const emptyMultiState: MultiState = { sessions: {}, tabs: [], activeKey: null, workspace: "" };
+
+/** Set the pending workspace. Does not touch any open session's own cwd. */
+export function withWorkspace(state: MultiState, cwd: string): MultiState {
+  return state.workspace === cwd ? state : { ...state, workspace: cwd };
+}
 
 /** Key for a tab. Runtime id when live, else a stable draft key. */
 export function tabKeyFor(runtimeId: string | null, storedId: string | null, fallback: string): string {
@@ -72,6 +85,7 @@ export function openDraft(state: MultiState): MultiState {
     sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
     tabs: [...state.tabs, tab],
     activeKey: key,
+    workspace: state.workspace,
   };
 }
 
@@ -127,6 +141,7 @@ export function bindSnapshot(
     sessions,
     tabs,
     activeKey: state.activeKey === key ? nextKey : state.activeKey,
+    workspace: state.workspace,
   };
 }
 
@@ -139,6 +154,7 @@ export function openStored(state: MultiState, storedId: string, title: string): 
     sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
     tabs: [...state.tabs, { key, runtimeId: null, storedId, title, draft: false }],
     activeKey: key,
+    workspace: state.workspace,
   };
 }
 
@@ -155,7 +171,7 @@ export function closeTab(state: MultiState, key: string): MultiState {
   if (activeKey === key) {
     activeKey = tabs.length ? (tabs[tabs.length - 1]?.key ?? null) : null;
   }
-  return { sessions, tabs, activeKey };
+  return { sessions, tabs, activeKey, workspace: state.workspace };
 }
 
 export function renameTab(state: MultiState, key: string, title: string): MultiState {

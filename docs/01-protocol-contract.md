@@ -102,12 +102,31 @@
 ### `session.create`
 
 ```json
-{"source":"desktop","cwd":"<可选>","model":"<可选>","provider":"<可选>"}
+{"source":"desktop","cwd":"<可选>","cwd_explicit":"<可选>","model":"<可选>","provider":"<可选>"}
 ```
 
 返回 `SessionCreateResult`：`session_id`（runtime）、`stored_session_id`、`message_count`、`messages`（`TranscriptMessage[]`）、`info`（`SessionLiveInfo`）。
 
 `source` 只影响会话列表的来源标记。用 `"desktop"` 让它在 `/sessions` 里按正常人类会话显示（`_LISTING_DENY_SOURCES` 会隐藏 subagent / kanban 来源）。
+
+**`cwd` 与 `cwd_explicit`（工作区，0.22.2 / `d923a5eb487` 核对）。** 后端在 `tui_gateway/session_workdir.py::_resolve_create_cwd` 决定新会话的工作目录：
+
+- `cwd` 能 `isdir` 通过 → 直接采用，会话行写上这个路径；
+- `cwd` 通不过本机探测（dashboard 连的是远程 / 容器化后端，路径在网关那台机器上不存在）→ 只有 `cwd_explicit: true` 且 `source == "desktop"` 才采用原样路径。客户端说「这是用户亲手选的」，比网关的 `isdir` 更权威；
+- 两个都不给 → 落到 `terminal.cwd` / 网关启动目录，且**不写会话行的 cwd**（「没有工作区」是一个真实状态，不是空字符串）。
+
+所以插件选了工作区时固定发 `{cwd, cwd_explicit: true}`；没选时两个字段都不发，而不是发空串。
+
+`info.cwd` 在 create / resume 的返回里回显会话自己的工作目录（没有则为空），插件把它放进 `SessionMeta.cwd` 只用于展示——已存在的会话不能被改目录，改的只是「下一个新对话」。
+
+### `GET /api/chat/workspaces`（REST，非 RPC）
+
+```json
+{"projects":[{"id","name","archived","primary_path","folders":[{"path","label","is_primary"}]}],
+ "repos":[{"root","label","last_active"}],"default_cwd":"…","home":"…","scan_enabled":true}
+```
+
+`?scan=1` 先让宿主重扫 `desktop.repo_scan_roots` 再返回（`hermes_cli/web_routers/chat_workspaces.py`）。这就是仪表盘自带 `/chat` 工作区选择器用的同一个端点，所以两边列出的项目/仓库完全一致。需要 dashboard 的会话 token —— 走 `SDK.fetchJSON`，不能用裸 `fetch`。`projects.db` 是 per-profile 的，profile 由服务端按请求作用域解析。
 
 ### `session.list`
 

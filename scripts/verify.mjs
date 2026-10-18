@@ -1590,6 +1590,73 @@ async function main() {
       );
     }
 
+    // ── workspace chip ──────────────────────────────────────────────────────
+    // The pick is a preference for the NEXT new chat, so it can be exercised
+    // without minting a session: pick a path, read the chip and storage, then
+    // restore the default so the run leaves no state behind.
+    const wsPath = projectRoot.replace(/\\/g, "/");
+    const wsBase = wsPath.split("/").filter(Boolean).at(-1) || "";
+    const wsChip = await session.evaluate(`(() => {
+      const el = document.querySelector('[data-hb="workspace-button"]');
+      return { present: Boolean(el), label: el ? el.textContent : "" };
+    })()`);
+    check(
+      "workspace chip renders under the composer",
+      wsChip.present === true && String(wsChip.label).length > 0,
+      JSON.stringify(wsChip),
+    );
+
+    await session.evaluate(`document.querySelector('[data-hb="workspace-button"]').click()`);
+    await sleep(250);
+    const wsPanel = await session.evaluate(`(() => {
+      const el = document.querySelector('[data-hb="workspace-panel"]');
+      return { present: Boolean(el), rows: document.querySelectorAll('[data-hb="workspace-option"]').length };
+    })()`);
+    check(
+      "workspace panel lists the host's projects and repos",
+      wsPanel.present === true && Number(wsPanel.rows) >= 1,
+      JSON.stringify(wsPanel),
+    );
+
+    await session.evaluate(`document.querySelector('[data-hb="workspace-custom-open"]').click()`);
+    await sleep(200);
+    // React owns the input's value, so the write has to go through the native
+    // setter followed by an `input` event — assigning `.value` alone is undone
+    // on the next render and the apply would submit an empty path.
+    await session.evaluate(`(() => {
+      const input = document.querySelector('[data-hb="workspace-custom"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(wsPath)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(150);
+    await session.evaluate(`document.querySelector('[data-hb="workspace-apply"]').click()`);
+    await sleep(300);
+    const wsPicked = await session.evaluate(`(() => ({
+      label: (document.querySelector('[data-hb="workspace-button"]') || {}).textContent || "",
+      stored: localStorage.getItem('hermes-bubbles-workspace:'),
+      open: Boolean(document.querySelector('[data-hb="workspace-panel"]')),
+    }))()`);
+    check(
+      "picking a workspace updates the chip, persists it, and closes the panel",
+      String(wsPicked.label).includes(wsBase) && wsPicked.stored === wsPath && wsPicked.open === false,
+      JSON.stringify(wsPicked),
+    );
+
+    await session.evaluate(`document.querySelector('[data-hb="workspace-button"]').click()`);
+    await sleep(250);
+    await session.evaluate(`document.querySelectorAll('[data-hb="workspace-option"]')[0].click()`);
+    await sleep(250);
+    const wsRestored = await session.evaluate(`(() => ({
+      stored: localStorage.getItem('hermes-bubbles-workspace:'),
+      label: (document.querySelector('[data-hb="workspace-button"]') || {}).textContent || "",
+    }))()`);
+    check(
+      "choosing the default clears the stored workspace",
+      wsRestored.stored === null && !String(wsRestored.label).includes(wsBase),
+      JSON.stringify(wsRestored),
+    );
+
     const consoleErrors = session.consoleLines.filter(
       (line) => (line.startsWith("[error]") || line.startsWith("[exception]")) && isPageError(line),
     );

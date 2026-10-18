@@ -121,6 +121,15 @@ export interface Messages {
   /** Composer affordances. */
   attachFiles: string;
   pickModel: string;
+  /** Workspace picker: the directory the NEXT new chat starts in. */
+  workspace: string;
+  workspaceForNewChat: string;
+  workspaceDefault: string;
+  workspaceRescan: string;
+  workspaceCustom: string;
+  workspaceApply: string;
+  workspaceSessionCwd: string;
+  workspaceLoadFailed: string;
   reasoning: string;
   reasoningLow: string;
   reasoningMedium: string;
@@ -252,6 +261,14 @@ const EN: Messages = {
   submit: "Submit",
   attachFiles: "Add files",
   pickModel: "Model and reasoning",
+  workspace: "Workspace",
+  workspaceForNewChat: "Directory the next new chat starts in",
+  workspaceDefault: "Default directory",
+  workspaceRescan: "Rescan repositories",
+  workspaceCustom: "Custom path…",
+  workspaceApply: "Use",
+  workspaceSessionCwd: "This chat's directory",
+  workspaceLoadFailed: "Could not list workspaces",
   reasoning: "Reasoning",
   reasoningLow: "Low",
   reasoningMedium: "Medium",
@@ -387,6 +404,14 @@ const ZH: Messages = {
   submit: "提交",
   attachFiles: "添加文件",
   pickModel: "模型与思考强度",
+  workspace: "工作区",
+  workspaceForNewChat: "下一个新对话的起始目录",
+  workspaceDefault: "默认目录",
+  workspaceRescan: "重新扫描仓库",
+  workspaceCustom: "自定义路径…",
+  workspaceApply: "使用",
+  workspaceSessionCwd: "本对话所在目录",
+  workspaceLoadFailed: "无法列出工作区",
   reasoning: "思考",
   reasoningLow: "低",
   reasoningMedium: "中",

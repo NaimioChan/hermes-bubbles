@@ -963,6 +963,177 @@ div:hover > .hb-row-tools,
   color: var(--color-card-foreground);
 }
 
+/* ── workspace chip + panel ──────────────────────────────────────────────── */
+
+.hb-workspace-wrap {
+  position: relative;
+  display: flex;
+  padding: 0.15rem 0.5rem 0;
+}
+
+.hb-workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 24rem;
+  padding: 0.1rem 0.4rem;
+  border: 0;
+  background: transparent;
+  border-radius: calc(var(--radius) * 0.5);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.hb-workspace-chip:hover {
+  background: var(--color-muted);
+}
+
+.hb-workspace-caret {
+  opacity: 0.6;
+  font-size: 0.5625rem;
+}
+
+.hb-workspace-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-workspace-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.hb-workspace-panel {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 0.5rem;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: 21rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--color-border);
+}
+
+.hb-workspace-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem 0.3rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hb-workspace-rescan {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hb-workspace-rescan:hover {
+  color: var(--color-card-foreground);
+}
+
+.hb-workspace-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.25rem 0.45rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  background: transparent;
+  color: var(--color-card-foreground);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hb-workspace-row:hover {
+  background: var(--color-muted);
+}
+
+.hb-workspace-name {
+  flex: 0 0 auto;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-workspace-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-muted-foreground);
+  font-size: 0.625rem;
+  font-family: var(--font-mono, monospace);
+  direction: rtl;
+  text-align: right;
+}
+
+.hb-workspace-check {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  font-size: 0.625rem;
+}
+
+.hb-workspace-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.3rem;
+}
+
+.hb-workspace-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  background: transparent;
+  color: var(--color-card-foreground);
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  font-size: 0.6875rem;
+  outline: none;
+}
+
+.hb-workspace-apply {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.5rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+
+.hb-workspace-note {
+  padding: 0.25rem 0.45rem 0.15rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.625rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hb-caret,
   .hb-todo-active {

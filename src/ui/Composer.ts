@@ -19,6 +19,7 @@ import { formatBytes, screenFiles } from "../core/attachments";
 import { fitComposerHeight } from "../core/autosize";
 import { metricChips, pressureTone } from "../core/metrics";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
+import type { WorkspaceOption } from "../core/workspaces";
 import {
   applyCompletion,
   filterCommands,
@@ -28,6 +29,7 @@ import {
 } from "../core/slash";
 import type { Usage } from "../core/types";
 import type { HermesPluginSdk } from "./sdk";
+import { WorkspacePicker } from "./WorkspacePicker";
 
 export interface ModelChoice {
   model: string;
@@ -53,6 +55,15 @@ export interface ComposerProps {
   onOpenModelPicker: () => void;
   onPickReasoning: (level: string) => void;
   onError: (message: string) => void;
+  /** Workspace the NEXT new chat starts in, plus the open session's own cwd. */
+  workspace: string;
+  workspaceCurrent: string;
+  workspaceOptions: readonly WorkspaceOption[];
+  workspaceHome: string;
+  workspaceLoading: boolean;
+  workspaceFailed: boolean;
+  onPickWorkspace: (cwd: string) => void;
+  onRescanWorkspaces: () => void;
   /** Text of the message being rewritten, or null when composing normally. */
   editingText?: string | null;
   onCancelEdit?: () => void;
@@ -524,6 +535,22 @@ export function Composer(props: ComposerProps) {
           ),
         ),
       ),
+
+      // The workspace chip sits directly under the box: it describes where the
+      // NEXT new chat will start, which is a composer-level affordance, not a
+      // transcript one.
+      React.createElement(WorkspacePicker, {
+        sdk,
+        locale: props.locale,
+        value: props.workspace,
+        current: props.workspaceCurrent,
+        options: props.workspaceOptions,
+        home: props.workspaceHome,
+        loading: props.workspaceLoading,
+        failed: props.workspaceFailed,
+        onPick: props.onPickWorkspace,
+        onRescan: props.onRescanWorkspaces,
+      }),
 
       // ── status + metrics ─────────────────────────────────────────────────
       React.createElement(

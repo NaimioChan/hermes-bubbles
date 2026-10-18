@@ -113,12 +113,54 @@ describe("interim segments", () => {
 });
 
 describe("reasoning", () => {
-  it("accumulates reasoning deltas separately from the reply", () => {
+  it("keeps reasoning in its own item instead of on the reply", () => {
     const t = feed(emptyTimeline, delta("答"), {
       type: "reasoning.delta",
       payload: { text: "想" },
     }, { type: "reasoning.delta", payload: { text: "了想" } });
-    expect(t.items[0]).toMatchObject({ text: "答", reasoning: "想了想" });
+    // A thinking block that starts after the reply splits it: the words before
+    // it are sealed, the block is its own row.
+    expect(t.items).toHaveLength(2);
+    expect(t.items[0]).toMatchObject({ kind: "assistant", text: "答", streaming: false });
+    expect(t.items[1]).toMatchObject({ kind: "reasoning", text: "想了想", streaming: true });
+  });
+
+  it("never creates an empty assistant bubble for a think-only segment", () => {
+    const t = feed(emptyTimeline, { type: "reasoning.delta", payload: { text: "先想一步" } });
+    expect(t.items).toHaveLength(1);
+    expect(t.items[0]).toMatchObject({ kind: "reasoning", text: "先想一步" });
+    expect(t.items.some((item) => item.kind === "assistant")).toBe(false);
+  });
+
+  it("seals the thinking block when the reply starts", () => {
+    const t = feed(
+      emptyTimeline,
+      { type: "reasoning.delta", payload: { text: "想" } },
+      delta("答"),
+    );
+    expect(t.items[0]).toMatchObject({ kind: "reasoning", streaming: false });
+    expect(t.items[1]).toMatchObject({ kind: "assistant", text: "答", streaming: true });
+  });
+
+  it("starts a new thinking block after a tool call instead of growing the old one", () => {
+    const t = feed(
+      emptyTimeline,
+      { type: "reasoning.delta", payload: { text: "第一段" } },
+      { type: "tool.start", payload: { tool_id: "t1", name: "terminal" } },
+      { type: "reasoning.delta", payload: { text: "第二段" } },
+    );
+    const blocks = t.items.filter((item) => item.kind === "reasoning") as Array<{ text: string }>;
+    expect(blocks.map((item) => item.text)).toEqual(["第一段", "第二段"]);
+  });
+
+  it("stops the live caret once the turn completes", () => {
+    const t = feed(
+      emptyTimeline,
+      { type: "reasoning.delta", payload: { text: "只有想法" } },
+      { type: "message.complete", payload: { status: "ok" } },
+    );
+    expect(t.items).toHaveLength(1);
+    expect(t.items[0]).toMatchObject({ kind: "reasoning", streaming: false });
   });
 
   it("ignores empty reasoning chunks", () => {
@@ -201,6 +243,12 @@ describe("inferToolStatus", () => {
 
   it("reads a failure out of a structured result", () => {
     expect(inferToolStatus({ result: { error: "nope" } })).toBe("error");
+  });
+
+  it("treats a null error field in a structured result as success", () => {
+    // Measured on a real terminal call: `{output, exit_code, error: null}` is a
+    // success, and a key-presence check painted it red.
+    expect(inferToolStatus({ result: { output: "hi", exit_code: 0, error: null } })).toBe("ok");
   });
 
   it("does not paint a success red just because the word appears in a result body", () => {

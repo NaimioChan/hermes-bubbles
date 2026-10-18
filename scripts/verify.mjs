@@ -1142,12 +1142,14 @@ async function main() {
       const usage = [...scroller.querySelectorAll('div')].find(d =>
         d.children.length === 0 && /tokens|tok ·/.test(d.textContent || ''));
       const reasoning = scroller.querySelector('[data-hb="reasoning-toggle"]');
-      const reasoningBlock = reasoning ? reasoning.parentElement : null;
+      // The row is its own transcript item now, so its spacing lives on the
+      // item wrapper (the per-kind gap), not on the block itself.
+      const reasoningRow = reasoning ? reasoning.closest('[data-hb-kind]') : null;
       return {
         usageSize: usage ? parseFloat(getComputedStyle(usage).fontSize) : null,
         reasoningSize: reasoning ? parseFloat(getComputedStyle(reasoning).fontSize) : null,
         reasoningPresent: Boolean(reasoning),
-        reasoningMarginTop: reasoningBlock ? parseFloat(getComputedStyle(reasoningBlock).marginTop) : null,
+        reasoningMarginTop: reasoningRow ? parseFloat(getComputedStyle(reasoningRow).marginTop) : null,
       };
     })()`);
     // The usage line must stay in the smallest tier. A turn need not produce
@@ -1162,12 +1164,66 @@ async function main() {
     );
     if (type.reasoningPresent) {
       check(
-        "reasoning block has real spacing above it",
-        typeof type.reasoningMarginTop === "number" && type.reasoningMarginTop >= 6,
+        "reasoning row keeps real spacing above it",
+        typeof type.reasoningMarginTop === "number" && type.reasoningMarginTop >= 4,
         `margin-top=${type.reasoningMarginTop}px`,
       );
     } else {
       console.log("SKIP  reasoning spacing — this turn produced no reasoning block");
+    }
+
+    // ── item 6 (this round): no empty bubbles, compact machinery ───────────
+    // The reported pair of complaints: one blank bubble per chain of thought
+    // (reasoning used to materialise as an assistant row with no text, complete
+    // with a reserved copy strip) and over-sized tool cards. Both are measured
+    // on the live transcript rather than asserted from the source.
+    const furniture = await session.evaluate(`(() => {
+      const scroller = [...document.querySelectorAll('div')]
+        .find(d => d.className.includes('hb-scroll') && d.className.includes('overflow-y-auto'));
+      if (!scroller) return { error: 'no transcript' };
+      const emptyBubbles = [...scroller.querySelectorAll('.hb-bubble-text')]
+        .filter((el) => !(el.textContent || '').trim()).length;
+      const reasonings = [...scroller.querySelectorAll('[data-hb="reasoning-row"]')];
+      const toggles = [...scroller.querySelectorAll('[data-hb="tool-toggle"]')];
+      const toggleSizes = toggles.map((el) => ({
+        fontSize: parseFloat(getComputedStyle(el).fontSize),
+        height: Math.round(el.getBoundingClientRect().height),
+      }));
+      return {
+        emptyBubbles,
+        reasoningRows: reasonings.length,
+        // A reasoning row nested inside an assistant bubble is the old shape.
+        reasoningInBubble: reasonings.filter((el) => el.closest('[data-hb-kind="assistant"]')).length,
+        toolRows: toggles.length,
+        toolMaxFont: toggleSizes.length ? Math.max(...toggleSizes.map((s) => s.fontSize)) : null,
+        toolMaxHeight: toggleSizes.length ? Math.max(...toggleSizes.map((s) => s.height)) : null,
+      };
+    })()`);
+    check(
+      "no empty message bubble is painted",
+      furniture.emptyBubbles === 0,
+      `emptyBubbles=${furniture.emptyBubbles}`,
+    );
+    if (furniture.reasoningRows > 0) {
+      check(
+        "thinking renders as its own row, not inside a bubble",
+        furniture.reasoningInBubble === 0,
+        `rows=${furniture.reasoningRows} inBubble=${furniture.reasoningInBubble}`,
+      );
+    } else {
+      console.log("SKIP  thinking row placement — this turn produced no reasoning");
+    }
+    if (furniture.toolRows > 0) {
+      check(
+        "tool calls render as compact one-line rows",
+        typeof furniture.toolMaxFont === "number"
+          && furniture.toolMaxFont <= 12
+          && typeof furniture.toolMaxHeight === "number"
+          && furniture.toolMaxHeight <= 24,
+        `font=${furniture.toolMaxFont}px height=${furniture.toolMaxHeight}px rows=${furniture.toolRows}`,
+      );
+    } else {
+      console.log("SKIP  tool row compactness — this run produced no tool calls");
     }
 
     // Ignore anything thrown by a browser extension. Headless Edge still loads

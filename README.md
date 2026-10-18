@@ -8,7 +8,7 @@ It does not go through a PTY. It speaks the dashboard's own `tui_gateway` JSON-R
 
 ![hermes-bubbles chat page](docs/assets/hero.png)
 
-Open sessions are tabs along the top, stored sessions live in a collapsible panel on the right, and the transcript in the middle holds bubbles, tool cards, a semi-explicit reasoning block, and a locator rail for jumping back to something you said earlier.
+Open sessions are tabs along the top, stored sessions live in a collapsible panel on the right, and the transcript in the middle holds bubbles, one-line tool rows, collapsible thinking blocks between them, and a locator rail for jumping back to something you said earlier.
 
 ## Features
 
@@ -108,7 +108,7 @@ src/
 │   ├── TabStrip.ts     open sessions
 │   ├── HistoryPanel.ts stored sessions, rename/delete, status lamp
 │   ├── Composer.ts     input, slash menu, attachment tray, metrics
-│   ├── Bubble.ts       message blocks and the reasoning disclosure
+│   ├── Bubble.ts       bubbles, thinking blocks, tool rows, subagent batches
 │   ├── Markdown.ts     renders the node tree via React.createElement
 │   ├── LocatorRail.ts  the jump rail
 │   ├── RequestCards.ts approval and clarify cards

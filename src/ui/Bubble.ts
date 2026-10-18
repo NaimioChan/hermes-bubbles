@@ -9,7 +9,7 @@
  * (DESIGN.md). Nothing in this file may hardcode a hex value.
  */
 
-import type { AssistantItem, NoticeItem, SubagentChild, SubagentsItem, TimelineItem, ToolItem, UserItem } from "../core/types";
+import type { AssistantItem, NoticeItem, ReasoningItem, SubagentChild, SubagentsItem, TimelineItem, ToolItem, UserItem } from "../core/types";
 import { isSubagentTerminal } from "../core/types";
 import { formatElapsed, messageStamp, messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
@@ -92,34 +92,36 @@ function UserBubble({
 }
 
 /**
- * Reasoning, shown semi-explicitly: while the model is thinking, the last line
- * of its reasoning is visible as a live preview so a long pause reads as work
- * rather than a hang. Once the turn ends the block collapses to a one-line
- * summary and expands on demand.
+ * One thinking segment.
  *
- * This is the middle ground between hiding reasoning entirely and dumping a wall
- * of it into the transcript — the same shape most agent chats use.
+ * Rendered as transcript furniture rather than a message: no card, no speaker
+ * corner radius, no copy/branch row. While the model thinks, the last line of
+ * its reasoning is visible so a long pause reads as work instead of a hang;
+ * once the segment ends it collapses to a one-line summary and expands on
+ * demand.
+ *
+ * This replaced a design where reasoning rode on the assistant bubble. Every
+ * think-only segment then became an assistant row with empty text, which is
+ * what put a blank bubble (and its reserved copy-button strip) under each chain
+ * of thought.
  */
-function Reasoning({
+function ReasoningRow({
   sdk,
-  text,
-  streaming,
+  item,
   locale,
 }: {
   sdk: HermesPluginSdk;
-  text: string;
-  streaming: boolean;
+  item: ReasoningItem;
   locale: Locale;
 }) {
   const { React } = sdk;
   const { useState, useMemo } = sdk.hooks;
   const [open, setOpen] = useState(false);
-  const trimmed = text.trim();
+  const trimmed = item.text.trim();
   const t = messagesFor(locale);
 
-  // Hooks must run unconditionally: this component returns null for empty
-  // reasoning, and a `useMemo` after that early return throws React #310
-  // ("rendered more hooks than during the previous render") the first time a
+  // Hooks run unconditionally: this component returns null for empty reasoning,
+  // and a `useMemo` after that early return throws React #310 the first time a
   // turn has no reasoning and the next one does.
   const tail = useMemo(() => {
     const lines = trimmed.split("\n").filter((line) => line.trim());
@@ -128,69 +130,37 @@ function Reasoning({
 
   if (!trimmed) return null;
 
-  const chars = trimmed.length;
-
   return React.createElement(
     "div",
-    { className: "hb-stack-gap", style: { maxWidth: "min(72ch, 82%)" } },
+    {
+      className: "hb-think",
+      "data-hb": "reasoning-row",
+      "data-streaming": item.streaming ? "true" : "false",
+    },
     React.createElement(
       "button",
       {
         type: "button",
-        className: "flex w-full cursor-pointer items-center gap-1.5 text-[0.6875rem]",
+        className: "hb-think-head",
         "data-hb": "reasoning-toggle",
-        style: { color: "var(--color-muted-foreground)" },
+        "data-open": open ? "true" : "false",
+        "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
-      React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, open ? "▾" : "▸"),
-      React.createElement("span", { className: "shrink-0 uppercase tracking-[0.06em]" }, t.thought),
-      streaming
-        ? React.createElement(
-            "span",
-            { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } },
-            "●",
-          )
+      React.createElement("span", { className: "hb-think-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-think-label" }, t.thought),
+      item.streaming
+        ? React.createElement("span", { className: "hb-caret hb-think-live" }, "●")
         : null,
-      React.createElement("span", { className: "shrink-0", style: { opacity: 0.7 } }, t.chars(chars)),
-      !open && !streaming
-        ? React.createElement(
-            "span",
-            { className: "hb-truncate hb-flex-fill text-left", style: { opacity: 0.8 } },
-            tail,
-          )
+      React.createElement("span", { className: "hb-think-count" }, t.chars(trimmed.length)),
+      // Collapsed, the segment is its own summary. The tail is the same string
+      // that streams in, so the row stays one line as it updates.
+      !open
+        ? React.createElement("span", { className: "hb-think-tail" }, tail)
         : null,
     ),
-    // While streaming the tail stays visible under the header even when the
-    // block is expanded, so the top of a long thought does not push it away.
-    streaming && !open
-      ? React.createElement(
-          "div",
-          {
-            className: "hb-mt-sm hb-truncate px-2 py-1 text-xs",
-            style: {
-              color: "var(--color-muted-foreground)",
-              borderLeft: "2px solid var(--color-border)",
-            },
-          },
-          tail,
-        )
-      : null,
     open
-      ? React.createElement(
-          "div",
-          {
-            className: "hb-pre hb-mt-sm break-words px-2 py-1.5 text-xs",
-            style: {
-              background: "color-mix(in oklab, var(--color-muted) 45%, var(--color-card))",
-              color: "var(--color-muted-foreground)",
-              borderRadius: "var(--radius)",
-              borderLeft: "2px solid var(--color-border)",
-              maxHeight: "22rem",
-              overflowY: "auto",
-            },
-          },
-          trimmed,
-        )
+      ? React.createElement("div", { className: "hb-think-body" }, trimmed)
       : null,
   );
 }
@@ -295,26 +265,34 @@ function AssistantBubble({
 }) {
   const { React } = sdk;
   const errorColor = "var(--color-destructive)";
+  // Never paint an empty bubble. A turn can create an assistant row before any
+  // text exists (a `message.start`, a think-only segment on an old snapshot);
+  // the card and its reserved action strip would then read as a blank message
+  // with a gap under it. Only a failure has something to say with no text.
+  const hasText = item.text.trim().length > 0;
+  if (!hasText && !item.error) return null;
   const t = messagesFor(locale);
   return React.createElement(
     "div",
     { className: "flex flex-col items-start" },
-    React.createElement(
-      "div",
-      {
-        className: "break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
-        style: {
-          maxWidth: "min(72ch, 82%)",
-          background: "var(--color-card)",
-          color: "var(--color-card-foreground)",
-          borderRadius: ASSISTANT_RADIUS,
-          boxShadow: "inset 0 0 0 1px var(--color-border)",
-        },
-      },
-      // The reply is Markdown. The caret rides inside the last block so a slow
-      // first token reads as work rather than a hang, without pushing a line.
-      React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming), locale }),
-    ),
+    hasText
+      ? React.createElement(
+          "div",
+          {
+            className: "break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
+            style: {
+              maxWidth: "min(72ch, 82%)",
+              background: "var(--color-card)",
+              color: "var(--color-card-foreground)",
+              borderRadius: ASSISTANT_RADIUS,
+              boxShadow: "inset 0 0 0 1px var(--color-border)",
+            },
+          },
+          // The reply is Markdown. The caret rides inside the last block so a slow
+          // first token reads as work rather than a hang, without pushing a line.
+          React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming), locale }),
+        )
+      : null,
     item.error
       ? React.createElement(
           "div",
@@ -325,7 +303,6 @@ function AssistantBubble({
           item.error,
         )
       : null,
-    React.createElement(Reasoning, { sdk, text: item.reasoning, streaming: item.streaming, locale }),
     item.usage
       ? React.createElement(
           "div",
@@ -343,108 +320,86 @@ function AssistantBubble({
       : null,
     // Actions only on a settled reply: mid-stream there is nothing to copy or
     // regenerate yet, and the desktop app's own bar is transient for the same reason.
-    !item.streaming && (onBranch || onRegenerate || onCopy)
+    hasText && !item.streaming && (onBranch || onRegenerate || onCopy)
       ? React.createElement(MessageActions, { sdk, item, locale, onBranch, onRegenerate, onCopy })
       : null,
   );
 }
 
-function ToolCard({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
+/**
+ * A tool call.
+ *
+ * Deliberately not a card. A turn fires ten or twenty of these, and a card per
+ * call (padding, background, a second preview line under the header) turns the
+ * transcript into a wall of grey boxes that buries the actual answer. This is a
+ * single dim row — caret, name, one-line summary, duration — on a hairline
+ * rail: dense enough that a run of calls reads as a list of things that
+ * happened, quiet enough that the reply stays the thing you see.
+ *
+ * Still collapsed by default: the arguments and output are one click away, and
+ * expanding is the only thing that grows the row.
+ */
+function ToolRow({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
   const { React } = sdk;
   const { useState } = sdk.hooks;
-  // Collapsed by default, running or not. A turn with a dozen tool calls is
-  // unreadable when each one expands its own output; the header still shows the
-  // language, the summary and the duration, so the chain stays scannable and the
-  // user opens only what they care about.
   const [open, setOpen] = useState(false);
   const preview = toolPreview(item.resultText);
-  const stripe =
-    item.status === "error"
-      ? "var(--color-destructive)"
-      : item.status === "running"
-        ? "var(--color-ring)"
-        : "var(--color-border)";
   const argsText = item.argsText ?? (item.args ? JSON.stringify(item.args, null, 2) : "");
   const duration = formatDuration(item.durationS);
-  const outputStyle = {
-    padding: "0.5rem",
-    fontFamily: "var(--font-mono)",
-    fontSize: "0.8125rem",
-    background: "color-mix(in oklab, var(--color-muted) 70%, transparent)",
-    borderRadius: "calc(var(--radius) * 0.6)",
-  };
 
   return React.createElement(
     "div",
     {
-      className: "px-3 py-2 text-xs",
-      style: {
-        maxWidth: "min(72ch, 82%)",
-        background: "color-mix(in oklab, var(--color-muted) 60%, var(--color-card))",
-        borderRadius: "var(--radius)",
-        borderLeft: `2px solid ${stripe}`,
-      },
+      className: "hb-tool",
+      "data-hb": "tool-row",
+      "data-status": item.status,
+      "data-name": item.name,
     },
     React.createElement(
       "button",
       {
         type: "button",
-        className: "flex w-full cursor-pointer items-center gap-2 text-left",
-        style: { color: "var(--color-card-foreground)" },
+        className: "hb-tool-head",
         "data-hb": "tool-toggle",
         "data-open": open ? "true" : "false",
         "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
-      React.createElement("span", null, open ? "▾" : "▸"),
-      React.createElement("span", { className: "font-medium" }, toolLabel(item.name)),
+      React.createElement("span", { className: "hb-tool-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name)),
       item.status === "running"
-        ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "…")
+        ? React.createElement("span", { className: "hb-caret hb-tool-live" }, "●")
         : null,
       item.summary
-        ? React.createElement(
-            "span",
-            { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
-            item.summary,
-          )
+        ? React.createElement("span", { className: "hb-tool-summary" }, item.summary)
         : null,
       duration
-        ? React.createElement(
-            "span",
-            { className: "ml-auto shrink-0 tabular-nums", style: { color: "var(--color-muted-foreground)" } },
-            duration,
-          )
+        ? React.createElement("span", { className: "hb-tool-duration tabular-nums" }, duration)
         : null,
     ),
     item.risk
       ? React.createElement(
           "div",
-          { className: "mt-1", style: { color: "var(--color-destructive)" } },
+          { className: "hb-tool-risk" },
           `输出被标记为 ${item.risk}`,
         )
       : null,
     open
       ? React.createElement(
           "div",
-          { className: "hb-stack-gap space-y-1.5" },
+          { className: "hb-tool-body" },
           argsText
-            ? React.createElement("pre", { className: "hb-output", style: outputStyle }, argsText)
+            ? React.createElement("pre", { className: "hb-output hb-tool-pre" }, argsText)
             : null,
           preview.text
             ? React.createElement(
                 "pre",
-                { className: "hb-output", style: outputStyle },
+                { className: "hb-output hb-tool-pre" },
                 preview.text + (preview.truncated ? "\n…" : ""),
               )
             : null,
         )
-      : preview.text
-        ? React.createElement(
-            "div",
-            { className: "mt-1 hb-truncate", style: { color: "var(--color-muted-foreground)" } },
-            preview.text.split("\n")[0],
-          )
-        : null,
+      : null,
   );
 }
 
@@ -628,7 +583,9 @@ export function Bubble(props: BubbleProps) {
         onCopy: props.onCopy,
       });
     case "tool":
-      return ToolCard({ sdk, item });
+      return ToolRow({ sdk, item });
+    case "reasoning":
+      return ReasoningRow({ sdk, item, locale });
     case "subagents":
       return SubagentsCard({ sdk, item, locale });
     case "notice":

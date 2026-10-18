@@ -8,6 +8,36 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 12:28 · hermes · 思维链独立成条目、工具调用收成紧凑行
+
+- 改：`core/types.ts`（新增 `ReasoningItem`，`AssistantItem` 去掉 `reasoning` 字段）；`core/reduce.ts`（`reasoning.delta` / `reasoning.available` 落成时间线尾部独立条目，只在尾部 streaming 时追加；`message.delta` / `message.interim` / `message.start` / `tool.start` / `message.complete` / `settleTimeline` 全部封口思考块；`inferToolStatus` 的 `result.error` 取真值判断）；`core/history.ts`（历史行的 reasoning 投影成回复**上方**的思考块，只有推理没有正文的行不再产出空助手条目）；`ui/Bubble.ts`（`Reasoning` → `ReasoningRow`，无卡片无动作行；`ToolCard` → `ToolRow`，单行细轨；空正文助手条目不渲染）；`ui/ChatPage.ts`（条目包装加 `data-hb-kind`）；`ui/style.css`（`.hb-think` / `.hb-tool` 及按 kind 分配的垂直节奏）；`scripts/verify.mjs` 加三条实测断言；新增 `scripts/probe-furniture.mjs`；`tests/reduce.test.ts` / `tests/history.test.ts` / `tests/layout-classes.test.ts`；`GLOSSARY.md`、`README.md`、`docs/01-protocol-contract.md`、`docs/agents/domain.md`
+- 验证：`npx vitest run` 453 passed（22 文件）；`npx tsc --noEmit` 干净；`node scripts/audit-classes.mjs` 170/170；`node scripts/verify.mjs` 79/79（真模型真往返，含「无空气泡」「思考不在气泡里」两条新断言）；`node scripts/probe-furniture.mjs` 11/11（命中真实的 terminal 调用：11px 字号／15px 行高／透明底／折叠往返／包装间距 3px，条目顺序 `user → reasoning → tool → assistant → reasoning → assistant`）
+- 遗留：`verify.mjs` 里的「工具行紧凑度」在本轮仍走了 SKIP——它的探针跑在一轮没有工具调用的转写上；真正的工具行验收放在 `probe-furniture.mjs` 里，需要时单独跑（依赖模型真的去调工具，所以没进主验收）
+
+### 空气泡是怎么长出来的
+
+`reasoning.delta` 在没有打开的气泡时会**自己创建一个 assistant 条目**，正文为空——推理被当成回复的附注塞进去。紧接着 `tool.start` 封口，于是每一段思维链都留下一个 `text: ""` 的助手条目：一个带边框的空卡片，下面还挂着一行预留了高度的复制按钮条。用户看到的就是「每个思维链对应一个空气泡，气泡下面一截空隙」。
+
+改法不是「隐藏空气泡」，而是**推理不该寄生在回复上**。一轮里可以想→调工具→再想→再说，每段推理都发生在不同位置，字段式的 `reasoning` 连这个顺序都表达不了。现在它是独立条目 `reasoning`：
+
+- 只有时间线**尾部**的思考块可以续写（`openReasoning` 用 last-item 判断，不用 `replaceLast`——后者会倒着找回工具调用之前那块，把两段推理粘成一块）；
+- 文字一开始流式就先封口思考块，工具调用开始时再封一次，回合结束时也封（否则光标在结束后还在闪）；
+- 历史行里的 reasoning 投影到回复**上方**，纯推理行只产出思考块，不再产生空回复。
+
+`AssistantBubble` 里另加一道保险：正文为空且没有 error 时直接不渲染。逻辑层的修法管不住所有来源（旧快照、异常帧），而「空卡片 + 空动作行」这种形态一旦出现就非常显眼。
+
+### 工具调用为什么不该是卡片
+
+先前每个调用是一张带内边距、底色和第二条预览行的卡片。一轮十几次调用就是十几个灰盒子，最终回答被压在下面——这才是可读性差的根源，不是字号。
+
+现在折叠态是一行：细轨（1px 左栏）+ 11px 文本，内容是 `▸ 工具名 · 摘要 · 耗时`，摘要独占可伸缩的那一列，名字和耗时固定不被挤走；展开才出现参数与输出（`hb-tool-pre`，仍是等宽、有底色）。`width: fit-content` 是关键的一笔：块级元素默认铺满整列，一行三个词的调用会把耗时甩到 82% 宽度之外的右边，看着像断线的两个元素。
+
+条目间距改成按 kind 分配（`.hb-bubble-gap[data-hb-kind="tool"]` 3px、思考 5.6px、消息保持 18.4px）：一串工具调用读起来是一段日志，而不是十个小段落。
+
+### 顺手修掉的红框
+
+实测里 `echo` 明明成功（`{output, exit_code: 0, error: null}`），工具行却是 red rail——`inferToolStatus` 用了 `"error" in result`，键在就算失败。改成取真值。这是探针跑出来的，不是读代码看出来的：只有真调一次工具才会看到 `error: null` 这个形状。
+
 ## 2026-10-18 01:05 · hermes · 输入框按内容自动增高（带上限）
 
 - 改：新增 `core/autosize.ts`（`fitComposerHeight()`，纯函数：内容高度 → 夹在 32–192px 之间，并回报是否需要滚动）；`ui/Composer.ts`（`fitInput()` 先 `height:auto` 再量 `scrollHeight`，`useLayoutEffect` 跟 `text` 走，`resize` 事件重算；`max-h-48` 换成 `hb-composer-input`）；`ui/style.css`（`.hb-composer-input` 同样的 192px 上限 + `overflow-y:auto`，脚本没跑起来时也封顶）；`tests/autosize.test.ts`；`scripts/verify.mjs` 加三条实测断言

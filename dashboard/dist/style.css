@@ -356,6 +356,170 @@
   color: var(--color-muted-foreground);
 }
 
+/* ── transcript furniture: thinking blocks and tool rows ──────────────────── */
+
+/*
+ * Neither of these is a message, and neither is styled as one: a hairline rail,
+ * one line of micro type, no card background, no speaker corner, no action row.
+ *
+ * Thinking used to ride on the assistant bubble, so every think-only segment
+ * became an assistant row with empty text — an empty card with a reserved
+ * copy-button strip under it. Tool calls used to be padded cards, which buried
+ * the answer under a column of grey boxes. Both are works-in-progress noise;
+ * the reply has to stay the loudest thing on screen.
+ */
+
+/* The transcript's vertical rhythm is per kind: messages keep their air,
+ * machinery packs. A run of tool calls should read as one block of lines, not
+ * as ten separate paragraphs. */
+.hb-bubble-gap[data-hb-kind="reasoning"],
+.hb-bubble-gap[data-hb-kind="notice"] {
+  margin-top: 0.35rem;
+}
+
+.hb-bubble-gap[data-hb-kind="tool"],
+.hb-bubble-gap[data-hb-kind="subagents"] {
+  margin-top: 0.2rem;
+}
+
+.hb-think,
+.hb-tool {
+  /* Hug the content: a block that fills the column leaves the duration stranded
+   * at the far right of a row that has three words in it. */
+  width: fit-content;
+  max-width: min(72ch, 82%);
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--color-muted-foreground);
+}
+
+.hb-think-head,
+.hb-tool-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hb-think-caret,
+.hb-think-live,
+.hb-think-label,
+.hb-think-count,
+.hb-tool-caret,
+.hb-tool-name,
+.hb-tool-live,
+.hb-tool-duration {
+  flex: 0 0 auto;
+}
+
+.hb-think-caret,
+.hb-think-count,
+.hb-tool-caret {
+  opacity: 0.65;
+}
+
+.hb-think-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hb-think-head:hover .hb-think-label,
+.hb-tool-head:hover .hb-tool-name {
+  color: var(--color-card-foreground);
+}
+
+.hb-think-live,
+.hb-tool-live {
+  color: var(--color-primary);
+}
+
+/* Collapsed, a thinking block summarises itself with its own last line — the
+ * same string the deltas are writing, so the row does not jump between two
+ * different descriptions of the same work. */
+.hb-think-tail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.hb-think-body {
+  margin-top: 0.2rem;
+  padding-left: 0.45rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.hb-tool[data-status="running"] {
+  border-left-color: var(--color-ring);
+}
+
+.hb-tool[data-status="error"] {
+  border-left-color: var(--color-destructive);
+}
+
+.hb-tool-name {
+  color: var(--color-card-foreground);
+  opacity: 0.85;
+}
+
+.hb-tool[data-status="error"] .hb-tool-name {
+  color: var(--color-destructive);
+}
+
+/* The one-line summary is the only thing allowed to shrink: the name and the
+ * duration are the scan handles, and a call with a paragraph of context must
+ * not push them off the row. */
+.hb-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.hb-tool-duration {
+  margin-left: 0.25rem;
+  opacity: 0.6;
+}
+
+.hb-tool-risk {
+  color: var(--color-destructive);
+}
+
+.hb-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0.1rem;
+}
+
+.hb-tool-pre {
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0.35rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: color-mix(in oklab, var(--color-muted) 55%, transparent);
+  border-radius: calc(var(--radius) * 0.5);
+}
+
 /* ── per-message actions ──────────────────────────────────────────────────── */
 
 /* Transparent until the message is hovered, and always occupying its height so

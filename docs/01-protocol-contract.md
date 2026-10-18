@@ -264,8 +264,8 @@
 | `message.delta` | `{text, rendered?, verbose?}` | `text` 追加到当前 streaming 气泡；没有则惰性创建 |
 | `message.interim` | `{text, already_streamed}` | 封口当前气泡（它已经通过 delta 可见了）。之后的新 delta 开新气泡 |
 | `message.complete` | `{text, usage?, status?, error?, partial?, reasoning?, billing?, failure_reason?}` | 收尾：`status:"error"` 时标错误；`text` 非空且当前气泡为空时用它兜底；`streaming=false`；记 usage |
-| `reasoning.delta` | `{text, verbose?}` | 追加到当前气泡的推理折叠区 |
-| `reasoning.available` | `{text, verbose?}` | 整块推理（非流式 provider） |
+| `reasoning.delta` | `{text, verbose?}` | 追加到当前**思考块**（`ReasoningItem`，时间线尾部独立的 reasoning 条目；回复已开始时先封口那条回复） |
+| `reasoning.available` | `{text, verbose?}` | 整块推理（非流式 provider），落在同一个思考块上 |
 | `thinking.delta` | `{text}` | **不进时间线**。绝大多数是 spinner 重绘 |
 | `session.usage` | `{usage}` | 更新上下文占用条 |
 | `session.title` | `{session_id, title}` | 自动标题，更新会话列表 |
@@ -275,10 +275,10 @@
 
 | 事件 | payload | 插件行为 |
 |---|---|---|
-| `tool.start` | `{tool_id, name, context?, args?, args_text?, preview?, labels?}` | 推一张 running 工具卡 |
-| `tool.complete` | `{tool_id, name, args?, duration_s?, result?, summary?, result_text?, inline_diff?, todos?, labels?}` | 按 `tool_id` 找到卡片，填结果，标 ok/error |
+| `tool.start` | `{tool_id, name, context?, args?, args_text?, preview?, labels?}` | 封口当前气泡与思考块，推一条 running 工具行 |
+| `tool.complete` | `{tool_id, name, args?, duration_s?, result?, summary?, result_text?, inline_diff?, todos?, labels?}` | 按 `tool_id` 找到工具行，填结果，标 ok/error（`result.error` 只在其值为真时算失败） |
 | `tool.generating` | `{name}` | 忽略（只是模型在吐参数） |
-| `tool.output_risk` | `{tool_id, name, risk, findings, redacted}` | 在工具卡上加一条风险提示 |
+| `tool.output_risk` | `{tool_id, name, risk, findings, redacted}` | 在工具行下加一条风险提示 |
 | `todo.updated` | `{todos:[{id, content, status, parent?}], revision}` | **整体替换**任务清单（`meta.todo`）。`revision` 单调，旧值丢弃 |
 
 ### 子代理（`delegate_task` 的每个子任务）

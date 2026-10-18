@@ -68,12 +68,32 @@ export interface UserItem {
   pending?: boolean;
 }
 
+/**
+ * One thinking segment (`reasoning.delta` / `reasoning.available`).
+ *
+ * Its own timeline item, not a field on the reply: a turn can think, call a
+ * tool, think again, then answer, and each segment has to land where it
+ * happened. Carrying reasoning on the assistant bubble forced every
+ * think-only segment to materialise as an assistant row with empty text —
+ * which rendered as a blank bubble with a lonely copy row under it.
+ *
+ * Reasoning is transcript furniture, not a message: it holds no copy/regenerate
+ * affordances and renders as a dim one-line disclosure.
+ */
+export interface ReasoningItem {
+  kind: "reasoning";
+  id: string;
+  at: Millis;
+  text: string;
+  /** Still receiving deltas. Drives the live caret and the collapsing tail. */
+  streaming: boolean;
+}
+
 export interface AssistantItem {
   kind: "assistant";
   id: string;
   at: Millis;
   text: string;
-  reasoning: string;
   /** Still receiving deltas. Drives the caret and the stop button. */
   streaming: boolean;
   rowId?: number;
@@ -208,7 +228,13 @@ export interface SubagentsItem {
   finishedAt?: Millis;
 }
 
-export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem | SubagentsItem;
+export type TimelineItem =
+  | UserItem
+  | AssistantItem
+  | ReasoningItem
+  | ToolItem
+  | NoticeItem
+  | SubagentsItem;
 
 /** Everything the page needs that is not part of the transcript. */
 export interface SessionMeta {

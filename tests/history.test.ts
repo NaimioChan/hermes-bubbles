@@ -67,15 +67,17 @@ describe("projectHistory", () => {
     expect((items[0] as { resultText?: string }).resultText).toBeUndefined();
   });
 
-  it("carries assistant reasoning sidecars", () => {
+  it("projects a row's reasoning as its own item above the reply", () => {
     const items = projectHistory([{ role: "assistant", text: "答", reasoning: "因为…" }]);
-    expect(items[0]).toMatchObject({ reasoning: "因为…" });
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ kind: "reasoning", text: "因为…" });
+    expect(items[1]).toMatchObject({ kind: "assistant", text: "答" });
   });
 
-  it("keeps a reasoning-only assistant row", () => {
+  it("projects a reasoning-only row as a thinking block, not an empty reply", () => {
     const items = projectHistory([{ role: "assistant", text: "", reasoning: "只有推理" }]);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "assistant", reasoning: "只有推理" });
+    expect(items[0]).toMatchObject({ kind: "reasoning", text: "只有推理" });
   });
 
   it("renders system rows as notices, not as a speaker", () => {

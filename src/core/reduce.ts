@@ -14,6 +14,7 @@ import {
   lastAssistant,
   openAssistant,
   type AssistantItem,
+  type ReasoningItem,
   type SubagentChild,
   type SubagentStatus,
   type SubagentsItem,
@@ -84,6 +85,38 @@ function sealAssistant(items: TimelineItem[]): TimelineItem[] {
 }
 
 /**
+ * Reasoning is positional, so only the TAIL can be open.
+ *
+ * `replaceLast` would reach back to a thinking block from before a tool call
+ * and glue the new segment onto it, which is the one thing keeping these as
+ * separate items was meant to prevent. Hence the strict "last item" test.
+ */
+function openReasoning(items: readonly TimelineItem[]): ReasoningItem | null {
+  const last = items[items.length - 1];
+  return last && last.kind === "reasoning" && last.streaming ? last : null;
+}
+
+function sealReasoning(items: TimelineItem[]): TimelineItem[] {
+  const open = openReasoning(items);
+  if (!open) return items;
+  const copy = items.slice();
+  copy[copy.length - 1] = { ...open, streaming: false };
+  return copy;
+}
+
+/** Append a chunk to the open thinking block, or start a new one. */
+function appendReasoning(items: TimelineItem[], text: string): TimelineItem[] {
+  const open = openReasoning(items);
+  if (open) {
+    const copy = items.slice();
+    copy[copy.length - 1] = { ...open, text: open.text + text };
+    return copy;
+  }
+  const fresh: ReasoningItem = { kind: "reasoning", id: nextId("reasoning"), at: Date.now(), text, streaming: true };
+  return [...items, fresh];
+}
+
+/**
  * Tool results carry no `is_error` flag on the wire; the desktop infers failure
  * from a `error` key the closed contract does not declare, and from the
  * rendered summary. Reproduce that inference conservatively: an explicit error
@@ -97,8 +130,10 @@ export function inferToolStatus(payload: Record<string, unknown>): "ok" | "error
     return "error";
   }
   const result = payload.result;
-  if (result && typeof result === "object" && !Array.isArray(result) && "error" in (result as object)) {
-    return "error";
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    // Truthiness, not key presence: plenty of tools report success as
+    // `{"error": null}`, and a key check painted every one of those calls red.
+    if ((result as Record<string, unknown>).error) return "error";
   }
   return "ok";
 }
@@ -367,28 +402,31 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       return { items, meta: { ...meta, connected: false, status: "连接中断，重连中…" } };
 
     case "message.start":
-      return { items: sealAssistant(items), meta: { ...meta, running: true, status: "" } };
+      return { items: sealReasoning(sealAssistant(items)), meta: { ...meta, running: true, status: "" } };
 
     case "message.delta": {
       const text = str(p.text);
       if (!text) return timeline;
-      const open = openAssistant(items);
+      // Words after a thinking block are a new bubble: the block sits between
+      // them, and appending across it would put the answer above its own
+      // reasoning.
+      const base = sealReasoning(items);
+      const open = openAssistant(base);
       if (open) {
-        return { items: replaceLast(items, { ...open, text: open.text + text }), meta };
+        return { items: replaceLast(base, { ...open, text: open.text + text }), meta };
       }
       const fresh: AssistantItem = {
         kind: "assistant",
         id: nextId("assistant"),
         at: Date.now(),
         text,
-        reasoning: "",
         streaming: true,
       };
-      return { items: [...items, fresh], meta: { ...meta, running: true } };
+      return { items: [...base, fresh], meta: { ...meta, running: true } };
     }
 
     case "message.interim": {
-      const sealed = sealAssistant(items);
+      const sealed = sealReasoning(sealAssistant(items));
       // `already_streamed` means the text is already on screen via deltas. When
       // it is not, the event is the only copy of that segment.
       if (p.already_streamed) return { items: sealed, meta };
@@ -401,7 +439,6 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
         id: nextId("assistant"),
         at: Date.now(),
         text,
-        reasoning: "",
         streaming: false,
       };
       return { items: [...sealed, fresh], meta };
@@ -412,11 +449,15 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       const finalText = str(p.text);
       const error = str(p.error) || str(p.failure_reason);
       const usage = (p.usage ?? null) as Usage | null;
+      // Seal the thinking block first: a thinking-only turn ends with nothing
+      // else to attach, and leaving it `streaming` would keep the caret blinking
+      // after the turn is over.
+      const settled = sealReasoning(items);
       // Identify the turn's bubble BEFORE sealing: afterwards it is no longer
       // `streaming`, and a plain "last assistant" search could reach back into
       // a previous turn when this one produced no text at all. Seal and finish
       // in ONE pass — sealing first would replace the object and break identity.
-      const target = openAssistant(items);
+      const target = openAssistant(settled);
       // The turn ended: stamp it for the timestamp and duration lines. `at` is
       // the turn's start and is the wrong number to print under a reply.
       const completedAt = Date.now();
@@ -427,7 +468,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
         // `text` on a complete frame is often empty (already streamed) — only
         // use it as a fallback, never as a replacement.
         const merged = target.text.trim() ? target.text : finalText || target.text;
-        nextItems = patchAssistant(items, target, (item) => ({
+        nextItems = patchAssistant(settled, target, (item) => ({
           ...item,
           text: merged,
           streaming: false,
@@ -439,13 +480,12 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
         }));
       } else if (finalText) {
         nextItems = [
-          ...items,
+          ...settled,
           {
             kind: "assistant",
             id: nextId("assistant"),
             at: Date.now(),
             text: finalText,
-            reasoning: "",
             streaming: false,
             error: status === "error" ? error || "turn failed" : undefined,
             partial: Boolean(p.partial),
@@ -456,13 +496,12 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
         ];
       } else if (status === "error" && error) {
         nextItems = [
-          ...items,
+          ...settled,
           {
             kind: "assistant",
             id: nextId("assistant"),
             at: Date.now(),
             text: "",
-            reasoning: "",
             streaming: false,
             error,
             completedAt,
@@ -470,7 +509,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
           },
         ];
       } else {
-        nextItems = items;
+        nextItems = settled;
       }
 
       return {
@@ -488,28 +527,21 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
     case "reasoning.available": {
       const text = str(p.text);
       if (!text) return timeline;
-      const open = openAssistant(items);
-      if (open) {
-        return { items: replaceLast(items, { ...open, reasoning: open.reasoning + text }), meta };
-      }
-      const fresh: AssistantItem = {
-        kind: "assistant",
-        id: nextId("assistant"),
-        at: Date.now(),
-        text: "",
-        reasoning: text,
-        streaming: true,
-      };
-      return { items: [...items, fresh], meta };
+      // A thinking block that starts once the reply has begun splits the reply:
+      // the words on either side are two segments with the block between them.
+      return { items: appendReasoning(sealAssistant(items), text), meta };
     }
 
     case "tool.start": {
       const tool = toolFromStart(event);
-      // A call ends the current text segment. The model's words before a tool
-      // and its words after it are two bubbles with the card between them;
-      // without this seal the post-tool reply keeps appending to the bubble
-      // above the card, so the answer looks buried under the tool calls.
-      return { items: [...sealAssistant(items), tool], meta };
+      // A call ends both the current text segment and the current thought. The
+      // model's words before a tool and its words after it are two bubbles with
+      // the card between them; without this seal the post-tool reply keeps
+      // appending to the bubble above the card, so the answer looks buried
+      // under the tool calls. The thought is sealed for the same reason: a
+      // thinking block belongs to the segment that produced it, not to a
+      // growing blob that swallows the rest of the turn.
+      return { items: [...sealReasoning(sealAssistant(items)), tool], meta };
     }
 
     case "tool.complete": {
@@ -668,7 +700,7 @@ function turnDuration(items: readonly TimelineItem[], completedAt: number): numb
 /** Stop pressed, or the turn ended without a `message.complete`. */
 export function settleTimeline(timeline: Timeline, note?: string): Timeline {
   return {
-    items: sealAssistant(timeline.items),
+    items: sealReasoning(sealAssistant(timeline.items)),
     meta: { ...timeline.meta, running: false, status: note ?? "" },
   };
 }

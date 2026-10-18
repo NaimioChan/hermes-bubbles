@@ -548,6 +548,27 @@ var HermesBubbles = (() => {
     if (!open) return items;
     return patchAssistant(items, open, (item) => ({ ...item, streaming: false }));
   }
+  function openReasoning(items) {
+    const last = items[items.length - 1];
+    return last && last.kind === "reasoning" && last.streaming ? last : null;
+  }
+  function sealReasoning(items) {
+    const open = openReasoning(items);
+    if (!open) return items;
+    const copy = items.slice();
+    copy[copy.length - 1] = { ...open, streaming: false };
+    return copy;
+  }
+  function appendReasoning(items, text) {
+    const open = openReasoning(items);
+    if (open) {
+      const copy = items.slice();
+      copy[copy.length - 1] = { ...open, text: open.text + text };
+      return copy;
+    }
+    const fresh = { kind: "reasoning", id: nextId("reasoning"), at: Date.now(), text, streaming: true };
+    return [...items, fresh];
+  }
   function inferToolStatus(payload) {
     if (payload.error) return "error";
     const summary = str(payload.summary);
@@ -555,8 +576,8 @@ var HermesBubbles = (() => {
       return "error";
     }
     const result = payload.result;
-    if (result && typeof result === "object" && !Array.isArray(result) && "error" in result) {
-      return "error";
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+      if (result.error) return "error";
     }
     return "ok";
   }
@@ -762,26 +783,26 @@ var HermesBubbles = (() => {
       case "gateway.reconnecting":
         return { items, meta: { ...meta, connected: false, status: "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u91CD\u8FDE\u4E2D\u2026" } };
       case "message.start":
-        return { items: sealAssistant(items), meta: { ...meta, running: true, status: "" } };
+        return { items: sealReasoning(sealAssistant(items)), meta: { ...meta, running: true, status: "" } };
       case "message.delta": {
         const text = str(p.text);
         if (!text) return timeline;
-        const open = openAssistant(items);
+        const base = sealReasoning(items);
+        const open = openAssistant(base);
         if (open) {
-          return { items: replaceLast(items, { ...open, text: open.text + text }), meta };
+          return { items: replaceLast(base, { ...open, text: open.text + text }), meta };
         }
         const fresh = {
           kind: "assistant",
           id: nextId("assistant"),
           at: Date.now(),
           text,
-          reasoning: "",
           streaming: true
         };
-        return { items: [...items, fresh], meta: { ...meta, running: true } };
+        return { items: [...base, fresh], meta: { ...meta, running: true } };
       }
       case "message.interim": {
-        const sealed = sealAssistant(items);
+        const sealed = sealReasoning(sealAssistant(items));
         if (p.already_streamed) return { items: sealed, meta };
         const text = str(p.text);
         if (!text) return { items: sealed, meta };
@@ -792,7 +813,6 @@ var HermesBubbles = (() => {
           id: nextId("assistant"),
           at: Date.now(),
           text,
-          reasoning: "",
           streaming: false
         };
         return { items: [...sealed, fresh], meta };
@@ -802,13 +822,14 @@ var HermesBubbles = (() => {
         const finalText = str(p.text);
         const error = str(p.error) || str(p.failure_reason);
         const usage = p.usage ?? null;
-        const target = openAssistant(items);
+        const settled = sealReasoning(items);
+        const target = openAssistant(settled);
         const completedAt = Date.now();
         const durationS = turnDuration(items, completedAt);
         let nextItems;
         if (target) {
           const merged = target.text.trim() ? target.text : finalText || target.text;
-          nextItems = patchAssistant(items, target, (item) => ({
+          nextItems = patchAssistant(settled, target, (item) => ({
             ...item,
             text: merged,
             streaming: false,
@@ -820,13 +841,12 @@ var HermesBubbles = (() => {
           }));
         } else if (finalText) {
           nextItems = [
-            ...items,
+            ...settled,
             {
               kind: "assistant",
               id: nextId("assistant"),
               at: Date.now(),
               text: finalText,
-              reasoning: "",
               streaming: false,
               error: status === "error" ? error || "turn failed" : void 0,
               partial: Boolean(p.partial),
@@ -837,13 +857,12 @@ var HermesBubbles = (() => {
           ];
         } else if (status === "error" && error) {
           nextItems = [
-            ...items,
+            ...settled,
             {
               kind: "assistant",
               id: nextId("assistant"),
               at: Date.now(),
               text: "",
-              reasoning: "",
               streaming: false,
               error,
               completedAt,
@@ -851,7 +870,7 @@ var HermesBubbles = (() => {
             }
           ];
         } else {
-          nextItems = items;
+          nextItems = settled;
         }
         return {
           items: nextItems,
@@ -867,23 +886,11 @@ var HermesBubbles = (() => {
       case "reasoning.available": {
         const text = str(p.text);
         if (!text) return timeline;
-        const open = openAssistant(items);
-        if (open) {
-          return { items: replaceLast(items, { ...open, reasoning: open.reasoning + text }), meta };
-        }
-        const fresh = {
-          kind: "assistant",
-          id: nextId("assistant"),
-          at: Date.now(),
-          text: "",
-          reasoning: text,
-          streaming: true
-        };
-        return { items: [...items, fresh], meta };
+        return { items: appendReasoning(sealAssistant(items), text), meta };
       }
       case "tool.start": {
         const tool = toolFromStart(event);
-        return { items: [...sealAssistant(items), tool], meta };
+        return { items: [...sealReasoning(sealAssistant(items)), tool], meta };
       }
       case "tool.complete": {
         const toolId = str(p.tool_id);
@@ -1011,7 +1018,7 @@ var HermesBubbles = (() => {
   }
   function settleTimeline(timeline, note) {
     return {
-      items: sealAssistant(timeline.items),
+      items: sealReasoning(sealAssistant(timeline.items)),
       meta: { ...timeline.meta, running: false, status: note ?? "" }
     };
   }
@@ -1080,12 +1087,15 @@ var HermesBubbles = (() => {
       if (role === "assistant") {
         const reasoning = assistantReasoning(row);
         if (!text.trim() && !reasoning) continue;
+        if (reasoning) {
+          items.push({ kind: "reasoning", id: historyId("reasoning"), at, text: reasoning, streaming: false });
+        }
+        if (!text.trim()) continue;
         const item = {
           kind: "assistant",
           id: historyId("assistant"),
           at,
           text,
-          reasoning,
           streaming: false,
           rowId
         };
@@ -3266,77 +3276,47 @@ var HermesBubbles = (() => {
       ) : null
     );
   }
-  function Reasoning({
+  function ReasoningRow({
     sdk,
-    text,
-    streaming,
+    item,
     locale
   }) {
     const { React } = sdk;
     const { useState, useMemo } = sdk.hooks;
     const [open, setOpen] = useState(false);
-    const trimmed = text.trim();
+    const trimmed = item.text.trim();
     const t = messagesFor(locale);
     const tail = useMemo(() => {
       const lines = trimmed.split("\n").filter((line) => line.trim());
       return lines.at(-1) ?? trimmed;
     }, [trimmed]);
     if (!trimmed) return null;
-    const chars = trimmed.length;
     return React.createElement(
       "div",
-      { className: "hb-stack-gap", style: { maxWidth: "min(72ch, 82%)" } },
+      {
+        className: "hb-think",
+        "data-hb": "reasoning-row",
+        "data-streaming": item.streaming ? "true" : "false"
+      },
       React.createElement(
         "button",
         {
           type: "button",
-          className: "flex w-full cursor-pointer items-center gap-1.5 text-[0.6875rem]",
+          className: "hb-think-head",
           "data-hb": "reasoning-toggle",
-          style: { color: "var(--color-muted-foreground)" },
+          "data-open": open ? "true" : "false",
+          "aria-expanded": open ? "true" : "false",
           onClick: () => setOpen((v) => !v)
         },
-        React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, open ? "\u25BE" : "\u25B8"),
-        React.createElement("span", { className: "shrink-0 uppercase tracking-[0.06em]" }, t.thought),
-        streaming ? React.createElement(
-          "span",
-          { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } },
-          "\u25CF"
-        ) : null,
-        React.createElement("span", { className: "shrink-0", style: { opacity: 0.7 } }, t.chars(chars)),
-        !open && !streaming ? React.createElement(
-          "span",
-          { className: "hb-truncate hb-flex-fill text-left", style: { opacity: 0.8 } },
-          tail
-        ) : null
+        React.createElement("span", { className: "hb-think-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", { className: "hb-think-label" }, t.thought),
+        item.streaming ? React.createElement("span", { className: "hb-caret hb-think-live" }, "\u25CF") : null,
+        React.createElement("span", { className: "hb-think-count" }, t.chars(trimmed.length)),
+        // Collapsed, the segment is its own summary. The tail is the same string
+        // that streams in, so the row stays one line as it updates.
+        !open ? React.createElement("span", { className: "hb-think-tail" }, tail) : null
       ),
-      // While streaming the tail stays visible under the header even when the
-      // block is expanded, so the top of a long thought does not push it away.
-      streaming && !open ? React.createElement(
-        "div",
-        {
-          className: "hb-mt-sm hb-truncate px-2 py-1 text-xs",
-          style: {
-            color: "var(--color-muted-foreground)",
-            borderLeft: "2px solid var(--color-border)"
-          }
-        },
-        tail
-      ) : null,
-      open ? React.createElement(
-        "div",
-        {
-          className: "hb-pre hb-mt-sm break-words px-2 py-1.5 text-xs",
-          style: {
-            background: "color-mix(in oklab, var(--color-muted) 45%, var(--color-card))",
-            color: "var(--color-muted-foreground)",
-            borderRadius: "var(--radius)",
-            borderLeft: "2px solid var(--color-border)",
-            maxHeight: "22rem",
-            overflowY: "auto"
-          }
-        },
-        trimmed
-      ) : null
+      open ? React.createElement("div", { className: "hb-think-body" }, trimmed) : null
     );
   }
   function MessageActions({
@@ -3407,11 +3387,13 @@ var HermesBubbles = (() => {
   }) {
     const { React } = sdk;
     const errorColor = "var(--color-destructive)";
+    const hasText = item.text.trim().length > 0;
+    if (!hasText && !item.error) return null;
     const t = messagesFor(locale);
     return React.createElement(
       "div",
       { className: "flex flex-col items-start" },
-      React.createElement(
+      hasText ? React.createElement(
         "div",
         {
           className: "break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
@@ -3426,7 +3408,7 @@ var HermesBubbles = (() => {
         // The reply is Markdown. The caret rides inside the last block so a slow
         // first token reads as work rather than a hang, without pushing a line.
         React.createElement(Markdown, { sdk, text: item.text, caret: Boolean(item.streaming), locale })
-      ),
+      ) : null,
       item.error ? React.createElement(
         "div",
         {
@@ -3435,7 +3417,6 @@ var HermesBubbles = (() => {
         },
         item.error
       ) : null,
-      React.createElement(Reasoning, { sdk, text: item.reasoning, streaming: item.streaming, locale }),
       item.usage ? React.createElement(
         "div",
         {
@@ -3449,78 +3430,54 @@ var HermesBubbles = (() => {
       ) : null,
       // Actions only on a settled reply: mid-stream there is nothing to copy or
       // regenerate yet, and the desktop app's own bar is transient for the same reason.
-      !item.streaming && (onBranch || onRegenerate || onCopy) ? React.createElement(MessageActions, { sdk, item, locale, onBranch, onRegenerate, onCopy }) : null
+      hasText && !item.streaming && (onBranch || onRegenerate || onCopy) ? React.createElement(MessageActions, { sdk, item, locale, onBranch, onRegenerate, onCopy }) : null
     );
   }
-  function ToolCard({ sdk, item }) {
+  function ToolRow({ sdk, item }) {
     const { React } = sdk;
     const { useState } = sdk.hooks;
     const [open, setOpen] = useState(false);
     const preview = toolPreview(item.resultText);
-    const stripe = item.status === "error" ? "var(--color-destructive)" : item.status === "running" ? "var(--color-ring)" : "var(--color-border)";
     const argsText = item.argsText ?? (item.args ? JSON.stringify(item.args, null, 2) : "");
     const duration = formatDuration(item.durationS);
-    const outputStyle = {
-      padding: "0.5rem",
-      fontFamily: "var(--font-mono)",
-      fontSize: "0.8125rem",
-      background: "color-mix(in oklab, var(--color-muted) 70%, transparent)",
-      borderRadius: "calc(var(--radius) * 0.6)"
-    };
     return React.createElement(
       "div",
       {
-        className: "px-3 py-2 text-xs",
-        style: {
-          maxWidth: "min(72ch, 82%)",
-          background: "color-mix(in oklab, var(--color-muted) 60%, var(--color-card))",
-          borderRadius: "var(--radius)",
-          borderLeft: `2px solid ${stripe}`
-        }
+        className: "hb-tool",
+        "data-hb": "tool-row",
+        "data-status": item.status,
+        "data-name": item.name
       },
       React.createElement(
         "button",
         {
           type: "button",
-          className: "flex w-full cursor-pointer items-center gap-2 text-left",
-          style: { color: "var(--color-card-foreground)" },
+          className: "hb-tool-head",
           "data-hb": "tool-toggle",
           "data-open": open ? "true" : "false",
           "aria-expanded": open ? "true" : "false",
           onClick: () => setOpen((v) => !v)
         },
-        React.createElement("span", null, open ? "\u25BE" : "\u25B8"),
-        React.createElement("span", { className: "font-medium" }, toolLabel(item.name)),
-        item.status === "running" ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "\u2026") : null,
-        item.summary ? React.createElement(
-          "span",
-          { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
-          item.summary
-        ) : null,
-        duration ? React.createElement(
-          "span",
-          { className: "ml-auto shrink-0 tabular-nums", style: { color: "var(--color-muted-foreground)" } },
-          duration
-        ) : null
+        React.createElement("span", { className: "hb-tool-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name)),
+        item.status === "running" ? React.createElement("span", { className: "hb-caret hb-tool-live" }, "\u25CF") : null,
+        item.summary ? React.createElement("span", { className: "hb-tool-summary" }, item.summary) : null,
+        duration ? React.createElement("span", { className: "hb-tool-duration tabular-nums" }, duration) : null
       ),
       item.risk ? React.createElement(
         "div",
-        { className: "mt-1", style: { color: "var(--color-destructive)" } },
+        { className: "hb-tool-risk" },
         `\u8F93\u51FA\u88AB\u6807\u8BB0\u4E3A ${item.risk}`
       ) : null,
       open ? React.createElement(
         "div",
-        { className: "hb-stack-gap space-y-1.5" },
-        argsText ? React.createElement("pre", { className: "hb-output", style: outputStyle }, argsText) : null,
+        { className: "hb-tool-body" },
+        argsText ? React.createElement("pre", { className: "hb-output hb-tool-pre" }, argsText) : null,
         preview.text ? React.createElement(
           "pre",
-          { className: "hb-output", style: outputStyle },
+          { className: "hb-output hb-tool-pre" },
           preview.text + (preview.truncated ? "\n\u2026" : "")
         ) : null
-      ) : preview.text ? React.createElement(
-        "div",
-        { className: "mt-1 hb-truncate", style: { color: "var(--color-muted-foreground)" } },
-        preview.text.split("\n")[0]
       ) : null
     );
   }
@@ -3678,7 +3635,9 @@ var HermesBubbles = (() => {
           onCopy: props.onCopy
         });
       case "tool":
-        return ToolCard({ sdk, item });
+        return ToolRow({ sdk, item });
+      case "reasoning":
+        return ReasoningRow({ sdk, item, locale });
       case "subagents":
         return SubagentsCard({ sdk, item, locale });
       case "notice":
@@ -5601,6 +5560,9 @@ var HermesBubbles = (() => {
                     {
                       key: item.id,
                       className: "hb-bubble-gap",
+                      // Per-kind vertical rhythm: messages breathe, tool rows and
+                      // thinking blocks pack (see style.css).
+                      "data-hb-kind": item.kind,
                       // Anchor for the locator rail's scroll-to.
                       "data-hb-item": item.id
                     },

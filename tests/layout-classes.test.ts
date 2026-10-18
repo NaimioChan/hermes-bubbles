@@ -113,10 +113,15 @@ describe("layout classes", () => {
     expect(ownCss).toMatch(/\.hb-text-tiny\s*\{[^}]*font-size:\s*0\.625rem/);
   });
 
-  it("gives the reasoning block explicit breathing room", () => {
-    // `mt-1.5` is not in the host bundle, so the spacing must come from our CSS.
+  it("keeps thinking blocks and tool rows out of the bubble treatment", () => {
+    // Both were bubbles once: reasoning rode on the assistant row (an empty card
+    // per think-only segment) and every tool call was a padded card. Their
+    // spacing has to come from the per-kind gap rule, not from a bubble's own
+    // margin, or a run of calls breaks into paragraphs again.
     const bubble = readFileSync(join(UI_DIR, "Bubble.ts"), "utf8");
-    expect(bubble).toContain("hb-stack-gap");
-    expect(ownCss).toMatch(/\.hb-stack-gap\s*\{[^}]*margin-top/);
+    expect(bubble).toContain("hb-think");
+    expect(bubble).toContain("hb-tool");
+    expect(ownCss).toMatch(/\.hb-bubble-gap\[data-hb-kind="tool"\][^{]*\{[^}]*margin-top/);
+    expect(ownCss).toMatch(/\.hb-bubble-gap\[data-hb-kind="reasoning"\][^{]*\{[^}]*margin-top/);
   });
 });

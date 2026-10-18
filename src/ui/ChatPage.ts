@@ -483,6 +483,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                     {
                       key: item.id,
                       className: "hb-bubble-gap",
+                      // Per-kind vertical rhythm: messages breathe, tool rows and
+                      // thinking blocks pack (see style.css).
+                      "data-hb-kind": item.kind,
                       // Anchor for the locator rail's scroll-to.
                       "data-hb-item": item.id,
                     },

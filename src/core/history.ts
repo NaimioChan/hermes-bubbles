@@ -118,12 +118,19 @@ export function projectHistory(messages: readonly TranscriptMessage[], now = Dat
     if (role === "assistant") {
       const reasoning = assistantReasoning(row);
       if (!text.trim() && !reasoning) continue;
+      // A stored row keeps its thinking on the row, but the transcript shows it
+      // where it happened: a dim block above the reply. A row that holds
+      // nothing but reasoning produces that block alone — projecting it as an
+      // assistant item is what used to paint an empty bubble.
+      if (reasoning) {
+        items.push({ kind: "reasoning", id: historyId("reasoning"), at, text: reasoning, streaming: false });
+      }
+      if (!text.trim()) continue;
       const item: AssistantItem = {
         kind: "assistant",
         id: historyId("assistant"),
         at,
         text,
-        reasoning,
         streaming: false,
         rowId,
       };

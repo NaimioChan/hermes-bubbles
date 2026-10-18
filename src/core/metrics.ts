@@ -5,6 +5,7 @@
  * §4 用量). Pure: numbers in, display strings out.
  */
 
+import type { Messages } from "./i18n";
 import type { Usage } from "./types";
 
 /** `1234` → `1.2k`. Matches the desktop status bar's compaction. */
@@ -85,21 +86,21 @@ export interface MetricChip {
  * The chips to show, in order. Only non-empty ones are returned, so the strip
  * collapses to nothing on a fresh session instead of showing placeholder dashes.
  */
-export function metricChips(usage: Usage | null): MetricChip[] {
+export function metricChips(usage: Usage | null, t: Messages): MetricChip[] {
   if (!usage) return [];
   const chips: MetricChip[] = [];
 
   const ctx = contextBarLabel(usage);
-  if (ctx) chips.push({ key: "context", label: ctx, title: `上下文占用 ${contextLabel(usage)}` });
+  if (ctx) chips.push({ key: "context", label: ctx, title: t.metricContextTitle(contextLabel(usage)) });
 
   const cache = cacheHitLabel(usage);
-  if (cache) chips.push({ key: "cache", label: `⚡${cache}`, title: "缓存命中率" });
+  if (cache) chips.push({ key: "cache", label: `⚡${cache}`, title: t.metricCacheTitle });
 
   const tps = tokensPerSecondLabel(usage);
-  if (tps) chips.push({ key: "tps", label: tps, title: "输出速度" });
+  if (tps) chips.push({ key: "tps", label: tps, title: t.metricTpsTitle });
 
   const cost = costLabel(usage);
-  if (cost) chips.push({ key: "cost", label: cost, title: "本会话花费" });
+  if (cost) chips.push({ key: "cost", label: cost, title: t.metricCostTitle });
 
   return chips;
 }

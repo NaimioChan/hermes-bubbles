@@ -295,6 +295,7 @@ function AssistantBubble({
 }) {
   const { React } = sdk;
   const errorColor = "var(--color-destructive)";
+  const t = messagesFor(locale);
   return React.createElement(
     "div",
     { className: "flex flex-col items-start" },
@@ -334,7 +335,7 @@ function AssistantBubble({
           },
           [
             item.usage.total ? `${formatCount(item.usage.total)} tokens` : "",
-            item.usage.context_percent ? `上下文 ${item.usage.context_percent}%` : "",
+            item.usage.context_percent ? t.contextPercent(item.usage.context_percent) : "",
           ]
             .filter(Boolean)
             .join(" · "),

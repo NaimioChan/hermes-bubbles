@@ -196,7 +196,7 @@ export function Composer(props: ComposerProps) {
   );
 
   const canSend = Boolean(text.trim()) && props.connected;
-  const chips = metricChips(props.usage);
+  const chips = metricChips(props.usage, t);
   const tone = pressureTone(null);
   const contextChip = chips.find((c) => c.key === "context");
 

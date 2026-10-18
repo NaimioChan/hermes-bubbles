@@ -59,6 +59,12 @@ export interface Messages {
   refresh: string;
   branchNewChat: string;
   turnDuration: (d: string) => string;
+  /** The usage readout: the reply footer and the composer's metric chips. */
+  contextPercent: (pct: number) => string;
+  metricContextTitle: (detail: string) => string;
+  metricCacheTitle: string;
+  metricTpsTitle: string;
+  metricCostTitle: string;
   yesterday: (time: string) => string;
   today: (time: string) => string;
   /** Approval / clarify cards. */
@@ -152,6 +158,11 @@ const EN: Messages = {
   turnDuration: (d) => `This turn took ${d}`,
   yesterday: (time) => `Yesterday, ${time}`,
   today: (time) => `Today, ${time}`,
+  contextPercent: (pct) => `${pct}% context`,
+  metricContextTitle: (detail) => `Context used ${detail}`,
+  metricCacheTitle: "Cache hit rate",
+  metricTpsTitle: "Output speed",
+  metricCostTitle: "Cost this session",
   approvalTitle: "Needs your confirmation",
   clarifyTitle: "Question",
   approvalOnce: "Allow once",
@@ -246,6 +257,11 @@ const ZH: Messages = {
   turnDuration: (d) => `本轮用时 ${d}`,
   yesterday: (time) => `昨天 ${time}`,
   today: (time) => `今天 ${time}`,
+  contextPercent: (pct) => `上下文 ${pct}%`,
+  metricContextTitle: (detail) => `上下文占用 ${detail}`,
+  metricCacheTitle: "缓存命中率",
+  metricTpsTitle: "输出速度",
+  metricCostTitle: "本会话花费",
   approvalTitle: "需要你确认",
   clarifyTitle: "请选择",
   approvalOnce: "允许一次",

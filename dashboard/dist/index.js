@@ -86,6 +86,11 @@ var HermesBubbles = (() => {
     turnDuration: (d) => `This turn took ${d}`,
     yesterday: (time) => `Yesterday, ${time}`,
     today: (time) => `Today, ${time}`,
+    contextPercent: (pct) => `${pct}% context`,
+    metricContextTitle: (detail) => `Context used ${detail}`,
+    metricCacheTitle: "Cache hit rate",
+    metricTpsTitle: "Output speed",
+    metricCostTitle: "Cost this session",
     approvalTitle: "Needs your confirmation",
     clarifyTitle: "Question",
     approvalOnce: "Allow once",
@@ -178,6 +183,11 @@ var HermesBubbles = (() => {
     turnDuration: (d) => `\u672C\u8F6E\u7528\u65F6 ${d}`,
     yesterday: (time) => `\u6628\u5929 ${time}`,
     today: (time) => `\u4ECA\u5929 ${time}`,
+    contextPercent: (pct) => `\u4E0A\u4E0B\u6587 ${pct}%`,
+    metricContextTitle: (detail) => `\u4E0A\u4E0B\u6587\u5360\u7528 ${detail}`,
+    metricCacheTitle: "\u7F13\u5B58\u547D\u4E2D\u7387",
+    metricTpsTitle: "\u8F93\u51FA\u901F\u5EA6",
+    metricCostTitle: "\u672C\u4F1A\u8BDD\u82B1\u8D39",
     approvalTitle: "\u9700\u8981\u4F60\u786E\u8BA4",
     clarifyTitle: "\u8BF7\u9009\u62E9",
     approvalOnce: "\u5141\u8BB8\u4E00\u6B21",
@@ -3391,6 +3401,7 @@ var HermesBubbles = (() => {
   }) {
     const { React } = sdk;
     const errorColor = "var(--color-destructive)";
+    const t = messagesFor(locale);
     return React.createElement(
       "div",
       { className: "flex flex-col items-start" },
@@ -3427,7 +3438,7 @@ var HermesBubbles = (() => {
         },
         [
           item.usage.total ? `${formatCount(item.usage.total)} tokens` : "",
-          item.usage.context_percent ? `\u4E0A\u4E0B\u6587 ${item.usage.context_percent}%` : ""
+          item.usage.context_percent ? t.contextPercent(item.usage.context_percent) : ""
         ].filter(Boolean).join(" \xB7 ")
       ) : null,
       // Actions only on a settled reply: mid-stream there is nothing to copy or
@@ -3712,17 +3723,17 @@ var HermesBubbles = (() => {
     if (cost < 1) return `$${cost.toFixed(4)}`;
     return `$${cost.toFixed(2)}`;
   }
-  function metricChips(usage) {
+  function metricChips(usage, t) {
     if (!usage) return [];
     const chips = [];
     const ctx = contextBarLabel(usage);
-    if (ctx) chips.push({ key: "context", label: ctx, title: `\u4E0A\u4E0B\u6587\u5360\u7528 ${contextLabel(usage)}` });
+    if (ctx) chips.push({ key: "context", label: ctx, title: t.metricContextTitle(contextLabel(usage)) });
     const cache = cacheHitLabel(usage);
-    if (cache) chips.push({ key: "cache", label: `\u26A1${cache}`, title: "\u7F13\u5B58\u547D\u4E2D\u7387" });
+    if (cache) chips.push({ key: "cache", label: `\u26A1${cache}`, title: t.metricCacheTitle });
     const tps = tokensPerSecondLabel(usage);
-    if (tps) chips.push({ key: "tps", label: tps, title: "\u8F93\u51FA\u901F\u5EA6" });
+    if (tps) chips.push({ key: "tps", label: tps, title: t.metricTpsTitle });
     const cost = costLabel(usage);
-    if (cost) chips.push({ key: "cost", label: cost, title: "\u672C\u4F1A\u8BDD\u82B1\u8D39" });
+    if (cost) chips.push({ key: "cost", label: cost, title: t.metricCostTitle });
     return chips;
   }
   function pressureTone(percent) {
@@ -3846,7 +3857,7 @@ var HermesBubbles = (() => {
       [props]
     );
     const canSend = Boolean(text.trim()) && props.connected;
-    const chips = metricChips(props.usage);
+    const chips = metricChips(props.usage, t);
     const tone = pressureTone(null);
     const contextChip = chips.find((c) => c.key === "context");
     return React.createElement(

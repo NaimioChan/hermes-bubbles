@@ -35,7 +35,7 @@ import {
   setNotifyEnabled,
 } from "./notifier";
 import { notifySwitch, type NotificationPermissionKind } from "../core/notify";
-import { runningLabel } from "./format";
+import { rejectionLabel, runningLabel } from "./format";
 import { useLocale } from "./useLocale";
 import type { HermesPluginSdk } from "./sdk";
 
@@ -281,7 +281,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const onPickFiles = useCallback(
     (files: FileList | File[]) => {
       const { accepted, rejected } = screenDroppedFiles(files);
-      for (const item of rejected) controller.notice(`${item.name}: ${item.reason}`, "error");
+      for (const item of rejected) controller.notice(`${item.name}: ${rejectionLabel(item, t)}`, "error");
       for (const { file, id } of accepted) {
         const pending: Attachment = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
         setAttachments((prev) => addAttachment(prev, pending));
@@ -428,7 +428,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // possible, not whether a tab happens to be focused.
   const socketOpen = controller.getConnection().state === "open";
   const composerConnected = tabs.length === 0 ? socketOpen : timeline.meta.connected;
-  const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
+  const status = runningLabel(timeline.meta, t);
 
   return React.createElement(
     "div",

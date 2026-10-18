@@ -28,6 +28,14 @@ export interface CommandEntry {
   description: string;
   /** `command` | `skill` — from `complete.slash`'s `kind`; `command` for catalog rows. */
   kind: "command" | "skill";
+  /**
+   * Where a skill came from (`local`, a plugin name, …).
+   *
+   * The row's label is built at render time (`Skill`, or `Skill · local`): this
+   * module has no locale, and a hardcoded label here is what put Chinese in the
+   * English popover.
+   */
+  origin?: string;
   /** Usage count for skills, used to rank. */
   usage?: number;
 }
@@ -169,7 +177,7 @@ export function entriesFromCatalog(catalog: CommandsCatalog): CommandEntry[] {
     const clean = name.replace(/^\//, "").trim();
     if (!clean || seen.has(clean)) continue;
     seen.add(clean);
-    out.push({ name: clean, description: meta?.origin === "local" ? "技能" : `技能 · ${meta?.origin ?? ""}`, kind: "skill", usage: meta?.usage ?? 0 });
+    out.push({ name: clean, description: "", kind: "skill", origin: meta?.origin ?? "", usage: meta?.usage ?? 0 });
   }
 
   return out;

@@ -13,6 +13,8 @@
 
 import { requireSdk } from "./ui/sdk";
 import { ChatPage } from "./ui/ChatPage";
+import { currentLocale } from "./ui/useLocale";
+import { messagesFor } from "./core/i18n";
 
 (function main() {
   const sdk = requireSdk();
@@ -32,7 +34,9 @@ import { ChatPage } from "./ui/ChatPage";
       return React.createElement(
         "div",
         { style: { padding: "1rem", color: "var(--color-destructive)" } },
-        `气泡聊天页渲染失败：${error instanceof Error ? error.message : String(error)}`,
+        messagesFor(currentLocale()).renderFailed(
+          error instanceof Error ? error.message : String(error),
+        ),
       );
     }
   }

@@ -23,19 +23,17 @@ var HermesBubbles = (() => {
     return "file";
   }
   var MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+  var MAX_ATTACHMENT_MIB = Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024);
   function screenFiles(files) {
     const accepted = [];
     const rejected = [];
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        rejected.push({
-          name: file.name,
-          reason: `\u8D85\u8FC7 ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MiB \u4E0A\u9650`
-        });
+        rejected.push({ name: file.name, code: "too_large", limitMib: MAX_ATTACHMENT_MIB });
         continue;
       }
       if (file.size === 0) {
-        rejected.push({ name: file.name, reason: "\u7A7A\u6587\u4EF6" });
+        rejected.push({ name: file.name, code: "empty" });
         continue;
       }
       accepted.push({ name: file.name, size: file.size, kind: classifyFile(file.name, file.type) });
@@ -91,6 +89,39 @@ var HermesBubbles = (() => {
     metricCacheTitle: "Cache hit rate",
     metricTpsTitle: "Output speed",
     metricCostTitle: "Cost this session",
+    toolTerminal: "Ran a command",
+    toolReadFile: "Read a file",
+    toolWriteFile: "Wrote a file",
+    toolPatch: "Edited a file",
+    toolSearchFiles: "Searched files",
+    toolWebSearch: "Searched the web",
+    toolWebExtract: "Fetched a page",
+    toolBrowserExec: "Drove the browser",
+    toolDelegateTask: "Delegated a task",
+    toolTodoList: "Task list",
+    toolMemory: "Memory",
+    toolSkillView: "Viewed a skill",
+    toolSkillManage: "Edited a skill",
+    toolImageGen: "Generated an image",
+    toolTextToSpeech: "Spoke text",
+    working: "Working\u2026",
+    reconnecting: "Connection lost, reconnecting\u2026",
+    genericError: "Something went wrong",
+    attachmentTooLarge: (mib) => `Over the ${mib} MiB limit`,
+    attachmentEmpty: "Empty file",
+    skill: "Skill",
+    skillOrigin: (origin) => `Skill \xB7 ${origin}`,
+    outputRisk: (risk) => `Output flagged as ${risk}`,
+    renderFailed: (detail) => `The chat page failed to render: ${detail}`,
+    slashUnrecognized: (name) => `/${name} returned something this page could not read`,
+    slashDone: (name) => `/${name} ran`,
+    slashTypeUnsupported: (name, type) => `/${name} returned a "${type}" result, which this page cannot show yet`,
+    replyNotFound: "That reply is no longer in this transcript",
+    userMessageNotFound: "Could not find the user message to rewrite",
+    attachmentNotAccepted: "The backend did not accept that attachment",
+    heartbeatTimeout: "Heartbeat timed out",
+    connectUnauthorized: "Not authorised \u2014 reload the page",
+    connectChatDisabled: "Chat is not enabled on this dashboard",
     approvalTitle: "Needs your confirmation",
     clarifyTitle: "Question",
     approvalOnce: "Allow once",
@@ -191,6 +222,39 @@ var HermesBubbles = (() => {
     metricCacheTitle: "\u7F13\u5B58\u547D\u4E2D\u7387",
     metricTpsTitle: "\u8F93\u51FA\u901F\u5EA6",
     metricCostTitle: "\u672C\u4F1A\u8BDD\u82B1\u8D39",
+    toolTerminal: "\u6267\u884C\u547D\u4EE4",
+    toolReadFile: "\u8BFB\u53D6\u6587\u4EF6",
+    toolWriteFile: "\u5199\u5165\u6587\u4EF6",
+    toolPatch: "\u4FEE\u6539\u6587\u4EF6",
+    toolSearchFiles: "\u641C\u7D22",
+    toolWebSearch: "\u8054\u7F51\u641C\u7D22",
+    toolWebExtract: "\u6293\u53D6\u7F51\u9875",
+    toolBrowserExec: "\u64CD\u4F5C\u6D4F\u89C8\u5668",
+    toolDelegateTask: "\u59D4\u6D3E\u5B50\u4EFB\u52A1",
+    toolTodoList: "\u4EFB\u52A1\u6E05\u5355",
+    toolMemory: "\u8BB0\u5FC6",
+    toolSkillView: "\u67E5\u770B\u6280\u80FD",
+    toolSkillManage: "\u7F16\u8F91\u6280\u80FD",
+    toolImageGen: "\u751F\u6210\u56FE\u7247",
+    toolTextToSpeech: "\u8BED\u97F3\u5408\u6210",
+    working: "\u6B63\u5728\u5904\u7406\u2026",
+    reconnecting: "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u91CD\u8FDE\u4E2D\u2026",
+    genericError: "\u53D1\u751F\u9519\u8BEF",
+    attachmentTooLarge: (mib) => `\u8D85\u8FC7 ${mib} MiB \u4E0A\u9650`,
+    attachmentEmpty: "\u7A7A\u6587\u4EF6",
+    skill: "\u6280\u80FD",
+    skillOrigin: (origin) => `\u6280\u80FD \xB7 ${origin}`,
+    outputRisk: (risk) => `\u8F93\u51FA\u88AB\u6807\u8BB0\u4E3A ${risk}`,
+    renderFailed: (detail) => `\u6C14\u6CE1\u804A\u5929\u9875\u6E32\u67D3\u5931\u8D25\uFF1A${detail}`,
+    slashUnrecognized: (name) => `/${name} \u8FD4\u56DE\u4E86\u65E0\u6CD5\u8BC6\u522B\u7684\u7ED3\u679C`,
+    slashDone: (name) => `/${name} \u5DF2\u6267\u884C`,
+    slashTypeUnsupported: (name, type) => `/${name} \u7684\u7ED3\u679C\u7C7B\u578B ${type} \u6682\u4E0D\u652F\u6301`,
+    replyNotFound: "\u627E\u4E0D\u5230\u8BE5\u56DE\u590D",
+    userMessageNotFound: "\u627E\u4E0D\u5230\u5BF9\u5E94\u7684\u7528\u6237\u6D88\u606F",
+    attachmentNotAccepted: "\u540E\u7AEF\u672A\u63A5\u53D7\u8BE5\u9644\u4EF6",
+    heartbeatTimeout: "\u5FC3\u8DF3\u8D85\u65F6",
+    connectUnauthorized: "\u9274\u6743\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762",
+    connectChatDisabled: "\u804A\u5929\u529F\u80FD\u672A\u542F\u7528",
     approvalTitle: "\u9700\u8981\u4F60\u786E\u8BA4",
     clarifyTitle: "\u8BF7\u9009\u62E9",
     approvalOnce: "\u5141\u8BB8\u4E00\u6B21",
@@ -387,7 +451,7 @@ var HermesBubbles = (() => {
       const clean = name.replace(/^\//, "").trim();
       if (!clean || seen.has(clean)) continue;
       seen.add(clean);
-      out.push({ name: clean, description: meta?.origin === "local" ? "\u6280\u80FD" : `\u6280\u80FD \xB7 ${meta?.origin ?? ""}`, kind: "skill", usage: meta?.usage ?? 0 });
+      out.push({ name: clean, description: "", kind: "skill", origin: meta?.origin ?? "", usage: meta?.usage ?? 0 });
     }
     return out;
   }
@@ -494,6 +558,7 @@ var HermesBubbles = (() => {
     running: false,
     usage: null,
     status: "",
+    statusKind: "",
     connected: false,
     todo: null
   };
@@ -778,12 +843,15 @@ var HermesBubbles = (() => {
     const p = event.payload ?? {};
     switch (event.type) {
       case "gateway.ready":
-        return { items, meta: { ...meta, connected: true } };
+        return { items, meta: { ...meta, connected: true, status: "", statusKind: "" } };
       case "gateway.closed":
       case "gateway.reconnecting":
-        return { items, meta: { ...meta, connected: false, status: "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u91CD\u8FDE\u4E2D\u2026" } };
+        return { items, meta: { ...meta, connected: false, status: "", statusKind: "reconnecting" } };
       case "message.start":
-        return { items: sealReasoning(sealAssistant(items)), meta: { ...meta, running: true, status: "" } };
+        return {
+          items: sealReasoning(sealAssistant(items)),
+          meta: { ...meta, running: true, status: "", statusKind: "" }
+        };
       case "message.delta": {
         const text = str(p.text);
         if (!text) return timeline;
@@ -878,6 +946,7 @@ var HermesBubbles = (() => {
             ...meta,
             running: false,
             status: "",
+            statusKind: "",
             usage: usage ?? meta.usage
           }
         };
@@ -943,7 +1012,7 @@ var HermesBubbles = (() => {
       case "status.update": {
         const text = str(p.text);
         const kind = str(p.kind);
-        return { items, meta: { ...meta, status: text || (kind ? `${kind}\u2026` : "") } };
+        return { items, meta: { ...meta, status: text || (kind ? `${kind}\u2026` : ""), statusKind: "" } };
       }
       case "session.usage": {
         const usage = p.usage ?? null;
@@ -978,7 +1047,7 @@ var HermesBubbles = (() => {
         return {
           items: [
             ...items,
-            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.message) || "\u53D1\u751F\u9519\u8BEF", tone: "error" }
+            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.message), tone: "error" }
           ],
           meta: { ...meta, running: false }
         };
@@ -992,7 +1061,7 @@ var HermesBubbles = (() => {
         ...timeline.items,
         { kind: "user", id: nextId("user"), at: Date.now(), text, pending: true }
       ],
-      meta: { ...timeline.meta, running: true, status: "" }
+      meta: { ...timeline.meta, running: true, status: "", statusKind: "" }
     };
   }
   function ackUser(timeline, rowId) {
@@ -1019,7 +1088,7 @@ var HermesBubbles = (() => {
   function settleTimeline(timeline, note) {
     return {
       items: sealReasoning(sealAssistant(timeline.items)),
-      meta: { ...timeline.meta, running: false, status: note ?? "" }
+      meta: { ...timeline.meta, running: false, status: note ?? "", statusKind: "" }
     };
   }
 
@@ -1122,6 +1191,7 @@ var HermesBubbles = (() => {
         running: Boolean(info.running ?? snapshot.running),
         usage: info.usage ?? null,
         status: "",
+        statusKind: "",
         connected: true,
         todo
       }
@@ -1147,7 +1217,7 @@ var HermesBubbles = (() => {
   }
   function openDraft(state) {
     const key = nextDraftKey();
-    const tab = { key, runtimeId: null, storedId: null, title: "\u65B0\u5BF9\u8BDD", draft: true };
+    const tab = { key, runtimeId: null, storedId: null, title: "", draft: true };
     return {
       sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
       tabs: [...state.tabs, tab],
@@ -1270,10 +1340,10 @@ var HermesBubbles = (() => {
   function runningKeys(state) {
     return Object.entries(state.sessions).filter(([, timeline]) => timeline.meta.running).map(([key]) => key);
   }
-  function tabLabel(tab) {
-    if (tab.title && tab.title !== "\u65B0\u5BF9\u8BDD") return tab.title;
+  function tabLabel(tab, t) {
+    if (tab.title) return tab.title;
     if (tab.storedId) return tab.storedId.slice(0, 8);
-    return tab.title || "\u65B0\u5BF9\u8BDD";
+    return t.untitled;
   }
   function editTargetFor(items, itemId) {
     const index = items.findIndex((item) => item.id === itemId);
@@ -1533,12 +1603,16 @@ var HermesBubbles = (() => {
         onServerRequest: options.onServerRequest,
         onUnhandledRequest: options.onUnhandledRequest,
         onHeartbeatFailure: () => {
-          this.dropAndReconnect("\u5FC3\u8DF3\u8D85\u65F6");
+          this.dropAndReconnect(this.messages().heartbeatTimeout);
         }
       });
     }
     getState() {
       return this.state;
+    }
+    /** The catalog in the dashboard's language; English when the caller did not supply one. */
+    messages() {
+      return this.options.messages?.() ?? messagesFor("en");
     }
     setState(state, detail) {
       this.state = state;
@@ -1600,7 +1674,7 @@ var HermesBubbles = (() => {
         this.channel.unbind();
         if (event.code === 4401 || event.code === 4403) {
           this.failureKind = event.code === 4401 ? "auth" : "scope";
-          this.failureMessage = event.code === 4401 ? "\u9274\u6743\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762" : "\u804A\u5929\u529F\u80FD\u672A\u542F\u7528";
+          this.failureMessage = event.code === 4401 ? this.messages().connectUnauthorized : this.messages().connectChatDisabled;
           this.settleOpenWaiters(new Error(this.failureMessage));
           this.setState("error", this.failureMessage);
           return;
@@ -1715,6 +1789,9 @@ var HermesBubbles = (() => {
       this.client = new GatewayClient({
         urlProvider: options.urlProvider,
         socketFactory: options.socketFactory,
+        // The transport renders its own failure sentences, so it reads the catalog
+        // in whatever language the page is currently in.
+        messages: () => messagesFor(this.locale),
         onState: (state, detail) => {
           this.connection = state;
           this.detail = detail ?? "";
@@ -1906,7 +1983,7 @@ var HermesBubbles = (() => {
       }
       const directive = parseDispatch(reply);
       if (!directive) {
-        this.notice(`/${name} \u8FD4\u56DE\u4E86\u65E0\u6CD5\u8BC6\u522B\u7684\u7ED3\u679C`, "error");
+        this.notice(messagesFor(this.locale).slashUnrecognized(name), "error");
         return null;
       }
       switch (directive.type) {
@@ -1914,7 +1991,7 @@ var HermesBubbles = (() => {
           return this.dispatchCommand((directive.target ?? "").replace(/^\//, ""), arg);
         case "exec":
         case "plugin":
-          this.notice(directive.output || `/${name} \u5DF2\u6267\u884C`);
+          this.notice(directive.output || messagesFor(this.locale).slashDone(name));
           return directive;
         case "prefill":
           if (directive.notice) this.notice(directive.notice);
@@ -1925,7 +2002,10 @@ var HermesBubbles = (() => {
           if (directive.notice) this.notice(directive.notice);
           return directive;
         default:
-          this.notice(`/${name} \u7684\u7ED3\u679C\u7C7B\u578B ${String(directive.type)} \u6682\u4E0D\u652F\u6301`, "error");
+          this.notice(
+            messagesFor(this.locale).slashTypeUnsupported(name, String(directive.type)),
+            "error"
+          );
           return directive;
       }
     }
@@ -1977,7 +2057,7 @@ var HermesBubbles = (() => {
       if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
       const timeline = timelineOf(this.state, key);
       const index = timeline.items.findIndex((entry) => entry.id === itemId);
-      if (index < 0) throw new Error("\u627E\u4E0D\u5230\u8BE5\u56DE\u590D");
+      if (index < 0) throw new Error(messagesFor(this.locale).replyNotFound);
       let prompt = null;
       for (let i = index - 1; i >= 0; i -= 1) {
         const entry = timeline.items[i];
@@ -1986,7 +2066,7 @@ var HermesBubbles = (() => {
           break;
         }
       }
-      if (prompt === null) throw new Error("\u627E\u4E0D\u5230\u5BF9\u5E94\u7684\u7528\u6237\u6D88\u606F");
+      if (prompt === null) throw new Error(messagesFor(this.locale).userMessageNotFound);
       const kept = timeline.items.slice(0, index);
       this.setState({
         ...this.state,
@@ -2240,7 +2320,7 @@ var HermesBubbles = (() => {
         params.filename = file.name;
       }
       const result = await this.rpc(attachMethodFor(kind), params);
-      if (!result?.attached) throw new Error("\u540E\u7AEF\u672A\u63A5\u53D7\u8BE5\u9644\u4EF6");
+      if (!result?.attached) throw new Error(messagesFor(this.locale).attachmentNotAccepted);
       return {
         id,
         kind,
@@ -3173,25 +3253,30 @@ var HermesBubbles = (() => {
   }
 
   // src/ui/format.ts
-  var TOOL_LABELS = {
-    terminal: "\u6267\u884C\u547D\u4EE4",
-    read_file: "\u8BFB\u53D6\u6587\u4EF6",
-    write_file: "\u5199\u5165\u6587\u4EF6",
-    patch: "\u4FEE\u6539\u6587\u4EF6",
-    search_files: "\u641C\u7D22",
-    web_search: "\u8054\u7F51\u641C\u7D22",
-    web_extract: "\u6293\u53D6\u7F51\u9875",
-    browser_exec: "\u64CD\u4F5C\u6D4F\u89C8\u5668",
-    delegate_task: "\u59D4\u6D3E\u5B50\u4EFB\u52A1",
-    todo_list: "\u4EFB\u52A1\u6E05\u5355",
-    memory: "\u8BB0\u5FC6",
-    skill_view: "\u67E5\u770B\u6280\u80FD",
-    skill_manage: "\u7F16\u8F91\u6280\u80FD",
-    image_gen: "\u751F\u6210\u56FE\u7247",
-    text_to_speech: "\u8BED\u97F3\u5408\u6210"
+  var TOOL_LABEL_KEYS = {
+    terminal: "toolTerminal",
+    read_file: "toolReadFile",
+    write_file: "toolWriteFile",
+    patch: "toolPatch",
+    search_files: "toolSearchFiles",
+    web_search: "toolWebSearch",
+    web_extract: "toolWebExtract",
+    browser_exec: "toolBrowserExec",
+    delegate_task: "toolDelegateTask",
+    todo_list: "toolTodoList",
+    memory: "toolMemory",
+    skill_view: "toolSkillView",
+    skill_manage: "toolSkillManage",
+    image_gen: "toolImageGen",
+    text_to_speech: "toolTextToSpeech"
   };
-  function toolLabel(name) {
-    return TOOL_LABELS[name] ?? name;
+  function toolLabel(name, t) {
+    const key = TOOL_LABEL_KEYS[name];
+    return key ? t[key] : name;
+  }
+  function rejectionLabel(rejection, t) {
+    if (rejection.code === "empty") return t.attachmentEmpty;
+    return t.attachmentTooLarge(rejection.limitMib ?? MAX_ATTACHMENT_MIB);
   }
   var TOOL_PREVIEW_CHARS = 400;
   function toolPreview(result, limit = TOOL_PREVIEW_CHARS) {
@@ -3216,9 +3301,10 @@ var HermesBubbles = (() => {
     if (value < 1e6) return `${(value / 1e3).toFixed(value < 1e4 ? 1 : 0)}k`;
     return `${(value / 1e6).toFixed(1)}M`;
   }
-  function runningLabel(meta) {
+  function runningLabel(meta, t) {
+    if (meta.statusKind === "reconnecting") return t.reconnecting;
     if (meta.status) return meta.status;
-    return meta.running ? "\u6B63\u5728\u5904\u7406\u2026" : "";
+    return meta.running ? t.working : "";
   }
 
   // src/ui/Bubble.ts
@@ -3433,10 +3519,11 @@ var HermesBubbles = (() => {
       hasText && !item.streaming && (onBranch || onRegenerate || onCopy) ? React.createElement(MessageActions, { sdk, item, locale, onBranch, onRegenerate, onCopy }) : null
     );
   }
-  function ToolRow({ sdk, item }) {
+  function ToolRow({ sdk, item, locale }) {
     const { React } = sdk;
     const { useState } = sdk.hooks;
     const [open, setOpen] = useState(false);
+    const t = messagesFor(locale);
     const preview = toolPreview(item.resultText);
     const argsText = item.argsText ?? (item.args ? JSON.stringify(item.args, null, 2) : "");
     const duration = formatDuration(item.durationS);
@@ -3459,7 +3546,7 @@ var HermesBubbles = (() => {
           onClick: () => setOpen((v) => !v)
         },
         React.createElement("span", { className: "hb-tool-caret" }, open ? "\u25BE" : "\u25B8"),
-        React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name)),
+        React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name, t)),
         item.status === "running" ? React.createElement("span", { className: "hb-caret hb-tool-live" }, "\u25CF") : null,
         item.summary ? React.createElement("span", { className: "hb-tool-summary" }, item.summary) : null,
         duration ? React.createElement("span", { className: "hb-tool-duration tabular-nums" }, duration) : null
@@ -3467,7 +3554,7 @@ var HermesBubbles = (() => {
       item.risk ? React.createElement(
         "div",
         { className: "hb-tool-risk" },
-        `\u8F93\u51FA\u88AB\u6807\u8BB0\u4E3A ${item.risk}`
+        t.outputRisk(item.risk)
       ) : null,
       open ? React.createElement(
         "div",
@@ -3510,7 +3597,7 @@ var HermesBubbles = (() => {
           React.createElement(
             "div",
             { key: "tool", className: "hb-sub-detail" },
-            `${toolLabel(child.lastTool)}${child.toolCount ? ` \xB7 ${t.subagentTools(child.toolCount)}` : ""}`
+            `${toolLabel(child.lastTool, t)}${child.toolCount ? ` \xB7 ${t.subagentTools(child.toolCount)}` : ""}`
           )
         );
       }
@@ -3606,8 +3693,9 @@ var HermesBubbles = (() => {
       open ? React.createElement("div", { className: "hb-sub-list" }, item.children.map(childRow)) : null
     );
   }
-  function NoticeRow({ sdk, item }) {
+  function NoticeRow({ sdk, item, locale }) {
     const { React } = sdk;
+    const t = messagesFor(locale);
     return React.createElement(
       "div",
       {
@@ -3617,7 +3705,9 @@ var HermesBubbles = (() => {
           color: item.tone === "error" ? "var(--color-destructive)" : "var(--color-muted-foreground)"
         }
       },
-      item.text
+      // An error frame can arrive with no message at all; an empty red row would
+      // read as a rendering bug, so fall back to a sentence from the catalog.
+      item.text || (item.tone === "error" ? t.genericError : "")
     );
   }
   function Bubble(props) {
@@ -3635,13 +3725,13 @@ var HermesBubbles = (() => {
           onCopy: props.onCopy
         });
       case "tool":
-        return ToolRow({ sdk, item });
+        return ToolRow({ sdk, item, locale });
       case "reasoning":
         return ReasoningRow({ sdk, item, locale });
       case "subagents":
         return SubagentsCard({ sdk, item, locale });
       case "notice":
-        return NoticeRow({ sdk, item });
+        return NoticeRow({ sdk, item, locale });
     }
   }
 
@@ -3970,7 +4060,7 @@ var HermesBubbles = (() => {
               React.createElement(
                 "span",
                 { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
-                entry.description
+                entry.kind === "skill" ? entry.origin ? t.skillOrigin(entry.origin) : t.skill : entry.description
               )
             )
           )
@@ -4906,7 +4996,7 @@ var HermesBubbles = (() => {
               // the visible label, which is localized.
               "data-hb": "tab",
               "data-hb-key": tab.key,
-              title: tabLabel(tab),
+              title: tabLabel(tab, t),
               className: "group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
               style: {
                 background: tab.key === props.activeKey ? "var(--color-muted)" : "transparent",
@@ -4917,7 +5007,7 @@ var HermesBubbles = (() => {
               onClick: () => props.onFocus(tab.key)
             },
             props.runningKeys.includes(tab.key) ? React.createElement("span", { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } }, "\u25CF") : null,
-            React.createElement("span", { className: "hb-truncate" }, tabLabel(tab)),
+            React.createElement("span", { className: "hb-truncate" }, tabLabel(tab, t)),
             React.createElement(
               "span",
               {
@@ -5251,6 +5341,13 @@ var HermesBubbles = (() => {
     }
     return normalizeLocale(document.documentElement.lang);
   }
+  function currentLocale() {
+    try {
+      return readLocale();
+    } catch {
+      return normalizeLocale(null);
+    }
+  }
   function useLocale(sdk) {
     const { useState, useEffect } = sdk.hooks;
     const [locale, setLocale] = useState(() => {
@@ -5411,7 +5508,7 @@ var HermesBubbles = (() => {
     const onPickFiles = useCallback(
       (files) => {
         const { accepted, rejected } = screenDroppedFiles(files);
-        for (const item of rejected) controller.notice(`${item.name}: ${item.reason}`, "error");
+        for (const item of rejected) controller.notice(`${item.name}: ${rejectionLabel(item, t)}`, "error");
         for (const { file, id } of accepted) {
           const pending = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
           setAttachments((prev) => addAttachment(prev, pending));
@@ -5511,7 +5608,7 @@ var HermesBubbles = (() => {
     const activeStoredId = tabs.find((t2) => t2.key === state.activeKey)?.storedId ?? null;
     const socketOpen = controller.getConnection().state === "open";
     const composerConnected = tabs.length === 0 ? socketOpen : timeline.meta.connected;
-    const status = runningLabel({ status: timeline.meta.status, running: timeline.meta.running });
+    const status = runningLabel(timeline.meta, t);
     return React.createElement(
       "div",
       { className: "flex h-full min-h-0 flex-col" },
@@ -5713,7 +5810,9 @@ var HermesBubbles = (() => {
         return React.createElement(
           "div",
           { style: { padding: "1rem", color: "var(--color-destructive)" } },
-          `\u6C14\u6CE1\u804A\u5929\u9875\u6E32\u67D3\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
+          messagesFor(currentLocale()).renderFailed(
+            error instanceof Error ? error.message : String(error)
+          )
         );
       }
     }

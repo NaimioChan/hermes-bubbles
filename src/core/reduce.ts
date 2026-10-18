@@ -395,14 +395,18 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
 
   switch (event.type) {
     case "gateway.ready":
-      return { items, meta: { ...meta, connected: true } };
+      return { items, meta: { ...meta, connected: true, status: "", statusKind: "" } };
 
     case "gateway.closed":
     case "gateway.reconnecting":
-      return { items, meta: { ...meta, connected: false, status: "连接中断，重连中…" } };
+      // The reconnect line is chosen at render time; `core/` stays prose-free.
+      return { items, meta: { ...meta, connected: false, status: "", statusKind: "reconnecting" } };
 
     case "message.start":
-      return { items: sealReasoning(sealAssistant(items)), meta: { ...meta, running: true, status: "" } };
+      return {
+        items: sealReasoning(sealAssistant(items)),
+        meta: { ...meta, running: true, status: "", statusKind: "" },
+      };
 
     case "message.delta": {
       const text = str(p.text);
@@ -518,6 +522,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
           ...meta,
           running: false,
           status: "",
+          statusKind: "",
           usage: usage ?? meta.usage,
         },
       };
@@ -603,7 +608,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       const kind = str(p.kind);
       // `compacting` / `goal` / `loop` / `heartbeat` / `process` are all just
       // "something is happening" for this page; they share one status line.
-      return { items, meta: { ...meta, status: text || (kind ? `${kind}…` : "") } };
+      return { items, meta: { ...meta, status: text || (kind ? `${kind}…` : ""), statusKind: "" } };
     }
 
     case "session.usage": {
@@ -643,7 +648,7 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
       return {
         items: [
           ...items,
-          { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.message) || "发生错误", tone: "error" },
+          { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.message), tone: "error" },
         ],
         meta: { ...meta, running: false },
       };
@@ -660,7 +665,7 @@ export function appendUser(timeline: Timeline, text: string): Timeline {
       ...timeline.items,
       { kind: "user", id: nextId("user"), at: Date.now(), text, pending: true },
     ],
-    meta: { ...timeline.meta, running: true, status: "" },
+    meta: { ...timeline.meta, running: true, status: "", statusKind: "" },
   };
 }
 
@@ -701,6 +706,6 @@ function turnDuration(items: readonly TimelineItem[], completedAt: number): numb
 export function settleTimeline(timeline: Timeline, note?: string): Timeline {
   return {
     items: sealReasoning(sealAssistant(timeline.items)),
-    meta: { ...timeline.meta, running: false, status: note ?? "" },
+    meta: { ...timeline.meta, running: false, status: note ?? "", statusKind: "" },
   };
 }

@@ -8,6 +8,7 @@ import {
   formatBytes,
   hasFailed,
   MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_MIB,
   readyAttachments,
   removeAttachment,
   screenFiles,
@@ -51,13 +52,12 @@ describe("screenFiles", () => {
     expect(accepted).toEqual([{ name: "a.png", size: 100, kind: "image" }]);
   });
 
-  it("rejects an oversized file with the limit in the reason", () => {
+  it("rejects an oversized file with the limit it broke", () => {
     const { accepted, rejected } = screenFiles([
       { name: "huge.bin", size: MAX_ATTACHMENT_BYTES + 1, type: "" },
     ]);
     expect(accepted).toEqual([]);
-    expect(rejected[0]?.name).toBe("huge.bin");
-    expect(rejected[0]?.reason).toMatch(/上限/);
+    expect(rejected[0]).toMatchObject({ name: "huge.bin", code: "too_large", limitMib: MAX_ATTACHMENT_MIB });
   });
 
   it("accepts a file exactly at the limit", () => {
@@ -67,7 +67,7 @@ describe("screenFiles", () => {
 
   it("rejects an empty file", () => {
     const { rejected } = screenFiles([{ name: "empty.txt", size: 0, type: "" }]);
-    expect(rejected[0]?.reason).toBe("空文件");
+    expect(rejected[0]?.code).toBe("empty");
   });
 
   it("keeps the good ones when a batch is mixed", () => {

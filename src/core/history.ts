@@ -183,6 +183,7 @@ export function timelineFromSnapshot(snapshot: LiveSessionSnapshot, now = Date.n
       running: Boolean(info.running ?? snapshot.running),
       usage: info.usage ?? null,
       status: "",
+      statusKind: "",
       connected: true,
       todo,
     },

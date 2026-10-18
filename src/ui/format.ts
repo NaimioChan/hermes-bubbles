@@ -6,29 +6,45 @@
  * tested without rendering.
  */
 
-import type { TimelineItem, ToolItem } from "../core/types";
+import type { SessionMeta, TimelineItem, ToolItem } from "../core/types";
+import type { Messages } from "../core/i18n";
+import { MAX_ATTACHMENT_MIB, type Rejection } from "../core/attachments";
 
-/** Tools whose names are worth showing a friendly verb for. Falls back to the raw name. */
-const TOOL_LABELS: Record<string, string> = {
-  terminal: "执行命令",
-  read_file: "读取文件",
-  write_file: "写入文件",
-  patch: "修改文件",
-  search_files: "搜索",
-  web_search: "联网搜索",
-  web_extract: "抓取网页",
-  browser_exec: "操作浏览器",
-  delegate_task: "委派子任务",
-  todo_list: "任务清单",
-  memory: "记忆",
-  skill_view: "查看技能",
-  skill_manage: "编辑技能",
-  image_gen: "生成图片",
-  text_to_speech: "语音合成",
+/**
+ * Tools whose names are worth showing a friendly verb for. Falls back to the raw name.
+ *
+ * The label itself lives in the catalog: this map only says which key a tool id
+ * points at, so an English dashboard does not show a Chinese verb.
+ */
+type ToolLabelKey = Extract<keyof Messages, `tool${string}`>;
+
+const TOOL_LABEL_KEYS: Record<string, ToolLabelKey> = {
+  terminal: "toolTerminal",
+  read_file: "toolReadFile",
+  write_file: "toolWriteFile",
+  patch: "toolPatch",
+  search_files: "toolSearchFiles",
+  web_search: "toolWebSearch",
+  web_extract: "toolWebExtract",
+  browser_exec: "toolBrowserExec",
+  delegate_task: "toolDelegateTask",
+  todo_list: "toolTodoList",
+  memory: "toolMemory",
+  skill_view: "toolSkillView",
+  skill_manage: "toolSkillManage",
+  image_gen: "toolImageGen",
+  text_to_speech: "toolTextToSpeech",
 };
 
-export function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
+export function toolLabel(name: string, t: Messages): string {
+  const key = TOOL_LABEL_KEYS[name];
+  return key ? t[key] : name;
+}
+
+/** Why a picked file was refused, in the dashboard's language. */
+export function rejectionLabel(rejection: Rejection, t: Messages): string {
+  if (rejection.code === "empty") return t.attachmentEmpty;
+  return t.attachmentTooLarge(rejection.limitMib ?? MAX_ATTACHMENT_MIB);
 }
 
 /** How many characters of a tool result to render before collapsing. */
@@ -69,9 +85,10 @@ export function formatCount(value: number | undefined): string {
 }
 
 /** The status line shown on the composer while a turn is running. */
-export function runningLabel(meta: { status: string; running: boolean }): string {
+export function runningLabel(meta: Pick<SessionMeta, "status" | "statusKind" | "running">, t: Messages): string {
+  if (meta.statusKind === "reconnecting") return t.reconnecting;
   if (meta.status) return meta.status;
-  return meta.running ? "正在处理…" : "";
+  return meta.running ? t.working : "";
 }
 
 export function isToolItem(item: TimelineItem): item is ToolItem {

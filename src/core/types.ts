@@ -249,6 +249,13 @@ export interface SessionMeta {
   usage: Usage | null;
   /** Last `status.update.text`, cleared when the turn ends. */
   status: string;
+  /**
+   * A machine-side reason to show the status line even with no backend text.
+   *
+   * `core/` never produces prose: a dropped socket sets `"reconnecting"` and the
+   * view picks the sentence from the catalog. Cleared alongside `status`.
+   */
+  statusKind: "" | "reconnecting";
   connected: boolean;
   /** Latest `todo.updated` snapshot (or the resumed session's `todo_state`). */
   todo: TodoState | null;
@@ -264,6 +271,7 @@ export const emptyMeta: SessionMeta = {
   running: false,
   usage: null,
   status: "",
+  statusKind: "",
   connected: false,
   todo: null,
 };

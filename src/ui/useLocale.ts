@@ -34,6 +34,18 @@ function readLocale(): Locale {
   return normalizeLocale(document.documentElement.lang);
 }
 
+/**
+ * The dashboard's language right now. Exported for the last-resort error screen
+ * in `index.ts`, which has to pick a language before any component mounts.
+ */
+export function currentLocale(): Locale {
+  try {
+    return readLocale();
+  } catch {
+    return normalizeLocale(null);
+  }
+}
+
 export function useLocale(sdk: HermesPluginSdk): Locale {
   const { useState, useEffect } = sdk.hooks;
   const [locale, setLocale] = useState<Locale>(() => {

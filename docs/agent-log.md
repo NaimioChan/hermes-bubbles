@@ -8,6 +8,28 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-18 13:25 · hermes · 剩余中文文案收进 i18n 目录（#6 / #7）
+
+- 背景：合并外部 PR #8（用量读数与指标 tooltip 走目录，作者 jcrabapple）后，补齐它刻意没收的那部分；issue #6 的清单与 #7 的 tab 标题哨兵一并做掉。
+- 改：`core/i18n.ts`（新增 15 个工具名词、`working` / `reconnecting` / `genericError`、`attachmentTooLarge` / `attachmentEmpty`、`skill` / `skillOrigin`、`outputRisk`、`renderFailed`、`slashUnrecognized` / `slashDone` / `slashTypeUnsupported`、`replyNotFound` / `userMessageNotFound` / `attachmentNotAccepted`、`heartbeatTimeout` / `connectUnauthorized` / `connectChatDisabled`，en + zh 各一份）；`core/types.ts` 加 `SessionMeta.statusKind`（`"" | "reconnecting"`）；`core/reduce.ts`（断线只置 `statusKind`，`gateway.ready` 顺带清状态行；error 帧 `text` 不再兜底中文，改由 `NoticeRow` 补）；`core/attachments.ts`（`Rejection` 从 `reason: string` 改成 `code + limitMib`）；`core/slash.ts`（技能行 `description` 置空、新增 `origin`）；`core/sessions.ts`（新 tab 标题用 `""` 作哨兵，`tabLabel(tab, t)`）；`core/history.ts`（快照 meta 补 `statusKind`）；`gateway/client.ts`（`ClientOptions.messages` 提供者 + 私有 `messages()`，心跳超时与 4401/4403 走目录）；`app/controller.ts`（构造 client 时注入 `() => messagesFor(this.locale)`，斜杠提示与三处抛错改走目录）；`ui/format.ts`（`toolLabel(name, t)`、`runningLabel(meta, t)`、新增 `rejectionLabel`）；`ui/Bubble.ts`（`ToolRow` / `NoticeRow` 接 `locale`，风险行走 `t.outputRisk`）；`ui/ChatPage.ts`（拒收原因走 `rejectionLabel`，状态行传整个 meta）；`ui/Composer.ts`（技能行标签渲染时拼）；`ui/TabStrip.ts`（两处 `tabLabel` 传 `t`）；`ui/useLocale.ts`（导出 `currentLocale()`）；`index.ts`（渲染失败文案走目录）；测试：`tests/format.test.ts` / `attachments.test.ts` / `sessions.test.ts` / `controller.test.ts` 断言改成对 catalog 比较，`tests/architecture.test.ts` 新增守卫「`src/` 里除 `core/i18n.ts` 外不许出现 CJK 字面量」
+- 验证：`npx tsc --noEmit` 干净；`npx vitest run` 460 passed（22 文件，改动前 454，新增 6 条）；`node scripts/audit-classes.mjs` 170/170；`node scripts/verify.mjs` 79/79（真仪表盘、真模型往返，改后重跑）
+- 遗留：`verify.mjs` 不校验语言（铁律 15 只按 `data-hb` 找元素），所以「英文界面不出现中文」目前只有单测与源码守卫兜着，没有端到端断言；本轮 `verify.mjs` 有一次跑到「发送后取用户气泡」时 8 条连锁失败并崩在 `dispatchEvent`（疑似该回合尚未落渲染），隔一次重跑 79/79，未深究；本地 3 个提交尚未 push
+
+### 分层怎么定的
+
+`core/` 和 `gateway/` 拿不到 locale，也不该去读 `localStorage`（铁律 1）。所以分两类处理：
+
+- 会进入时间线/状态机的东西一律改成机器值：`Rejection.code`、`SlashItem.origin`、`SessionMeta.statusKind`、`NoticeItem.text` 留空。视图层再翻。
+- 传输层自己的句子（心跳超时、4401/4403）无法变成机器值——它直接 `throw new Error(...)`，而错误 message 会被 controller 当通知显示。于是给 `GatewayClient` 注入 `messages: () => Messages`，语义跟 `urlProvider` 一样：调用时才取，语言切换后下一帧就跟着变。controller 本来就有 `this.locale` 和 `setLocale`，顺着它喂。
+
+`tabLabel` 的哨兵（#7）用空标题而不是比较中文字面量：否则一个真叫「新对话」的中文会话会被当成未命名，退回 stored id 前 8 位。
+
+### 一个自己的坑
+
+`node build.mjs` 写的是仓库根的 `dist/`（gitignore），仓库里入库的是 `dashboard/dist/`——两者靠 `scripts/install-plugin.mjs` 复制过去。改完只跑 `build.mjs` 再 `git add`，会把**带冲突标记的旧 bundle** 提交进去（这次 rebase 时真的发生了：`git status` 看着没变化，因为变化落在 gitignore 的 `dist/`）。入库前必须 `npm run install-plugin`，然后用 `grep -c "<<<<<<<" dashboard/dist/index.js` 确认是 0。
+
+---
+
 ## 2026-10-18 12:28 · hermes · 思维链独立成条目、工具调用收成紧凑行
 
 - 改：`core/types.ts`（新增 `ReasoningItem`，`AssistantItem` 去掉 `reasoning` 字段）；`core/reduce.ts`（`reasoning.delta` / `reasoning.available` 落成时间线尾部独立条目，只在尾部 streaming 时追加；`message.delta` / `message.interim` / `message.start` / `tool.start` / `message.complete` / `settleTimeline` 全部封口思考块；`inferToolStatus` 的 `result.error` 取真值判断）；`core/history.ts`（历史行的 reasoning 投影成回复**上方**的思考块，只有推理没有正文的行不再产出空助手条目）；`ui/Bubble.ts`（`Reasoning` → `ReasoningRow`，无卡片无动作行；`ToolCard` → `ToolRow`，单行细轨；空正文助手条目不渲染）；`ui/ChatPage.ts`（条目包装加 `data-hb-kind`）；`ui/style.css`（`.hb-think` / `.hb-tool` 及按 kind 分配的垂直节奏）；`scripts/verify.mjs` 加三条实测断言；新增 `scripts/probe-furniture.mjs`；`tests/reduce.test.ts` / `tests/history.test.ts` / `tests/layout-classes.test.ts`；`GLOSSARY.md`、`README.md`、`docs/01-protocol-contract.md`、`docs/agents/domain.md`

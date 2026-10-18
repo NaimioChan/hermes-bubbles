@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatController } from "../src/app/controller";
+import { messagesFor } from "../src/core/i18n";
 import type { TurnNotice } from "../src/core/notify";
 import { activeTimeline, timelineOf } from "../src/core/sessions";
 
@@ -139,13 +140,13 @@ describe("connection", () => {
     const { controller, socket } = await connectAndOpen();
     socket.onclose?.({ code: 4401 });
     expect(controller.getConnection().state).toBe("error");
-    expect(controller.getConnection().detail).toMatch(/鉴权/);
+    expect(controller.getConnection().detail).toBe(messagesFor("en").connectUnauthorized);
   });
 
   it("stops retrying when chat is disabled on this dashboard (4403)", async () => {
     const { controller, socket } = await connectAndOpen();
     socket.onclose?.({ code: 4403 });
-    expect(controller.getConnection().detail).toMatch(/未启用/);
+    expect(controller.getConnection().detail).toBe(messagesFor("en").connectChatDisabled);
   });
 
   it("reconnects after an ordinary drop", async () => {
@@ -525,7 +526,7 @@ describe("attachments", () => {
     );
     await tick();
     socket.replyTo("file.attach", { attached: false });
-    await expect(staging).rejects.toThrow(/未接受/);
+    await expect(staging).rejects.toThrow(messagesFor("en").attachmentNotAccepted);
   });
 });
 

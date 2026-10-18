@@ -52,9 +52,22 @@ export function classifyFile(name: string, mime?: string): AttachmentKind {
  */
 export const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 
+/** The cap in MiB, for the on-screen reason. */
+export const MAX_ATTACHMENT_MIB = Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024);
+
+/**
+ * Why a file was refused.
+ *
+ * A code rather than a sentence: this module is pure and has no locale, and the
+ * screen that shows the rejection picks the words (`format.ts::rejectionLabel`).
+ */
+export type RejectionCode = "too_large" | "empty";
+
 export interface Rejection {
   name: string;
-  reason: string;
+  code: RejectionCode;
+  /** Present on `too_large`: the limit, so the reason can quote it. */
+  limitMib?: number;
 }
 
 /** Partition picked files into acceptable ones and rejections with a reason. */
@@ -65,14 +78,11 @@ export function screenFiles(
   const rejected: Rejection[] = [];
   for (const file of files) {
     if (file.size > MAX_ATTACHMENT_BYTES) {
-      rejected.push({
-        name: file.name,
-        reason: `超过 ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MiB 上限`,
-      });
+      rejected.push({ name: file.name, code: "too_large", limitMib: MAX_ATTACHMENT_MIB });
       continue;
     }
     if (file.size === 0) {
-      rejected.push({ name: file.name, reason: "空文件" });
+      rejected.push({ name: file.name, code: "empty" });
       continue;
     }
     accepted.push({ name: file.name, size: file.size, kind: classifyFile(file.name, file.type) });

@@ -14,7 +14,7 @@
  * through `file.attach`, the same path the desktop app uses.
  */
 
-import type { Attachment } from "../core/attachments";
+import type { Attachment, Rejection } from "../core/attachments";
 import { formatBytes, screenFiles } from "../core/attachments";
 import { fitComposerHeight } from "../core/autosize";
 import { metricChips, pressureTone } from "../core/metrics";
@@ -380,7 +380,11 @@ export function Composer(props: ComposerProps) {
                 React.createElement(
                   "span",
                   { className: "hb-truncate hb-flex-fill", style: { color: "var(--color-muted-foreground)" } },
-                  entry.description,
+                  entry.kind === "skill"
+                    ? entry.origin
+                      ? t.skillOrigin(entry.origin)
+                      : t.skill
+                    : entry.description,
                 ),
               ),
             ),
@@ -560,7 +564,7 @@ export function Composer(props: ComposerProps) {
 /** Screen dropped/picked files and hand the accepted ones up. */
 export function screenDroppedFiles(files: FileList | File[]): {
   accepted: { file: File; id: string }[];
-  rejected: { name: string; reason: string }[];
+  rejected: Rejection[];
 } {
   const list = Array.from(files);
   const { accepted, rejected } = screenFiles(

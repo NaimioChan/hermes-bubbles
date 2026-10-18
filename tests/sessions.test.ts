@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { EventDedupe } from "../src/core/dedupe";
 import { resetHistoryIdCounter } from "../src/core/history";
+import { messagesFor } from "../src/core/i18n";
 import { resetIdCounter } from "../src/core/reduce";
 import {
   ackUserInActive,
@@ -40,7 +41,8 @@ describe("openDraft", () => {
   it("creates an empty tab and focuses it", () => {
     const state = openDraft(emptyMultiState);
     expect(state.tabs).toHaveLength(1);
-    expect(state.tabs[0]).toMatchObject({ title: "新对话", draft: true, runtimeId: null });
+    // An empty title is the "untitled" sentinel; the label comes from the catalog.
+    expect(state.tabs[0]).toMatchObject({ title: "", draft: true, runtimeId: null });
     expect(state.activeKey).toBe(state.tabs[0]?.key);
     expect(activeTimeline(state).items).toEqual([]);
   });
@@ -283,9 +285,23 @@ describe("tab helpers", () => {
   });
 
   it("labels a tab by title, falling back to a short stored id", () => {
-    expect(tabLabel({ key: "k", runtimeId: null, storedId: null, title: "标题", draft: false })).toBe("标题");
-    expect(tabLabel({ key: "k", runtimeId: null, storedId: "20261016_abcdef", title: "新对话", draft: false })).toBe("20261016");
-    expect(tabLabel({ key: "k", runtimeId: null, storedId: null, title: "新对话", draft: true })).toBe("新对话");
+    const t = messagesFor("en");
+    expect(tabLabel({ key: "k", runtimeId: null, storedId: null, title: "标题", draft: false }, t)).toBe("标题");
+    expect(tabLabel({ key: "k", runtimeId: null, storedId: "20261016_abcdef", title: "", draft: false }, t)).toBe(
+      "20261016",
+    );
+    expect(tabLabel({ key: "k", runtimeId: null, storedId: null, title: "", draft: true }, t)).toBe(t.untitled);
+  });
+
+  it("keeps a session that is genuinely called 新对话 out of the untitled bucket", () => {
+    // Regression for the sentinel: the old code compared the title against the
+    // literal string, so a zh session named 新对话 fell through to its stored id.
+    const t = messagesFor("zh");
+    expect(tabLabel({ key: "k", runtimeId: null, storedId: "20261016_abcdef", title: "新对话", draft: false }, t)).toBe(
+      "新对话",
+    );
+    expect(tabLabel({ key: "k", runtimeId: null, storedId: null, title: "", draft: true }, t)).toBe(t.untitled);
+    expect(t.untitled).not.toBe("新对话");
   });
 
   it("reports which tabs are running", () => {

@@ -3,20 +3,42 @@ import { describe, expect, it } from "vitest";
 import {
   formatCount,
   formatDuration,
+  rejectionLabel,
   runningLabel,
   toolLabel,
   toolPreview,
   TOOL_PREVIEW_CHARS,
 } from "../src/ui/format";
+import { messagesFor } from "../src/core/i18n";
+
+const en = messagesFor("en");
 
 describe("toolLabel", () => {
-  it("translates known tools", () => {
-    expect(toolLabel("terminal")).toBe("执行命令");
-    expect(toolLabel("read_file")).toBe("读取文件");
+  it("translates known tools through the catalog", () => {
+    expect(toolLabel("terminal", en)).toBe(en.toolTerminal);
+    expect(toolLabel("read_file", en)).toBe(en.toolReadFile);
+    expect(toolLabel("read_file", messagesFor("zh"))).toBe(messagesFor("zh").toolReadFile);
   });
 
   it("passes unknown tools through unchanged", () => {
-    expect(toolLabel("mcp__thing__do")).toBe("mcp__thing__do");
+    expect(toolLabel("mcp__thing__do", en)).toBe("mcp__thing__do");
+  });
+
+  it("leaves no CJK in an English label", () => {
+    const cjk = /[\u4e00-\u9fff]/;
+    for (const name of ["terminal", "read_file", "write_file", "patch", "web_search", "skill_view"]) {
+      expect(cjk.test(toolLabel(name, en))).toBe(false);
+    }
+  });
+});
+
+describe("rejectionLabel", () => {
+  it("quotes the limit on an oversized file", () => {
+    expect(rejectionLabel({ name: "a.bin", code: "too_large", limitMib: 12 }, en)).toBe(en.attachmentTooLarge(12));
+  });
+
+  it("names an empty file", () => {
+    expect(rejectionLabel({ name: "a.txt", code: "empty" }, en)).toBe(en.attachmentEmpty);
   });
 });
 
@@ -93,14 +115,18 @@ describe("formatCount", () => {
 
 describe("runningLabel", () => {
   it("prefers the backend's status line", () => {
-    expect(runningLabel({ status: "压缩上下文…", running: true })).toBe("压缩上下文…");
+    expect(runningLabel({ status: "压缩上下文…", statusKind: "", running: true }, en)).toBe("压缩上下文…");
   });
 
-  it("falls back to a generic label while a turn is live", () => {
-    expect(runningLabel({ status: "", running: true })).toBe("正在处理…");
+  it("falls back to a catalog label while a turn is live", () => {
+    expect(runningLabel({ status: "", statusKind: "", running: true }, en)).toBe(en.working);
+  });
+
+  it("shows the reconnect line in place of everything else", () => {
+    expect(runningLabel({ status: "", statusKind: "reconnecting", running: false }, en)).toBe(en.reconnecting);
   });
 
   it("is empty when idle", () => {
-    expect(runningLabel({ status: "", running: false })).toBe("");
+    expect(runningLabel({ status: "", statusKind: "", running: false }, en)).toBe("");
   });
 });

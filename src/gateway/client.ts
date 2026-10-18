@@ -6,6 +6,8 @@
  */
 
 import { Channel, type GatewayEvent, type ServerRequestHandler, type Transport } from "./channel";
+import type { Messages } from "../core/i18n";
+import { messagesFor } from "../core/i18n";
 
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -19,6 +21,15 @@ export interface ClientOptions {
   onReconnected?: () => void;
   onUnhandledRequest?: (request: { id: string; method: string }) => void;
   socketFactory?: (url: string) => WebSocket;
+  /**
+   * The catalog in the dashboard's current language.
+   *
+   * A provider rather than a fixed catalog because the language can change while
+   * the socket lives, and because the transport owns the failure sentences
+   * (`Heartbeat timed out`, the 4401/4403 refusals) — leaving them in this file
+   * as literals is how an English dashboard used to show Chinese.
+   */
+  messages?: () => Messages;
 }
 
 const BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
@@ -61,13 +72,18 @@ export class GatewayClient {
       onHeartbeatFailure: () => {
         // A silent socket is indistinguishable from a dead one; drop it and let
         // the reconnect path take over.
-        this.dropAndReconnect("心跳超时");
+        this.dropAndReconnect(this.messages().heartbeatTimeout);
       },
     });
   }
 
   getState(): ConnectionState {
     return this.state;
+  }
+
+  /** The catalog in the dashboard's language; English when the caller did not supply one. */
+  private messages(): Messages {
+    return this.options.messages?.() ?? messagesFor("en");
   }
 
   private setState(state: ConnectionState, detail?: string): void {
@@ -138,7 +154,8 @@ export class GatewayClient {
       // will fail identically, so stop and surface it.
       if (event.code === 4401 || event.code === 4403) {
         this.failureKind = event.code === 4401 ? "auth" : "scope";
-        this.failureMessage = event.code === 4401 ? "鉴权失败，请刷新页面" : "聊天功能未启用";
+        this.failureMessage =
+          event.code === 4401 ? this.messages().connectUnauthorized : this.messages().connectChatDisabled;
         this.settleOpenWaiters(new Error(this.failureMessage));
         this.setState("error", this.failureMessage);
         return;

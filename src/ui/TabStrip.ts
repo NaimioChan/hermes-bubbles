@@ -106,7 +106,7 @@ export function TabStrip(props: TabStripProps) {
                 // the visible label, which is localized.
                 "data-hb": "tab",
                 "data-hb-key": tab.key,
-                title: tabLabel(tab),
+                title: tabLabel(tab, t),
                 className: "group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
                 style: {
                   background: tab.key === props.activeKey ? "var(--color-muted)" : "transparent",
@@ -122,7 +122,7 @@ export function TabStrip(props: TabStripProps) {
               props.runningKeys.includes(tab.key)
                 ? React.createElement("span", { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } }, "●")
                 : null,
-              React.createElement("span", { className: "hb-truncate" }, tabLabel(tab)),
+              React.createElement("span", { className: "hb-truncate" }, tabLabel(tab, t)),
               React.createElement(
                 "span",
                 {

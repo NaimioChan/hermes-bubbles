@@ -66,6 +66,36 @@ describe("architecture invariants", () => {
     expect(offences).toEqual([]);
   });
 
+  it("keeps every user-visible string in the catalog", () => {
+    // 铁律 16: the plugin's default language is English and follows the
+    // dashboard. A CJK character left in the code outside `core/i18n.ts` is a
+    // string that bypassed the catalog — which is exactly how tool cards, slash
+    // notices, attachment reasons and the tab label ended up Chinese on an
+    // English dashboard (issues #6 and #7).
+    const cjk = /[\u4e00-\u9fff]/;
+    // Sanity-check the scanner before trusting it.
+    expect(cjk.test(stripComments('const a = "你好";'))).toBe(true);
+    expect(cjk.test(stripComments("// 中文注释 is fine"))).toBe(false);
+
+    const offences: string[] = [];
+    for (const dir of ["", "core", "ui", "app", "gateway"]) {
+      let files: { name: string; text: string }[];
+      try {
+        files = sourcesIn(dir ? join(SRC, dir) : SRC);
+      } catch {
+        continue;
+      }
+      for (const { name, text } of files) {
+        if (name === "core/i18n.ts") continue;
+        const code = stripComments(text);
+        code.split("\n").forEach((line, index) => {
+          if (cjk.test(line)) offences.push(`${name}:${index + 1}: ${line.trim()}`);
+        });
+      }
+    }
+    expect(offences).toEqual([]);
+  });
+
   it("keeps the notification sink alive across route changes", () => {
     // The controller is a module-level singleton (persistent.ts): it keeps
     // streaming while the user is on another dashboard route. Clearing the sink

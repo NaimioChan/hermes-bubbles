@@ -339,10 +339,11 @@ function AssistantBubble({
  * Still collapsed by default: the arguments and output are one click away, and
  * expanding is the only thing that grows the row.
  */
-function ToolRow({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
+function ToolRow({ sdk, item, locale }: { sdk: HermesPluginSdk; item: ToolItem; locale: Locale }) {
   const { React } = sdk;
   const { useState } = sdk.hooks;
   const [open, setOpen] = useState(false);
+  const t = messagesFor(locale);
   const preview = toolPreview(item.resultText);
   const argsText = item.argsText ?? (item.args ? JSON.stringify(item.args, null, 2) : "");
   const duration = formatDuration(item.durationS);
@@ -366,7 +367,7 @@ function ToolRow({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
         onClick: () => setOpen((v: boolean) => !v),
       },
       React.createElement("span", { className: "hb-tool-caret" }, open ? "▾" : "▸"),
-      React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name)),
+      React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name, t)),
       item.status === "running"
         ? React.createElement("span", { className: "hb-caret hb-tool-live" }, "●")
         : null,
@@ -381,7 +382,7 @@ function ToolRow({ sdk, item }: { sdk: HermesPluginSdk; item: ToolItem }) {
       ? React.createElement(
           "div",
           { className: "hb-tool-risk" },
-          `输出被标记为 ${item.risk}`,
+          t.outputRisk(item.risk),
         )
       : null,
     open
@@ -449,7 +450,7 @@ function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: Suba
         React.createElement(
           "div",
           { key: "tool", className: "hb-sub-detail" },
-          `${toolLabel(child.lastTool)}${child.toolCount ? ` · ${t.subagentTools(child.toolCount)}` : ""}`,
+          `${toolLabel(child.lastTool, t)}${child.toolCount ? ` · ${t.subagentTools(child.toolCount)}` : ""}`,
         ),
       );
     }
@@ -553,8 +554,9 @@ function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: Suba
   );
 }
 
-function NoticeRow({ sdk, item }: { sdk: HermesPluginSdk; item: NoticeItem }) {
+function NoticeRow({ sdk, item, locale }: { sdk: HermesPluginSdk; item: NoticeItem; locale: Locale }) {
   const { React } = sdk;
+  const t = messagesFor(locale);
   return React.createElement(
     "div",
     {
@@ -564,7 +566,9 @@ function NoticeRow({ sdk, item }: { sdk: HermesPluginSdk; item: NoticeItem }) {
         color: item.tone === "error" ? "var(--color-destructive)" : "var(--color-muted-foreground)",
       },
     },
-    item.text,
+    // An error frame can arrive with no message at all; an empty red row would
+    // read as a rendering bug, so fall back to a sentence from the catalog.
+    item.text || (item.tone === "error" ? t.genericError : ""),
   );
 }
 
@@ -583,12 +587,12 @@ export function Bubble(props: BubbleProps) {
         onCopy: props.onCopy,
       });
     case "tool":
-      return ToolRow({ sdk, item });
+      return ToolRow({ sdk, item, locale });
     case "reasoning":
       return ReasoningRow({ sdk, item, locale });
     case "subagents":
       return SubagentsCard({ sdk, item, locale });
     case "notice":
-      return NoticeRow({ sdk, item });
+      return NoticeRow({ sdk, item, locale });
   }
 }

@@ -13,6 +13,7 @@
 import { EventDedupe } from "./dedupe";
 import { projectHistory, timelineFromSnapshot, type LiveSessionSnapshot } from "./history";
 import { ackUser, appendUser, reduceEvent, settleTimeline, type GatewayEvent } from "./reduce";
+import type { Messages } from "./i18n";
 import { emptyMeta, type Timeline } from "./types";
 
 export interface SessionTab {
@@ -66,7 +67,7 @@ function withTimeline(state: MultiState, key: string, timeline: Timeline): Multi
 
 export function openDraft(state: MultiState): MultiState {
   const key = nextDraftKey();
-  const tab: SessionTab = { key, runtimeId: null, storedId: null, title: "新对话", draft: true };
+  const tab: SessionTab = { key, runtimeId: null, storedId: null, title: "", draft: true };
   return {
     sessions: { ...state.sessions, [key]: { items: [], meta: { ...emptyMeta } } },
     tabs: [...state.tabs, tab],
@@ -260,11 +261,17 @@ export function runningKeys(state: MultiState): string[] {
     .map(([key]) => key);
 }
 
-/** A tab label: the title, or a short id when the backend has not titled it. */
-export function tabLabel(tab: SessionTab): string {
-  if (tab.title && tab.title !== "新对话") return tab.title;
+/**
+ * A tab label: the title, or a short id when the backend has not titled it.
+ *
+ * "Untitled" is passed in rather than baked in — an empty title is the sentinel
+ * (`openDraft` writes `""`), so a session that is genuinely called 新对话 keeps
+ * its name instead of being treated as unnamed.
+ */
+export function tabLabel(tab: SessionTab, t: Messages): string {
+  if (tab.title) return tab.title;
   if (tab.storedId) return tab.storedId.slice(0, 8);
-  return tab.title || "新对话";
+  return t.untitled;
 }
 
 /**

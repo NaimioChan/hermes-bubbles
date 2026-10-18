@@ -65,6 +65,49 @@ export interface Messages {
   metricCacheTitle: string;
   metricTpsTitle: string;
   metricCostTitle: string;
+  /** Tool-row names. `core/` only knows tool ids; the verb is chosen here. */
+  toolTerminal: string;
+  toolReadFile: string;
+  toolWriteFile: string;
+  toolPatch: string;
+  toolSearchFiles: string;
+  toolWebSearch: string;
+  toolWebExtract: string;
+  toolBrowserExec: string;
+  toolDelegateTask: string;
+  toolTodoList: string;
+  toolMemory: string;
+  toolSkillView: string;
+  toolSkillManage: string;
+  toolImageGen: string;
+  toolTextToSpeech: string;
+  /** The composer's status line while a turn runs with no backend text. */
+  working: string;
+  /** After the socket drops, until it comes back. */
+  reconnecting: string;
+  /** Fallback body for an error notice that carried no message. */
+  genericError: string;
+  /** Attachment screening. */
+  attachmentTooLarge: (mib: number) => string;
+  attachmentEmpty: string;
+  /** Slash-menu rows for skills (the backend describes its own commands). */
+  skill: string;
+  skillOrigin: (origin: string) => string;
+  /** A tool result the backend flagged. */
+  outputRisk: (risk: string) => string;
+  /** The whole page failed to mount. */
+  renderFailed: (detail: string) => string;
+  /** Slash-command outcomes and controller-side failures. */
+  slashUnrecognized: (name: string) => string;
+  slashDone: (name: string) => string;
+  slashTypeUnsupported: (name: string, type: string) => string;
+  replyNotFound: string;
+  userMessageNotFound: string;
+  attachmentNotAccepted: string;
+  /** Transport failures: the socket's detail line and its thrown errors. */
+  heartbeatTimeout: string;
+  connectUnauthorized: string;
+  connectChatDisabled: string;
   yesterday: (time: string) => string;
   today: (time: string) => string;
   /** Approval / clarify cards. */
@@ -167,6 +210,39 @@ const EN: Messages = {
   metricCacheTitle: "Cache hit rate",
   metricTpsTitle: "Output speed",
   metricCostTitle: "Cost this session",
+  toolTerminal: "Ran a command",
+  toolReadFile: "Read a file",
+  toolWriteFile: "Wrote a file",
+  toolPatch: "Edited a file",
+  toolSearchFiles: "Searched files",
+  toolWebSearch: "Searched the web",
+  toolWebExtract: "Fetched a page",
+  toolBrowserExec: "Drove the browser",
+  toolDelegateTask: "Delegated a task",
+  toolTodoList: "Task list",
+  toolMemory: "Memory",
+  toolSkillView: "Viewed a skill",
+  toolSkillManage: "Edited a skill",
+  toolImageGen: "Generated an image",
+  toolTextToSpeech: "Spoke text",
+  working: "Working…",
+  reconnecting: "Connection lost, reconnecting…",
+  genericError: "Something went wrong",
+  attachmentTooLarge: (mib) => `Over the ${mib} MiB limit`,
+  attachmentEmpty: "Empty file",
+  skill: "Skill",
+  skillOrigin: (origin) => `Skill · ${origin}`,
+  outputRisk: (risk) => `Output flagged as ${risk}`,
+  renderFailed: (detail) => `The chat page failed to render: ${detail}`,
+  slashUnrecognized: (name) => `/${name} returned something this page could not read`,
+  slashDone: (name) => `/${name} ran`,
+  slashTypeUnsupported: (name, type) => `/${name} returned a "${type}" result, which this page cannot show yet`,
+  replyNotFound: "That reply is no longer in this transcript",
+  userMessageNotFound: "Could not find the user message to rewrite",
+  attachmentNotAccepted: "The backend did not accept that attachment",
+  heartbeatTimeout: "Heartbeat timed out",
+  connectUnauthorized: "Not authorised — reload the page",
+  connectChatDisabled: "Chat is not enabled on this dashboard",
   approvalTitle: "Needs your confirmation",
   clarifyTitle: "Question",
   approvalOnce: "Allow once",
@@ -269,6 +345,39 @@ const ZH: Messages = {
   metricCacheTitle: "缓存命中率",
   metricTpsTitle: "输出速度",
   metricCostTitle: "本会话花费",
+  toolTerminal: "执行命令",
+  toolReadFile: "读取文件",
+  toolWriteFile: "写入文件",
+  toolPatch: "修改文件",
+  toolSearchFiles: "搜索",
+  toolWebSearch: "联网搜索",
+  toolWebExtract: "抓取网页",
+  toolBrowserExec: "操作浏览器",
+  toolDelegateTask: "委派子任务",
+  toolTodoList: "任务清单",
+  toolMemory: "记忆",
+  toolSkillView: "查看技能",
+  toolSkillManage: "编辑技能",
+  toolImageGen: "生成图片",
+  toolTextToSpeech: "语音合成",
+  working: "正在处理…",
+  reconnecting: "连接中断，重连中…",
+  genericError: "发生错误",
+  attachmentTooLarge: (mib) => `超过 ${mib} MiB 上限`,
+  attachmentEmpty: "空文件",
+  skill: "技能",
+  skillOrigin: (origin) => `技能 · ${origin}`,
+  outputRisk: (risk) => `输出被标记为 ${risk}`,
+  renderFailed: (detail) => `气泡聊天页渲染失败：${detail}`,
+  slashUnrecognized: (name) => `/${name} 返回了无法识别的结果`,
+  slashDone: (name) => `/${name} 已执行`,
+  slashTypeUnsupported: (name, type) => `/${name} 的结果类型 ${type} 暂不支持`,
+  replyNotFound: "找不到该回复",
+  userMessageNotFound: "找不到对应的用户消息",
+  attachmentNotAccepted: "后端未接受该附件",
+  heartbeatTimeout: "心跳超时",
+  connectUnauthorized: "鉴权失败，请刷新页面",
+  connectChatDisabled: "聊天功能未启用",
   approvalTitle: "需要你确认",
   clarifyTitle: "请选择",
   approvalOnce: "允许一次",

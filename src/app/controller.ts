@@ -99,6 +99,9 @@ export class ChatController {
     this.client = new GatewayClient({
       urlProvider: options.urlProvider,
       socketFactory: options.socketFactory,
+      // The transport renders its own failure sentences, so it reads the catalog
+      // in whatever language the page is currently in.
+      messages: () => messagesFor(this.locale),
       onState: (state, detail) => {
         this.connection = state;
         this.detail = detail ?? "";
@@ -329,7 +332,7 @@ export class ChatController {
 
     const directive = parseDispatch(reply);
     if (!directive) {
-      this.notice(`/${name} 返回了无法识别的结果`, "error");
+      this.notice(messagesFor(this.locale).slashUnrecognized(name), "error");
       return null;
     }
 
@@ -339,7 +342,7 @@ export class ChatController {
         return this.dispatchCommand((directive.target ?? "").replace(/^\//, ""), arg);
       case "exec":
       case "plugin":
-        this.notice(directive.output || `/${name} 已执行`);
+        this.notice(directive.output || messagesFor(this.locale).slashDone(name));
         return directive;
       case "prefill":
         // The composer puts `message` in the box; the notice explains why.
@@ -352,7 +355,10 @@ export class ChatController {
         if (directive.notice) this.notice(directive.notice);
         return directive;
       default:
-        this.notice(`/${name} 的结果类型 ${String((directive as { type: string }).type)} 暂不支持`, "error");
+        this.notice(
+          messagesFor(this.locale).slashTypeUnsupported(name, String((directive as { type: string }).type)),
+          "error",
+        );
         return directive;
     }
   }
@@ -412,7 +418,7 @@ export class ChatController {
 
     const timeline = timelineOf(this.state, key);
     const index = timeline.items.findIndex((entry) => entry.id === itemId);
-    if (index < 0) throw new Error("找不到该回复");
+    if (index < 0) throw new Error(messagesFor(this.locale).replyNotFound);
 
     // The turn's own user row is the nearest user item above the reply.
     let prompt: string | null = null;
@@ -423,7 +429,7 @@ export class ChatController {
         break;
       }
     }
-    if (prompt === null) throw new Error("找不到对应的用户消息");
+    if (prompt === null) throw new Error(messagesFor(this.locale).userMessageNotFound);
 
     // Drop the reply and everything after it, then rewind server-side.
     const kept = timeline.items.slice(0, index);
@@ -764,7 +770,7 @@ export class ChatController {
       path?: string;
       name?: string;
     }>(attachMethodFor(kind), params);
-    if (!result?.attached) throw new Error("后端未接受该附件");
+    if (!result?.attached) throw new Error(messagesFor(this.locale).attachmentNotAccepted);
 
     return {
       id,

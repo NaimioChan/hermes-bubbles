@@ -8,6 +8,18 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-19 11:12 · hermes · 工作区实时化 + 右侧 Git 徽标
+
+- 背景：用户要「工作区按钮右边显示当前工作区的 git」；随后补两条要求 —— chip 要显示当前对话所在的实时目录、新建对话没选目录时落默认目录，并报了一个 bug：选了自定义目录之后消息仍落在默认目录。
+- 改（Git 徽标）：`plugin_api.py` 新增 `GET /git?path=`，在宿主机跑 `git rev-parse --show-toplevel` + `status --porcelain=v2 --branch`（`GIT_OPTIONAL_LOCKS=0` 只读、`GIT_TERMINAL_PROMPT=0`、4s 超时、2000 行截断），返回原文由前端解析；新增 `src/core/gitinfo.ts`（porcelain v2 解析、`changedCount`、`gitBadgeText`、`gitTargetDir`）；新增 `src/ui/GitBadge.ts`（无 hook，非仓库直接 `null`，不渲染）；`WorkspacePicker` / `Composer` / `ChatPage` 接线（会话目录变化、一轮结束 running→idle、点徽标都会重探）；`core/i18n.ts` 加 10 个键（en+zh）；`ui/style.css` 加 `hb-git-*`，`.hb-workspace-wrap` 改成横向对齐布局。
+- 改（工作区语义）：chip 改为显示 `meta.cwd`（当前对话的实时目录），偏好只在没有实时目录时兜底；偏好改成**一次性** —— `ensureSession()` 用它建完会话立即清空并删掉 localStorage 的 key；新增 `controller.pickWorkspace()`：选中时若活动页签还没说过话（`items` 空且不在跑）就关掉它重开一个。这就是那个 bug 的根因：页面加载时已经 mint 了一个会话，后端把 cwd 钉死在那一行，之后再选目录只会改偏好，消息仍进旧会话。
+- 文档：`docs/01-protocol-contract.md` 加 `/git` 路由形状与「偏好一次性、chip 实时」的客户端取舍；`AGENTS.md` 铁律 15 补 `git-badge` 钩子、铁律 26 补一次性语义与重开页签；`README.zh-CN.md` 功能表加「Git 信息」、文件树补两个新文件、验证数字更新。
+- 验证：`npx tsc --noEmit` 干净；`npx vitest run` 534 passed / 25 文件（新增 `tests/gitinfo.test.ts` 14 条、controller 4 条选目录用例）；`node scripts/audit-classes.mjs` 177/177；`node scripts/verify.mjs` 89/89（真仪表盘真模型：新开页签 → 选 hermes-bubbles → 会话被重开过去且 chip 标题为该目录、localStorage 已清空、Git 徽标出现并显示 `main`、中英文案走面板读取）。另用 `.cache/probe-git.mjs` 单独验过「仓库有徽标 / 普通目录无徽标 / 点击重探」。
+- 运维：插件 API 的新路由在 plugin host 进程里只 import 一次（`plugin_host_child.py::op_asgi`），`/api/dashboard/plugins/rescan` 不会重载 `plugin_api.py`，所以**改 plugin_api.py 必须重启仪表盘**。本次为验证重启了仪表盘（先 Stop-Process 掉 42640/48308，再用原来的 cmd 启动器重新拉起 9119），这条也写进了契约文档。
+- 遗留：面板里「下一个新对话」只有一行提示，没做成「点一下回到默认目录」的快捷项；git 只报 branch / 改动数 / 领先落后，没有 per-file 列表；chip 在默认目录会话上显示「默认目录」而不是宿主解析出的真实路径（后端在没显式 cwd 时不回显 `info.cwd`）。
+
+---
+
 ## 2026-10-18 23:34 · hermes · 历史面板加「项目」视图（两层，带新建对话）
 
 - 背景：用户要桌面端那样按项目看历史会话。定了三条：只做两层（项目 → 会话，泳道砍掉）、保留平铺列表改成两个页签、项目行加「在此新建对话」。双语言界面同步适配。

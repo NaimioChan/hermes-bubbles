@@ -119,6 +119,8 @@
 
 `info.cwd` 在 create / resume 的返回里回显会话自己的工作目录（没有则为空），插件把它放进 `SessionMeta.cwd` 只用于展示——已存在的会话不能被改目录，改的只是「下一个新对话」。
 
+客户端侧的取舍：工作区 chip 显示的是 `meta.cwd`（当前对话的实时目录），偏好只在没有实时目录时才显示；偏好是**一次性**的——`ensureSession()` 用它建完会话立刻清空（连带删 localStorage 的 key），所以没人指方向的新对话落默认目录。若选中时活动页签还没说过话（`items` 为空、没在跑），客户端会关掉它重开一个：页面加载时已经建过会话，而那行的 cwd 在后端钉死了，不重建就等于把用户选的目录吞掉。
+
 ### `GET /api/chat/workspaces`（REST，非 RPC）
 
 ```json
@@ -127,6 +129,25 @@
 ```
 
 `?scan=1` 先让宿主重扫 `desktop.repo_scan_roots` 再返回（`hermes_cli/web_routers/chat_workspaces.py`）。这就是仪表盘自带 `/chat` 工作区选择器用的同一个端点，所以两边列出的项目/仓库完全一致。需要 dashboard 的会话 token —— 走 `SDK.fetchJSON`，不能用裸 `fetch`。`projects.db` 是 per-profile 的，profile 由服务端按请求作用域解析。
+
+### `GET /api/plugins/hermes-bubbles/git?path=<目录>`（插件自己的路由）
+
+工作区按钮右边的 Git 徽标用它。**不用网关 RPC**：网关只有 `config.get{key:"project"}` 会给一个 `branch`（没有改动计数），而浏览器不能 spawn git。
+
+```json
+// 仓库
+{"ok":true,"is_repo":true,"path":"…","root":"C:/repo","status":"# branch.oid …\n# branch.head main\n…","truncated":false}
+// 不是仓库（目录存在）
+{"ok":true,"is_repo":false,"path":"…"}
+// 路径为空 / 不存在，或旧版插件没有这条路由
+{"ok":false,"is_repo":false,"error":"path required" | "not a directory"}
+```
+
+`status` 是 `git status --porcelain=v2 --branch --untracked-files=normal` 的**原文**，解析在 `src/core/gitinfo.ts`（有单测，覆盖 staged / unstaged / untracked / 冲突 / detached / 无提交 / CRLF）。后端只做三件事：`isdir` 校验、`rev-parse --show-toplevel` 判仓库、跑 status 并按 2000 行截断（`truncated: true` 时前端计数显示成 `N+`，表示下限）。
+
+实现要点：`GIT_OPTIONAL_LOCKS=0`（读状态不刷新 index，不写用户仓库）、`GIT_TERMINAL_PROMPT=0`（断网凭据直接失败而不是挂住）、4s 超时、`CREATE_NO_WINDOW`。`is_repo: false` 时前端**什么都不渲染**，普通目录跟加这个功能之前一样。
+
+**路由改动要重启仪表盘**：插件 API 模块在 plugin host 进程里只 import 一次（`plugin_host_child.py::op_asgi`），`/api/dashboard/plugins/rescan` 只重扫 manifest，不会重载 `plugin_api.py`。
 
 ### `session.list`
 

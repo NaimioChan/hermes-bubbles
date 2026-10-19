@@ -13,6 +13,7 @@
 
 import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
 import { messagesFor, type Locale } from "../core/i18n";
+import { gitTargetDir, type GitInfo } from "../core/gitinfo";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
 import type { TimelineItem } from "../core/types";
@@ -132,6 +133,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceFailed, setWorkspaceFailed] = useState(false);
+  // Git badge beside the workspace chip: branch + working-tree state of the
+  // chip's directory. `null` = not a repo, so nothing is rendered.
+  const [git, setGit] = useState<GitInfo | null>(null);
+  const [gitLoading, setGitLoading] = useState(false);
+  /** Bumped to force a re-probe (manual click, or a turn that may have written files). */
+  const [gitTick, setGitTick] = useState(0);
   // History panel: flat recents vs project grouping. The tree is fetched lazily
   // (its first read git-probes every distinct session cwd on the host).
   const [historyMode, setHistoryMode] = useState<HistoryMode>("recent");
@@ -288,11 +295,67 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
   const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
 
-  const onPickWorkspace = useCallback((cwd: string) => controller.setWorkspace(cwd), [controller]);
+  const onPickWorkspace = useCallback(
+    (cwd: string) => {
+      controller
+        .pickWorkspace(cwd)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    },
+    [controller],
+  );
 
   const onRescanWorkspaces = useCallback(() => {
     void loadWorkspaces(true);
   }, [loadWorkspaces]);
+
+  // ── git badge (to the right of the workspace chip) ───────────────────────
+
+  /**
+   * The directory the chip and the git badge describe: the open chat's own cwd
+   * when there is one (that is the "live" reading the picker is meant to show),
+   * else the pick for the next new chat.
+   */
+  const gitDir = useMemo(
+    () => gitTargetDir(timeline.meta.cwd, state.workspace, workspaces?.home ?? ""),
+    [timeline.meta.cwd, state.workspace, workspaces?.home],
+  );
+
+  useEffect(() => {
+    let live = true;
+    if (!gitDir) {
+      setGit(null);
+      return () => {
+        live = false;
+      };
+    }
+    setGitLoading(true);
+    controller
+      .gitInfo(gitDir)
+      // A failed probe is "no badge", not an error banner: the host may have no
+      // git, or an older install may not carry the `/git` route.
+      .catch(() => null)
+      .then((info) => {
+        if (live) setGit(info);
+      })
+      .finally(() => {
+        if (live) setGitLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [controller, gitDir, gitTick]);
+
+  const refreshGit = useCallback(() => setGitTick((tick) => tick + 1), []);
+
+  // A finished turn is the moment the working tree changes: the agent may have
+  // written files. Re-probe on the running → idle edge only, so a turn costs one
+  // extra `git status` rather than one per streaming event.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    const running = timeline.meta.running;
+    if (wasRunning.current && !running) setGitTick((tick) => tick + 1);
+    wasRunning.current = running;
+  }, [timeline.meta.running]);
 
   // ── project grouping (history panel) ─────────────────────────────────────
 
@@ -725,6 +788,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           workspaceHome: workspaces?.home ?? "",
           workspaceLoading,
           workspaceFailed,
+          git,
+          gitLoading,
+          onRefreshGit: refreshGit,
           onPickWorkspace,
           onRescanWorkspaces,
         }),

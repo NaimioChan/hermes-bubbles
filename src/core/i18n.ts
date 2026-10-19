@@ -130,6 +130,17 @@ export interface Messages {
   workspaceApply: string;
   workspaceSessionCwd: string;
   workspaceLoadFailed: string;
+  /** Git badge beside the workspace chip (nothing renders outside a repo). */
+  gitRefresh: string;
+  gitDetached: string;
+  gitClean: string;
+  gitStaged: (n: number) => string;
+  gitUnstaged: (n: number) => string;
+  gitUntracked: (n: number) => string;
+  gitConflicts: (n: number) => string;
+  gitAhead: (n: number) => string;
+  gitBehind: (n: number) => string;
+  gitTruncated: string;
   /** History panel: the flat recent list vs the project tree. */
   recent: string;
   projects: string;
@@ -278,6 +289,16 @@ const EN: Messages = {
   workspaceApply: "Use",
   workspaceSessionCwd: "This chat's directory",
   workspaceLoadFailed: "Could not list workspaces",
+  gitRefresh: "Refresh git status",
+  gitDetached: "Detached HEAD",
+  gitClean: "Working tree clean",
+  gitStaged: (n) => `${n} staged`,
+  gitUnstaged: (n) => `${n} unstaged`,
+  gitUntracked: (n) => `${n} untracked`,
+  gitConflicts: (n) => `${n} unmerged`,
+  gitAhead: (n) => `ahead by ${n}`,
+  gitBehind: (n) => `behind by ${n}`,
+  gitTruncated: "too many changes — counts are a lower bound",
   recent: "Recent",
   projects: "Projects",
   newChatInProject: "New chat here",
@@ -429,6 +450,16 @@ const ZH: Messages = {
   workspaceApply: "使用",
   workspaceSessionCwd: "本对话所在目录",
   workspaceLoadFailed: "无法列出工作区",
+  gitRefresh: "刷新 Git 状态",
+  gitDetached: "游离 HEAD",
+  gitClean: "工作区干净",
+  gitStaged: (n) => `已暂存 ${n}`,
+  gitUnstaged: (n) => `未暂存 ${n}`,
+  gitUntracked: (n) => `未跟踪 ${n}`,
+  gitConflicts: (n) => `冲突 ${n}`,
+  gitAhead: (n) => `领先远端 ${n}`,
+  gitBehind: (n) => `落后远端 ${n}`,
+  gitTruncated: "改动过多，计数为下限",
   recent: "最近",
   projects: "项目",
   newChatInProject: "在此新建对话",

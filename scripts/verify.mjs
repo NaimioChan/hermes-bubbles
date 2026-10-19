@@ -1599,9 +1599,11 @@ async function main() {
     }
 
     // ── workspace chip ──────────────────────────────────────────────────────
-    // The pick is a preference for the NEXT new chat, so it can be exercised
-    // without minting a session: pick a path, read the chip and storage, then
-    // restore the default so the run leaves no state behind.
+    // The chip is LIVE (it names the open chat's directory) and the pick aims the
+    // NEXT new chat. So the exercise is: open a fresh tab (untouched session),
+    // pick a repo, and watch the session get re-homed into it — a pick made after
+    // the page-load session was minted would otherwise be swallowed, because the
+    // backend pins a session's cwd at `session.create` and never moves it.
     const wsPath = projectRoot.replace(/\\/g, "/");
     const wsBase = wsPath.split("/").filter(Boolean).at(-1) || "";
     const wsChip = await session.evaluate(`(() => {
@@ -1614,6 +1616,8 @@ async function main() {
       JSON.stringify(wsChip),
     );
 
+    await session.evaluate(`document.querySelector('[data-hb="tab-new"]').click()`);
+    await sleep(600);
     await session.evaluate(`document.querySelector('[data-hb="workspace-button"]').click()`);
     await sleep(250);
     const wsPanel = await session.evaluate(`(() => {
@@ -1639,29 +1643,63 @@ async function main() {
     })()`);
     await sleep(150);
     await session.evaluate(`document.querySelector('[data-hb="workspace-apply"]').click()`);
-    await sleep(300);
+    await sleep(1500);
     const wsPicked = await session.evaluate(`(() => ({
       label: (document.querySelector('[data-hb="workspace-button"]') || {}).textContent || "",
+      title: (document.querySelector('[data-hb="workspace-button"]') || {}).getAttribute?.('title') || "",
       stored: localStorage.getItem('hermes-bubbles-workspace:'),
       open: Boolean(document.querySelector('[data-hb="workspace-panel"]')),
     }))()`);
     check(
-      "picking a workspace updates the chip, persists it, and closes the panel",
-      String(wsPicked.label).includes(wsBase) && wsPicked.stored === wsPath && wsPicked.open === false,
+      "picking a workspace re-homes an untouched chat there and closes the panel",
+      String(wsPicked.label).includes(wsBase) &&
+        // The chip names the open chat's OWN directory now; the host reports it
+        // with native separators even though the pick was made with forward ones.
+        String(wsPicked.title).replace(/\\/g, "/").includes(wsPath) &&
+        wsPicked.open === false &&
+        // The pick was spent by the session it aimed: the stored key is gone, so
+        // the next chat nobody aimed anywhere starts at the default directory.
+        wsPicked.stored === null,
       JSON.stringify(wsPicked),
+    );
+
+    // The git badge reads the SAME directory the chip names: this repo is a git
+    // checkout, so a branch has to show up to the right of the chip. The probe
+    // runs on the host, hence the extra settle time.
+    const gitBadgeSeen = await waitForOr(
+      session,
+      `Boolean(document.querySelector('[data-hb="git-badge"]'))`,
+      { timeout: 8000, label: "git badge" },
+    );
+    const gitBadge = await session.evaluate(`(() => {
+      const chip = document.querySelector('[data-hb="workspace-button"]');
+      const badge = document.querySelector('[data-hb="git-badge"]');
+      if (!badge || !chip) return { present: Boolean(badge) };
+      return {
+        present: true,
+        text: badge.textContent || "",
+        title: badge.getAttribute("title") || "",
+        toTheRight: badge.getBoundingClientRect().left >= chip.getBoundingClientRect().right - 1,
+      };
+    })()`);
+    check(
+      "git badge shows the workspace's branch to the right of the chip",
+      gitBadgeSeen && gitBadge.present === true && gitBadge.toTheRight === true &&
+        String(gitBadge.title).replace(/\\/g, "/").includes(wsPath),
+      JSON.stringify(gitBadge),
     );
 
     await session.evaluate(`document.querySelector('[data-hb="workspace-button"]').click()`);
     await sleep(250);
     await session.evaluate(`document.querySelectorAll('[data-hb="workspace-option"]')[0].click()`);
-    await sleep(250);
+    await sleep(400);
     const wsRestored = await session.evaluate(`(() => ({
       stored: localStorage.getItem('hermes-bubbles-workspace:'),
-      label: (document.querySelector('[data-hb="workspace-button"]') || {}).textContent || "",
+      open: Boolean(document.querySelector('[data-hb="workspace-panel"]')),
     }))()`);
     check(
-      "choosing the default clears the stored workspace",
-      wsRestored.stored === null && !String(wsRestored.label).includes(wsBase),
+      "choosing the default leaves nothing stored for the next chat",
+      wsRestored.stored === null && wsRestored.open === false,
       JSON.stringify(wsRestored),
     );
 
@@ -1756,14 +1794,21 @@ async function main() {
     await sleep(1200);
     await session.evaluate(`document.querySelector('[data-hb="history-mode-projects"]').click()`);
     await sleep(2500);
+    // The chip itself may legitimately show a path (it is live), so localization
+    // is read off the workspace panel, where the words actually live.
+    await session.evaluate(`document.querySelector('[data-hb="workspace-button"]')?.click()`);
+    await sleep(400);
     const zhSurfaces = await session.evaluate(`JSON.stringify({
       tabs: [...document.querySelectorAll('[data-hb^="history-mode-"]')].map((el) => el.textContent.trim()),
       rows: [...document.querySelectorAll('[data-hb="project-toggle"]')].map((el) => el.textContent.trim()).slice(0, 4),
       newChat: (document.querySelector('[data-hb="project-new-chat"]') || { title: '' }).title,
-      workspace: (document.querySelector('[data-hb="workspace-button"]') || { textContent: '' }).textContent,
+      workspaceDefault: (document.querySelector('[data-hb="workspace-option"]') || { textContent: '' }).textContent.trim(),
+      workspaceNote: (document.querySelector('[data-hb="workspace-next-note"]') || { textContent: '' }).textContent.trim(),
     })`);
+    await session.evaluate(`document.querySelector('[data-hb="workspace-button"]')?.click()`);
+    await sleep(200);
     check(
-      "the project view and the workspace chip follow the dashboard language (zh)",
+      "the project view and the workspace panel follow the dashboard language (zh)",
       zhSurfaces.includes("最近") &&
         zhSurfaces.includes("项目") &&
         zhSurfaces.includes("未归类") &&

@@ -139,6 +139,16 @@ var HermesBubbles = (() => {
     workspaceApply: "Use",
     workspaceSessionCwd: "This chat's directory",
     workspaceLoadFailed: "Could not list workspaces",
+    gitRefresh: "Refresh git status",
+    gitDetached: "Detached HEAD",
+    gitClean: "Working tree clean",
+    gitStaged: (n) => `${n} staged`,
+    gitUnstaged: (n) => `${n} unstaged`,
+    gitUntracked: (n) => `${n} untracked`,
+    gitConflicts: (n) => `${n} unmerged`,
+    gitAhead: (n) => `ahead by ${n}`,
+    gitBehind: (n) => `behind by ${n}`,
+    gitTruncated: "too many changes \u2014 counts are a lower bound",
     recent: "Recent",
     projects: "Projects",
     newChatInProject: "New chat here",
@@ -288,6 +298,16 @@ var HermesBubbles = (() => {
     workspaceApply: "\u4F7F\u7528",
     workspaceSessionCwd: "\u672C\u5BF9\u8BDD\u6240\u5728\u76EE\u5F55",
     workspaceLoadFailed: "\u65E0\u6CD5\u5217\u51FA\u5DE5\u4F5C\u533A",
+    gitRefresh: "\u5237\u65B0 Git \u72B6\u6001",
+    gitDetached: "\u6E38\u79BB HEAD",
+    gitClean: "\u5DE5\u4F5C\u533A\u5E72\u51C0",
+    gitStaged: (n) => `\u5DF2\u6682\u5B58 ${n}`,
+    gitUnstaged: (n) => `\u672A\u6682\u5B58 ${n}`,
+    gitUntracked: (n) => `\u672A\u8DDF\u8E2A ${n}`,
+    gitConflicts: (n) => `\u51B2\u7A81 ${n}`,
+    gitAhead: (n) => `\u9886\u5148\u8FDC\u7AEF ${n}`,
+    gitBehind: (n) => `\u843D\u540E\u8FDC\u7AEF ${n}`,
+    gitTruncated: "\u6539\u52A8\u8FC7\u591A\uFF0C\u8BA1\u6570\u4E3A\u4E0B\u9650",
     recent: "\u6700\u8FD1",
     projects: "\u9879\u76EE",
     newChatInProject: "\u5728\u6B64\u65B0\u5EFA\u5BF9\u8BDD",
@@ -419,6 +439,79 @@ var HermesBubbles = (() => {
     const minutes = Math.floor(seconds / 60);
     const rest = Math.round(seconds % 60);
     return `${minutes}m${rest}s`;
+  }
+
+  // src/core/gitinfo.ts
+  function parseGitStatus(status, root = "", truncated = false) {
+    const info = {
+      root: root ?? "",
+      oid: "",
+      branch: "",
+      detached: false,
+      upstream: "",
+      ahead: 0,
+      behind: 0,
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflicts: 0,
+      truncated: truncated === true
+    };
+    let sawHeader = false;
+    for (const line of (status ?? "").split(/\r?\n/)) {
+      if (!line) continue;
+      if (line.startsWith("# ")) {
+        sawHeader = true;
+        const rest = line.slice(2);
+        const space = rest.indexOf(" ");
+        const key = space === -1 ? rest : rest.slice(0, space);
+        const value = space === -1 ? "" : rest.slice(space + 1);
+        if (key === "branch.oid") info.oid = value === "(initial)" ? "" : value;
+        else if (key === "branch.head") {
+          if (value === "(detached)") info.detached = true;
+          else info.branch = value;
+        } else if (key === "branch.upstream") info.upstream = value;
+        else if (key === "branch.ab") {
+          const match = /^\+(\d+)\s+-(\d+)$/.exec(value.trim());
+          if (match) {
+            info.ahead = Number(match[1]);
+            info.behind = Number(match[2]);
+          }
+        }
+        continue;
+      }
+      const kind = line[0];
+      if (kind === "?") {
+        info.untracked += 1;
+        continue;
+      }
+      if (kind === "1" || kind === "2") {
+        const x = line[2] ?? ".";
+        const y = line[3] ?? ".";
+        if (x !== ".") info.staged += 1;
+        if (y !== ".") info.unstaged += 1;
+        continue;
+      }
+      if (kind === "u") {
+        info.conflicts += 1;
+        continue;
+      }
+    }
+    return sawHeader ? info : null;
+  }
+  function changedCount(info) {
+    return info.staged + info.unstaged + info.untracked + info.conflicts;
+  }
+  function gitBranchLabel(info) {
+    if (!info.detached) return info.branch || "HEAD";
+    return info.oid ? info.oid.slice(0, 7) : "HEAD";
+  }
+  function gitTargetDir(sessionCwd, pick, home) {
+    const open = (sessionCwd ?? "").trim();
+    if (open) return open;
+    const preference = (pick ?? "").trim();
+    if (preference) return preference;
+    return (home ?? "").trim();
   }
 
   // src/core/slash.ts
@@ -2093,6 +2186,32 @@ var HermesBubbles = (() => {
       this.persistWorkspace?.(next);
     }
     /**
+     * The user picked a directory in the workspace panel.
+     *
+     * `setWorkspace` alone is not enough: the page mints a session on load, in
+     * whatever directory was current then, and the backend stamps `cwd` on the row
+     * at `session.create` — a session can never be moved afterwards. So picking a
+     * repo and then typing used to deliver the message into the page-load session,
+     * i.e. straight back into the default directory. When the open tab has not been
+     * spoken into, replace it: there is nothing in it to lose.
+     *
+     * The pick also gets spent by the next create (see `ensureSession`), which is
+     * what makes a new chat you did not aim anywhere land in the default directory.
+     */
+    async pickWorkspace(cwd) {
+      const next = (cwd ?? "").trim();
+      if (next === this.state.workspace) return;
+      this.setWorkspace(next);
+      if (!next) return;
+      const key = this.state.activeKey;
+      const tab = key ? this.state.tabs.find((candidate) => candidate.key === key) : void 0;
+      if (!key || !tab) return;
+      const timeline = timelineOf(this.state, key);
+      if (timeline.items.length > 0 || timeline.meta.running) return;
+      this.setState(closeTab(this.state, key));
+      await this.newSession();
+    }
+    /**
      * Projects + discovered repos a fresh chat may start in.
      *
      * REST rather than RPC: `/api/chat/workspaces` is the same endpoint the
@@ -2104,6 +2223,29 @@ var HermesBubbles = (() => {
       const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
       const payload = await this.fetchJSON(path, { method: "GET" });
       return payload ?? {};
+    }
+    /**
+     * Git branch + working-tree state for one directory.
+     *
+     * This plugin's own host route (`plugin_api.py::/git`) rather than RPC: the
+     * gateway answers only a branch (`config.get{key:"project"}`) and probes the
+     * machine the gateway runs on. `null` means "render no badge" — not a repo, no
+     * git on PATH, or an older installed copy of the plugin with no `/git` route.
+     */
+    async gitInfo(dir) {
+      const path = (dir ?? "").trim();
+      if (!path) return null;
+      let payload;
+      try {
+        payload = await this.fetchJSON(
+          `/api/plugins/hermes-bubbles/git?path=${encodeURIComponent(path)}`,
+          { method: "GET" }
+        );
+      } catch {
+        return null;
+      }
+      if (!payload || payload.ok === false || !payload.is_repo) return null;
+      return parseGitStatus(payload.status ?? "", payload.root ?? "", payload.truncated === true);
     }
     // ── projects ─────────────────────────────────────────────────────────────
     /**
@@ -2173,9 +2315,11 @@ var HermesBubbles = (() => {
       if (!tab) return null;
       if (tab.runtimeId) return tab.runtimeId;
       const method = tab.storedId ? "session.resume" : "session.create";
-      const params = tab.storedId ? { session_id: tab.storedId, omit_messages: false } : { source: "desktop", ...createCwdParams(this.state.workspace) };
+      const workspace = this.state.workspace;
+      const params = tab.storedId ? { session_id: tab.storedId, omit_messages: false } : { source: "desktop", ...createCwdParams(workspace) };
       const snapshot = await this.client.request(method, params);
       this.setState(bindSnapshot(this.state, key, snapshot, { connected: this.connection === "open" }));
+      if (!tab.storedId && workspace) this.setWorkspace("");
       return snapshot.session_id ?? null;
     }
     markError(key, error) {
@@ -4050,6 +4194,56 @@ var HermesBubbles = (() => {
     return "calm";
   }
 
+  // src/ui/GitBadge.ts
+  function GitBadge(props) {
+    const { React } = props.sdk;
+    const info = props.info;
+    if (!info) return null;
+    const t = messagesFor(props.locale);
+    const changed = changedCount(info);
+    const counts = [];
+    if (info.staged) counts.push(t.gitStaged(info.staged));
+    if (info.unstaged) counts.push(t.gitUnstaged(info.unstaged));
+    if (info.untracked) counts.push(t.gitUntracked(info.untracked));
+    if (info.conflicts) counts.push(t.gitConflicts(info.conflicts));
+    const lines = [
+      info.root,
+      info.detached ? `${t.gitDetached} (${gitBranchLabel(info)})` : gitBranchLabel(info),
+      counts.length ? counts.join(" \xB7 ") : t.gitClean
+    ];
+    if (info.ahead) lines.push(t.gitAhead(info.ahead));
+    if (info.behind) lines.push(t.gitBehind(info.behind));
+    if (info.truncated) lines.push(t.gitTruncated);
+    lines.push(t.gitRefresh);
+    const title = lines.filter(Boolean).join("\n");
+    return React.createElement(
+      "button",
+      {
+        type: "button",
+        "data-hb": "git-badge",
+        title,
+        "aria-label": title,
+        className: "hb-git-badge",
+        style: { color: "var(--color-muted-foreground)" },
+        onClick: props.onRefresh
+      },
+      React.createElement("span", { className: "hb-git-mark" }, "\u2387"),
+      React.createElement("span", { className: "hb-git-branch" }, gitBranchLabel(info)),
+      changed > 0 ? React.createElement(
+        "span",
+        {
+          className: "hb-git-changed",
+          // Dirty is the one thing worth colouring: a warning tone the host
+          // actually defines (an undefined var here drops the declaration).
+          style: { color: "var(--color-warning)" }
+        },
+        info.truncated ? `${changed}+` : String(changed)
+      ) : null,
+      info.ahead > 0 ? React.createElement("span", { className: "hb-git-track" }, `\u2191${info.ahead}`) : null,
+      info.behind > 0 ? React.createElement("span", { className: "hb-git-track" }, `\u2193${info.behind}`) : null
+    );
+  }
+
   // src/ui/WorkspacePicker.tsx
   function WorkspacePicker(props) {
     const { sdk } = props;
@@ -4059,8 +4253,10 @@ var HermesBubbles = (() => {
     const [open, setOpen] = useState(false);
     const [customOpen, setCustomOpen] = useState(false);
     const [draft, setDraft] = useState(props.value);
-    const label = workspaceLabel(props.value, props.options, props.home, t.workspaceDefault);
-    const title = props.value ? `${t.workspaceForNewChat}: ${props.value}` : `${t.workspaceForNewChat}: ${t.workspaceDefault}`;
+    const live = props.current.trim();
+    const shown = live || props.value;
+    const label = workspaceLabel(shown, props.options, props.home, t.workspaceDefault);
+    const title = live ? `${t.workspaceSessionCwd}: ${live}` : props.value ? `${t.workspaceForNewChat}: ${props.value}` : `${t.workspaceForNewChat}: ${t.workspaceDefault}`;
     const choose = (cwd) => {
       props.onPick(cwd);
       setOpen(false);
@@ -4110,6 +4306,15 @@ var HermesBubbles = (() => {
         React.createElement("span", { className: "hb-workspace-caret" }, open ? "\u25BE" : "\u25B8"),
         React.createElement("span", { className: "hb-workspace-chip-label" }, label)
       ),
+      // Git state of that same directory, immediately to the right of the chip.
+      // Renders nothing outside a repository — see GitBadge.
+      React.createElement(GitBadge, {
+        sdk,
+        locale: props.locale,
+        info: props.git,
+        loading: props.gitLoading,
+        onRefresh: props.onRefreshGit
+      }),
       // Backdrop: clicking anywhere outside closes, without a document listener
       // that would have to be torn down on unmount.
       open ? React.createElement("div", {
@@ -4191,11 +4396,13 @@ var HermesBubbles = (() => {
           },
           React.createElement("span", { className: "hb-workspace-name" }, t.workspaceCustom)
         ),
-        // Read-only: the open chat cannot be moved, it was born in its cwd.
-        props.current && props.current !== props.value ? React.createElement(
+        // The chip names where the OPEN chat lives and cannot be changed; the
+        // rows above aim the NEXT one. Say so only while both exist, or the
+        // panel reads as "move this chat" and nothing appears to happen.
+        live ? React.createElement(
           "div",
-          { className: "hb-workspace-note", title: props.current },
-          `${t.workspaceSessionCwd}: ${abbreviateHomePath(props.current, props.home)}`
+          { className: "hb-workspace-note", "data-hb": "workspace-next-note" },
+          `${t.workspaceForNewChat}: ${props.value ? abbreviateHomePath(props.value, props.home) : t.workspaceDefault}`
         ) : null
       ) : null
     );
@@ -4600,6 +4807,9 @@ var HermesBubbles = (() => {
           home: props.workspaceHome,
           loading: props.workspaceLoading,
           failed: props.workspaceFailed,
+          git: props.git,
+          gitLoading: props.gitLoading,
+          onRefreshGit: props.onRefreshGit,
           onPick: props.onPickWorkspace,
           onRescan: props.onRescanWorkspaces
         }),
@@ -6030,6 +6240,9 @@ var HermesBubbles = (() => {
     const [workspaces, setWorkspaces] = useState(null);
     const [workspaceLoading, setWorkspaceLoading] = useState(false);
     const [workspaceFailed, setWorkspaceFailed] = useState(false);
+    const [git, setGit] = useState(null);
+    const [gitLoading, setGitLoading] = useState(false);
+    const [gitTick, setGitTick] = useState(0);
     const [historyMode, setHistoryMode] = useState("recent");
     const [projectTree, setProjectTree] = useState(null);
     const [projectsLoading, setProjectsLoading] = useState(false);
@@ -6107,10 +6320,44 @@ var HermesBubbles = (() => {
       void loadWorkspaces(false);
     }, [loadWorkspaces]);
     const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
-    const onPickWorkspace = useCallback((cwd) => controller.setWorkspace(cwd), [controller]);
+    const onPickWorkspace = useCallback(
+      (cwd) => {
+        controller.pickWorkspace(cwd).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      },
+      [controller]
+    );
     const onRescanWorkspaces = useCallback(() => {
       void loadWorkspaces(true);
     }, [loadWorkspaces]);
+    const gitDir = useMemo(
+      () => gitTargetDir(timeline.meta.cwd, state.workspace, workspaces?.home ?? ""),
+      [timeline.meta.cwd, state.workspace, workspaces?.home]
+    );
+    useEffect(() => {
+      let live = true;
+      if (!gitDir) {
+        setGit(null);
+        return () => {
+          live = false;
+        };
+      }
+      setGitLoading(true);
+      controller.gitInfo(gitDir).catch(() => null).then((info) => {
+        if (live) setGit(info);
+      }).finally(() => {
+        if (live) setGitLoading(false);
+      });
+      return () => {
+        live = false;
+      };
+    }, [controller, gitDir, gitTick]);
+    const refreshGit = useCallback(() => setGitTick((tick) => tick + 1), []);
+    const wasRunning = useRef(false);
+    useEffect(() => {
+      const running2 = timeline.meta.running;
+      if (wasRunning.current && !running2) setGitTick((tick) => tick + 1);
+      wasRunning.current = running2;
+    }, [timeline.meta.running]);
     const loadProjects = useCallback(() => {
       setProjectsLoading(true);
       return controller.projectsTree().then((tree2) => {
@@ -6426,6 +6673,9 @@ var HermesBubbles = (() => {
             workspaceHome: workspaces?.home ?? "",
             workspaceLoading,
             workspaceFailed,
+            git,
+            gitLoading,
+            onRefreshGit: refreshGit,
             onPickWorkspace,
             onRescanWorkspaces
           })

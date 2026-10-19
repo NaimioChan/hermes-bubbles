@@ -19,6 +19,7 @@ import { formatBytes, screenFiles } from "../core/attachments";
 import { fitComposerHeight } from "../core/autosize";
 import { metricChips, pressureTone } from "../core/metrics";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
+import type { GitInfo } from "../core/gitinfo";
 import type { WorkspaceOption } from "../core/workspaces";
 import {
   applyCompletion,
@@ -62,6 +63,10 @@ export interface ComposerProps {
   workspaceHome: string;
   workspaceLoading: boolean;
   workspaceFailed: boolean;
+  /** Git state of the workspace chip's directory; `null` = no badge. */
+  git: GitInfo | null;
+  gitLoading: boolean;
+  onRefreshGit: () => void;
   onPickWorkspace: (cwd: string) => void;
   onRescanWorkspaces: () => void;
   /** Text of the message being rewritten, or null when composing normally. */
@@ -548,6 +553,9 @@ export function Composer(props: ComposerProps) {
         home: props.workspaceHome,
         loading: props.workspaceLoading,
         failed: props.workspaceFailed,
+        git: props.git,
+        gitLoading: props.gitLoading,
+        onRefreshGit: props.onRefreshGit,
         onPick: props.onPickWorkspace,
         onRescan: props.onRescanWorkspaces,
       }),

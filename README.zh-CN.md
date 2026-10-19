@@ -82,8 +82,9 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 | 审批 / 选择题 | 已交付 | `approval` 与 `clarify` 两张卡；选择项取自服务端下发的 `choices`（不再自己写死），`multi_select` 合并成字符串提交，未答完不可提交 |
 | 界面语言 | 已交付 | 默认英语；跟随仪表盘的语言切换自动改变，无需刷新 |
 | 中途 steer | 已交付 | 运行中仍可发送；后端按 `prompt.submit` 的 busy 路径决定排队 / 插入 / 改向，页面把结果显示成一行提示 |
-| 工作区选择 | 已交付 | 输入框下面一枚小按钮，列出宿主上的项目与扫描到的 git 仓库（`GET /api/chat/workspaces`，与仪表盘自带选择器同源），可选默认目录或手打路径；选中的目录在下一次新建对话时通过 `session.create` 的 `{cwd, cwd_explicit}` 钉到会话上，按 profile 记住。已打开的会话不受影响，面板里另标出它自己的工作目录 |
+| 工作区选择 | 已交付 | 输入框下面一枚小按钮，列出宿主上的项目与扫描到的 git 仓库（`GET /api/chat/workspaces`，与仪表盘自带选择器同源），可选默认目录或手打路径。**按钮显示的是当前对话的实时目录**（`meta.cwd`），面板里的选择指向**下一个**新对话：选中后下一次 `session.create` 带着 `{cwd, cwd_explicit}` 把目录钉到新会话上，随即作废（没再选就落默认目录）。选的时候若当前页签还没说过话，会直接把它重开到新目录——已存在的会话后端不允许换目录 |
 | 项目分组 | 已交付 | 历史面板顶部两个页签「最近 / 项目」：项目视图读后端 `projects.tree`（桌面端侧栏同款），项目行给会话数与最近几条，展开只拉该项目的 `projects.project_sessions`；每个项目带一个「＋」＝把工作区设成该项目的文件夹并新开对话；没有工作区的会话归到「未归类」桶。泳道（分支/worktree）层被拍平 |
+| Git 信息 | 已交付 | 工作区按钮右边一枚小徽标，跟着**当前对话的目录**自动探测 git：分支（游离时显示短 sha）、改动数、领先/落后上游；不是仓库就**不渲染**。探测走插件自己的 `GET /api/plugins/hermes-bubbles/git?path=`（在宿主机上跑 `git status --porcelain=v2`，只读、4s 超时），解析在 `core/gitinfo.ts`；点一下徽标重探，一轮对话结束后也会自动重探 |
 
 ## 架构
 
@@ -102,6 +103,7 @@ src/
 │   ├── metrics.ts     用量指标格式化与压力分级
 │   ├── workspaces.ts  工作区列表整形、路径缩写、按 profile 的存储键
 │   ├── projects.ts    项目树整形：排序、拍平泳道、去重、新建对话用的路径
+│   ├── gitinfo.ts     `status --porcelain=v2` 解析、徽标文案、徽标描述哪个目录
 │   ├── i18n.ts        文案目录与时间戳格式化
 │   └── dedupe.ts      跨 socket 重复投递闸门
 ├── gateway/       传输
@@ -116,6 +118,7 @@ src/
 │   ├── HistoryPanel.ts 历史会话、改名/删除、状态灯
 │   ├── Composer.ts    输入框、斜杠菜单、附件托盘、指标条
 │   ├── WorkspacePicker.ts 输入框下方的工作区按钮与面板
+│   ├── GitBadge.ts    工作区按钮右边的 git 徽标（非仓库时不渲染）
 │   ├── ProjectList.tsx 历史面板的项目视图（项目行 + 展开的会话）
 │   ├── Bubble.ts      消息块与可展开的思考过程
 │   ├── Markdown.ts    用 React.createElement 渲染节点树
@@ -144,8 +147,8 @@ src/
 
 ## 验证
 
-- `npm test` — 512 项 / 24 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、工作区列表整形与存储、项目树排序与拍平、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写、工作区下发）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
-- `node scripts/verify.mjs` — 88 项，对**真实仪表盘**跑真模型真往返：插件接管 `/chat`、内置 xterm 消失、流式气泡、Markdown 结构与配色实测、页签与历史面板布局、改名/删除落库、切页后页签保持、状态灯、定位轨道、工作区按钮（选中→落存储→选回默认清空）、项目视图（页签切换、项目行、新建对话按钮、展开出会话、切回最近、中英双语切换）、空状态可输入等等。跑不了的项（模型这次没输出代码块）标 `SKIP` 而不是空转通过。
+- `npm test` — 534 项 / 25 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、工作区列表整形与存储、项目树排序与拍平、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写、工作区下发）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
+- `node scripts/verify.mjs` — 89 项，对**真实仪表盘**跑真模型真往返：插件接管 `/chat`、内置 xterm 消失、流式气泡、Markdown 结构与配色实测、页签与历史面板布局、改名/删除落库、切页后页签保持、状态灯、定位轨道、工作区按钮（新开页签→选仓库→会话被重开到该目录、偏好用掉即清空、Git 徽标跟着显示分支）、项目视图（页签切换、项目行、新建对话按钮、展开出会话、切回最近、中英双语切换）、空状态可输入等等。跑不了的项（模型这次没输出代码块）标 `SKIP` 而不是空转通过。
 
 - `node scripts/verify-clarify.mjs` — 审批/选择题卡片的按需检查，单独放：它依赖模型主动调用 `clarify`，进主验收会随机失败。
 

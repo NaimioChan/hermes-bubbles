@@ -4,16 +4,20 @@
  * Picks the host directory the NEXT new chat starts in. The value is a
  * controller-level preference (persisted per profile by the page), not a
  * property of the open tab: `session.create` stamps `cwd` on the session row
- * once, and a resumed session keeps the directory it was born in. So the panel
- * also shows the open chat's own directory, read-only, when it differs — that is
- * the answer to "why is this chat still in the old repo".
+ * once, and a resumed session keeps the directory it was born in.
+ *
+ * The chip itself is live: while a chat is open it names that chat's own
+ * directory (`meta.cwd`), because that is the answer to "where am I right now".
+ * The panel keeps aiming the next new chat, and says so when a chat is open.
  *
  * Styling: host classes for layout, `hb-` classes for anything the host bundle
  * does not ship (AGENTS.md 铁律 11 — an unknown class fails silently).
  */
 
 import { abbreviateHomePath, workspaceLabel, type WorkspaceOption } from "../core/workspaces";
+import type { GitInfo } from "../core/gitinfo";
 import { messagesFor, type Locale } from "../core/i18n";
+import { GitBadge } from "./GitBadge";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface WorkspacePickerProps {
@@ -27,6 +31,10 @@ export interface WorkspacePickerProps {
   home: string;
   loading: boolean;
   failed: boolean;
+  /** Git state of the chip's directory; `null` renders no badge (not a repo). */
+  git: GitInfo | null;
+  gitLoading: boolean;
+  onRefreshGit: () => void;
   onPick: (cwd: string) => void;
   onRescan: () => void;
 }
@@ -41,10 +49,17 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
   const [customOpen, setCustomOpen] = useState(false);
   const [draft, setDraft] = useState(props.value);
 
-  const label = workspaceLabel(props.value, props.options, props.home, t.workspaceDefault);
-  const title = props.value
-    ? `${t.workspaceForNewChat}: ${props.value}`
-    : `${t.workspaceForNewChat}: ${t.workspaceDefault}`;
+  const live = props.current.trim();
+  // The chip is LIVE: with a chat open it names that chat's own directory, not
+  // the pick for the next one. The pick only shows when there is nothing to be
+  // live about (a fresh draft), which is also the only time it can take effect.
+  const shown = live || props.value;
+  const label = workspaceLabel(shown, props.options, props.home, t.workspaceDefault);
+  const title = live
+    ? `${t.workspaceSessionCwd}: ${live}`
+    : props.value
+      ? `${t.workspaceForNewChat}: ${props.value}`
+      : `${t.workspaceForNewChat}: ${t.workspaceDefault}`;
 
   const choose = (cwd: string) => {
     props.onPick(cwd);
@@ -107,6 +122,16 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
       React.createElement("span", { className: "hb-workspace-caret" }, open ? "▾" : "▸"),
       React.createElement("span", { className: "hb-workspace-chip-label" }, label),
     ),
+
+    // Git state of that same directory, immediately to the right of the chip.
+    // Renders nothing outside a repository — see GitBadge.
+    React.createElement(GitBadge, {
+      sdk,
+      locale: props.locale,
+      info: props.git,
+      loading: props.gitLoading,
+      onRefresh: props.onRefreshGit,
+    }),
 
     // Backdrop: clicking anywhere outside closes, without a document listener
     // that would have to be torn down on unmount.
@@ -206,12 +231,14 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
                 React.createElement("span", { className: "hb-workspace-name" }, t.workspaceCustom),
               ),
 
-          // Read-only: the open chat cannot be moved, it was born in its cwd.
-          props.current && props.current !== props.value
+          // The chip names where the OPEN chat lives and cannot be changed; the
+          // rows above aim the NEXT one. Say so only while both exist, or the
+          // panel reads as "move this chat" and nothing appears to happen.
+          live
             ? React.createElement(
                 "div",
-                { className: "hb-workspace-note", title: props.current },
-                `${t.workspaceSessionCwd}: ${abbreviateHomePath(props.current, props.home)}`,
+                { className: "hb-workspace-note", "data-hb": "workspace-next-note" },
+                `${t.workspaceForNewChat}: ${props.value ? abbreviateHomePath(props.value, props.home) : t.workspaceDefault}`,
               )
             : null,
         )

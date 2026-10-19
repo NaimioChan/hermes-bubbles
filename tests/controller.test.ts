@@ -1139,9 +1139,11 @@ describe("workspace", () => {
       cwd: "/home/me/code/daw",
       cwd_explicit: true,
     });
-    // Restoring a stored pick is not a new pick: nothing to persist yet.
-    expect(persisted).toEqual([]);
-    expect(controller.getSnapshot().workspace).toBe("/home/me/code/daw");
+    // The page-load session consumed the restored pick: it rode on this create,
+    // and the preference is cleared so the NEXT chat starts at the default
+    // directory instead of inheriting the choice forever.
+    expect(persisted).toEqual([""]);
+    expect(controller.getSnapshot().workspace).toBe("");
   });
 
   it("sends no cwd at all when nothing is picked", async () => {
@@ -1233,5 +1235,131 @@ describe("projects", () => {
     await tick();
     socket.replyTo("projects.project_sessions", { project: null });
     expect(await pending).toBeNull();
+  });
+});
+
+describe("git badge", () => {
+  it("asks the plugin's host route for the directory, not the gateway", async () => {
+    const { controller } = await connectAndOpen();
+    const seen: string[] = [];
+    controller.setHttpFetcher((path) => {
+      seen.push(path);
+      return Promise.resolve({
+        ok: true,
+        is_repo: true,
+        root: "C:/work/repo",
+        status: ["# branch.oid abc1234", "# branch.head main", "? a.txt"].join("\n"),
+      });
+    });
+
+    const info = await controller.gitInfo("C:/work/repo");
+    expect(seen).toEqual(["/api/plugins/hermes-bubbles/git?path=C%3A%2Fwork%2Frepo"]);
+    expect(info?.branch).toBe("main");
+    expect(info?.untracked).toBe(1);
+  });
+
+  it("answers null (no badge) outside a repository", async () => {
+    const { controller } = await connectAndOpen();
+    controller.setHttpFetcher(() => Promise.resolve({ ok: true, is_repo: false }));
+    expect(await controller.gitInfo("C:/work/plain")).toBeNull();
+  });
+
+  it("answers null when the route is missing or the transport fails", async () => {
+    const { controller } = await connectAndOpen();
+    controller.setHttpFetcher(() => Promise.reject(new Error("404 Not Found")));
+    expect(await controller.gitInfo("C:/work/repo")).toBeNull();
+  });
+
+  it("does not call the host for an empty directory", async () => {
+    const { controller } = await connectAndOpen();
+    let called = false;
+    controller.setHttpFetcher(() => {
+      called = true;
+      return Promise.resolve({ ok: true, is_repo: true });
+    });
+    expect(await controller.gitInfo("   ")).toBeNull();
+    expect(called).toBe(false);
+  });
+});
+
+describe("picking a workspace", () => {
+  it("replaces an untouched session so the pick is the one that takes effect", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const createsBefore = socket.frames().filter((f) => f.method === "session.create").length;
+
+    const pending = controller.pickWorkspace("C:/work/repo");
+    await tick();
+    const last = socket.frames().filter((f) => f.method === "session.create").at(-1);
+    // The page-load session was minted in the default directory and can never be
+    // moved, so the pick has to reach the backend through a NEW create.
+    expect(socket.frames().filter((f) => f.method === "session.create")).toHaveLength(createsBefore + 1);
+    expect(last?.params).toMatchObject({ source: "desktop", cwd: "C:/work/repo", cwd_explicit: true });
+
+    socket.replyTo("session.create", {
+      session_id: "runtime-2",
+      stored_session_id: "20261019_101010_repo",
+      messages: [],
+      info: { model: "m", provider: "p", cwd: "C:/work/repo", running: false },
+    });
+    await pending;
+
+    expect(activeTimeline(controller.getSnapshot()).meta.cwd).toBe("C:/work/repo");
+    // The pick aimed this session and was spent: a new chat nobody aimed
+    // anywhere must start at the default directory, not inherit the repo.
+    expect(controller.getWorkspace()).toBe("");
+  });
+
+  it("does not replace a session that already has content", async () => {
+    const { controller, socket } = await connectAndOpen();
+    socket.event("message.start", {});
+    socket.event("message.delta", { text: "已有内容" });
+    socket.event("message.complete", { status: "ok", text: "已有内容" });
+    await tick();
+
+    const createsBefore = socket.frames().filter((f) => f.method === "session.create").length;
+    await controller.pickWorkspace("C:/work/repo");
+    await tick();
+
+    expect(socket.frames().filter((f) => f.method === "session.create")).toHaveLength(createsBefore);
+    // The pick still stands for the next new chat.
+    expect(controller.getWorkspace()).toBe("C:/work/repo");
+  });
+
+  it("never re-homes a resumed session (its cwd is pinned by the backend)", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const opening = controller.openStoredSession("20261015_old", "旧对话");
+    await tick();
+    socket.replyTo("session.resume", {
+      session_id: "runtime-old",
+      stored_session_id: "20261015_old",
+      messages: [{ role: "user", text: "以前说的话" }],
+      info: { model: "m", provider: "p", cwd: "C:/old/place", running: false },
+    });
+    await opening;
+
+    const createsBefore = socket.frames().filter((f) => f.method === "session.create").length;
+    await controller.pickWorkspace("C:/work/repo");
+    await tick();
+
+    expect(socket.frames().filter((f) => f.method === "session.create")).toHaveLength(createsBefore);
+    expect(controller.getWorkspace()).toBe("C:/work/repo");
+  });
+
+  it("clears the pick after the session it aimed is created", async () => {
+    const persisted: string[] = [];
+    const { controller, socket } = await connectAndOpen({ persistWorkspace: (cwd) => persisted.push(cwd) });
+    const pending = controller.pickWorkspace("C:/work/repo");
+    await tick();
+    socket.replyTo("session.create", {
+      session_id: "runtime-3",
+      stored_session_id: "20261019_101011_repo",
+      messages: [],
+      info: { model: "m", provider: "p", cwd: "C:/work/repo", running: false },
+    });
+    await pending;
+    // Persisting "" removes the profile's stored key: the next chat that nobody
+    // aimed anywhere starts at the default directory.
+    expect(persisted).toEqual(["C:/work/repo", ""]);
+    expect(controller.getWorkspace()).toBe("");
   });
 });

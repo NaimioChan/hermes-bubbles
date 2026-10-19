@@ -35,6 +35,7 @@ import { parseCommandInput, parseDispatch, type DispatchResult } from "../core/s
 import type { TurnNotice } from "../core/notify";
 import type { TimelineItem } from "../core/types";
 import { createCwdParams, type WorkspacesPayload } from "../core/workspaces";
+import { parseGitStatus, type GitInfo, type GitStatusPayload } from "../core/gitinfo";
 import type { ProjectNode, ProjectsTree } from "../core/projects";
 import type { ServerRequest } from "../gateway/channel";
 import { GatewayClient, type ConnectionState } from "../gateway/client";
@@ -244,6 +245,38 @@ export class ChatController {
   }
 
   /**
+   * The user picked a directory in the workspace panel.
+   *
+   * `setWorkspace` alone is not enough: the page mints a session on load, in
+   * whatever directory was current then, and the backend stamps `cwd` on the row
+   * at `session.create` — a session can never be moved afterwards. So picking a
+   * repo and then typing used to deliver the message into the page-load session,
+   * i.e. straight back into the default directory. When the open tab has not been
+   * spoken into, replace it: there is nothing in it to lose.
+   *
+   * The pick also gets spent by the next create (see `ensureSession`), which is
+   * what makes a new chat you did not aim anywhere land in the default directory.
+   */
+  async pickWorkspace(cwd: string): Promise<void> {
+    const next = (cwd ?? "").trim();
+    if (next === this.state.workspace) return;
+    this.setWorkspace(next);
+    if (!next) return;
+
+    const key = this.state.activeKey;
+    const tab = key ? this.state.tabs.find((candidate) => candidate.key === key) : undefined;
+    if (!key || !tab) return;
+    // An untouched conversation has nothing to lose: neither its rows nor its
+    // directory were ever used. Proof of use is content or a running turn, not
+    // `storedId` — every created session carries one.
+    const timeline = timelineOf(this.state, key);
+    if (timeline.items.length > 0 || timeline.meta.running) return;
+
+    this.setState(closeTab(this.state, key));
+    await this.newSession();
+  }
+
+  /**
    * Projects + discovered repos a fresh chat may start in.
    *
    * REST rather than RPC: `/api/chat/workspaces` is the same endpoint the
@@ -255,6 +288,30 @@ export class ChatController {
     const path = scan ? "/api/chat/workspaces?scan=1" : "/api/chat/workspaces";
     const payload = await this.fetchJSON<WorkspacesPayload>(path, { method: "GET" });
     return payload ?? {};
+  }
+
+  /**
+   * Git branch + working-tree state for one directory.
+   *
+   * This plugin's own host route (`plugin_api.py::/git`) rather than RPC: the
+   * gateway answers only a branch (`config.get{key:"project"}`) and probes the
+   * machine the gateway runs on. `null` means "render no badge" — not a repo, no
+   * git on PATH, or an older installed copy of the plugin with no `/git` route.
+   */
+  async gitInfo(dir: string): Promise<GitInfo | null> {
+    const path = (dir ?? "").trim();
+    if (!path) return null;
+    let payload: GitStatusPayload;
+    try {
+      payload = await this.fetchJSON<GitStatusPayload>(
+        `/api/plugins/hermes-bubbles/git?path=${encodeURIComponent(path)}`,
+        { method: "GET" },
+      );
+    } catch {
+      return null;
+    }
+    if (!payload || payload.ok === false || !payload.is_repo) return null;
+    return parseGitStatus(payload.status ?? "", payload.root ?? "", payload.truncated === true);
   }
 
   // ── projects ─────────────────────────────────────────────────────────────
@@ -337,11 +394,16 @@ export class ChatController {
     if (tab.runtimeId) return tab.runtimeId;
 
     const method = tab.storedId ? "session.resume" : "session.create";
+    const workspace = this.state.workspace;
     const params = tab.storedId
       ? { session_id: tab.storedId, omit_messages: false }
-      : { source: "desktop", ...createCwdParams(this.state.workspace) };
+      : { source: "desktop", ...createCwdParams(workspace) };
     const snapshot = await this.client.request<Record<string, unknown>>(method, params);
     this.setState(bindSnapshot(this.state, key, snapshot as never, { connected: this.connection === "open" }));
+    // The pick aimed THIS session, and the backend pinned its cwd: clear it so
+    // the chip falls back to the session's own directory and a new chat you did
+    // not aim anywhere starts at the default instead of inheriting the choice.
+    if (!tab.storedId && workspace) this.setWorkspace("");
     return (snapshot as { session_id?: string }).session_id ?? null;
   }
 

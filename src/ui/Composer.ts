@@ -17,6 +17,7 @@
 import type { Attachment, Rejection } from "../core/attachments";
 import { formatBytes, screenFiles } from "../core/attachments";
 import { fitComposerHeight } from "../core/autosize";
+import { SESSION_CONTEXT_MIME, insertContext } from "../core/context";
 import { metricChips, pressureTone } from "../core/metrics";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
 import type { GitInfo } from "../core/gitinfo";
@@ -72,6 +73,14 @@ export interface ComposerProps {
   /** Text of the message being rewritten, or null when composing normally. */
   editingText?: string | null;
   onCancelEdit?: () => void;
+  /**
+   * One-shot request to put text in the draft (a session pulled in as context).
+   * `seq` is what makes it one-shot: the page bumps it for every insert, and the
+   * composer applies an entry exactly once.
+   */
+  insertion?: { seq: number; text: string } | null;
+  /** A stored session row was dropped on the composer; raw drag payload. */
+  onDropSession?: (payload: string) => void;
 }
 
 /**
@@ -108,6 +117,8 @@ export function Composer(props: ComposerProps) {
   const [menuDismissed, setMenuDismissed] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /** Highest `props.insertion.seq` already written into the draft. */
+  const appliedInsertion = useRef(0);
 
   /**
    * Size the box to its content.
@@ -164,6 +175,25 @@ export function Composer(props: ComposerProps) {
       el.setSelectionRange(props.editingText!.length, props.editingText!.length);
     });
   }, [props.editingText]);
+
+  // A session pulled in from the history panel lands here. The block goes above
+  // whatever was already typed (see `insertContext`), and the seq guard makes
+  // re-renders harmless: the same entry never appends twice.
+  useEffect(() => {
+    const entry = props.insertion;
+    if (!entry || entry.seq === appliedInsertion.current) return;
+    appliedInsertion.current = entry.seq;
+    const next = insertContext(text, entry.text);
+    setText(next);
+    setCaret(next.length);
+    setMenuDismissed(true);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.length, next.length);
+    });
+  }, [props.insertion, text]);
 
   // Reset the highlight whenever the candidate list changes shape.
   useEffect(() => {
@@ -247,6 +277,15 @@ export function Composer(props: ComposerProps) {
 
   const onDrop = useCallback(
     (event: { dataTransfer?: DataTransfer; preventDefault: () => void }) => {
+      // A history row dropped here (see `core/context.ts`). Checked before files:
+      // a session drag carries no file list, but a file drag must never be read
+      // as a session id.
+      const session = event.dataTransfer?.getData?.(SESSION_CONTEXT_MIME) ?? "";
+      if (session) {
+        event.preventDefault();
+        props.onDropSession?.(session);
+        return;
+      }
       const files = Array.from(event.dataTransfer?.files ?? []);
       if (!files.length) return;
       event.preventDefault();

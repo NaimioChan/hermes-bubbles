@@ -6,6 +6,7 @@
  */
 
 import { messagesFor, type Locale } from "../core/i18n";
+import { SESSION_CONTEXT_MIME, sessionDragPayload } from "../core/context";
 import type { HermesPluginSdk } from "./sdk";
 import { ProjectList, type ProjectListProps } from "./ProjectList";
 
@@ -45,6 +46,8 @@ export interface HistoryPanelProps {
   onOpen: (id: string, title: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  /** Put this session's transcript into the composer draft. */
+  onUseAsContext: (id: string, title: string) => void;
   onRefresh: () => void;
   onClose: () => void;
 }
@@ -182,6 +185,22 @@ export function HistoryPanel(props: HistoryPanelProps) {
                 {
                   key: session.id,
                   className: "cursor-pointer px-2 py-1.5 text-xs",
+                  // The row is also a drag source: dropping it on the composer
+                  // attaches its transcript as context (see `core/context.ts`).
+                  draggable: true,
+                  onDragStart: (event: {
+                    dataTransfer?: DataTransfer;
+                    stopPropagation: () => void;
+                  }) => {
+                    event.stopPropagation();
+                    const payload = sessionDragPayload({ id: session.id, title: session.title });
+                    if (event.dataTransfer) {
+                      event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
+                      // A plain-text target (or the OS) still gets something usable.
+                      event.dataTransfer.setData("text/plain", payload);
+                      event.dataTransfer.effectAllowed = "copy";
+                    }
+                  },
                   style: {
                     borderRadius: "calc(var(--radius) * 0.6)",
                     color: "var(--color-card-foreground)",
@@ -264,6 +283,21 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   React.createElement(
                     "span",
                     { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        title: t.useAsContext,
+                        "aria-label": t.useAsContext,
+                        "data-hb": "session-to-context",
+                        className: "hb-action-btn",
+                        onClick: (event: { stopPropagation: () => void }) => {
+                          event.stopPropagation();
+                          props.onUseAsContext(session.id, session.title);
+                        },
+                      },
+                      "⇩",
+                    ),
                     React.createElement(
                       "button",
                       {

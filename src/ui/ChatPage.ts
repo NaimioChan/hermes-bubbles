@@ -12,6 +12,7 @@
  */
 
 import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
+import { parseSessionDrop } from "../core/context";
 import { messagesFor, type Locale } from "../core/i18n";
 import { gitTargetDir, type GitInfo } from "../core/gitinfo";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
@@ -152,6 +153,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // Set while an existing user message is being rewritten: Send then truncates
   // and resubmits instead of appending.
   const [editing, setEditing] = useState<{ itemId: string; text: string } | null>(null);
+  // One-shot text pushed into the composer (a history session pulled in as
+  // context). `seq` is the identity: the composer applies each entry once.
+  const [insertion, setInsertion] = useState<{ seq: number; text: string } | null>(null);
+  const insertionSeq = useRef(0);
   // Desktop notifications: the switch is persisted, the permission is the
   // browser's, and the two are independent (a blocked browser keeps the switch
   // on but nothing fires).
@@ -594,6 +599,41 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     [controller, refreshStored],
   );
 
+  /**
+   * Pull a stored session's transcript into the composer as context.
+   *
+   * Read-only on the backend (`session.history`), so it never makes that row the
+   * active session. A session with no prose (tool-only, or freshly created)
+   * reports that instead of inserting a bare header.
+   */
+  const onUseAsContext = useCallback(
+    (id: string, title: string) => {
+      controller
+        .contextForStoredSession(id, title)
+        .then((block) => {
+          if (!block.text) {
+            setError(t.contextEmpty);
+            return;
+          }
+          insertionSeq.current += 1;
+          setInsertion({ seq: insertionSeq.current, text: block.text });
+        })
+        .catch((err: unknown) =>
+          setError(t.contextFailed(err instanceof Error ? err.message : String(err))),
+        );
+    },
+    [controller, t],
+  );
+
+  /** A history row dropped on the composer carries `{id, title}`. */
+  const onDropSession = useCallback(
+    (payload: string) => {
+      const ref = parseSessionDrop(payload);
+      if (ref) onUseAsContext(ref.id, ref.title);
+    },
+    [onUseAsContext],
+  );
+
   // ── per-message actions ─────────────────────────────────────────────────
 
   const onCopy = useCallback((text: string) => {
@@ -782,6 +822,8 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           onOpenModelPicker: openModelPicker,
           onPickReasoning,
           onError: setError,
+          insertion,
+          onDropSession,
           workspace: state.workspace,
           workspaceCurrent: timeline.meta.cwd,
           workspaceOptions: wsOptions,
@@ -834,6 +876,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         onRefresh: refreshStored,
         onRename,
         onDelete,
+        onUseAsContext,
         onClose: () => setHistoryOpen(false),
       }),
     ),

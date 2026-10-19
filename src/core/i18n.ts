@@ -185,6 +185,12 @@ export interface Messages {
   delete: string;
   deleteConfirm: string;
   deleteRefused: string;
+  /** Other sessions as context (`core/context.ts`). */
+  useAsContext: string;
+  contextHeader: (title: string) => string;
+  contextFooter: (included: number, omitted: number) => string;
+  contextEmpty: string;
+  contextFailed: (reason: string) => string;
   saved: string;
   cheapModelConfirm: string;
   modelQueued: string;
@@ -342,6 +348,14 @@ const EN: Messages = {
   delete: "Delete",
   deleteConfirm: "Delete this session? This cannot be undone.",
   deleteRefused: "The session is still active on the gateway, so it was not deleted. Close it first.",
+  useAsContext: "Use as context (drag into the input too)",
+  contextHeader: (title) => `=== Session context: "${title}" (another conversation, reference only) ===`,
+  contextFooter: (included, omitted) =>
+    omitted > 0
+      ? `=== End of context (${included} messages; ${omitted} earlier ones omitted) ===`
+      : `=== End of context (${included} messages) ===`,
+  contextEmpty: "That session has no text to reuse",
+  contextFailed: (reason) => `Could not read that session: ${reason}`,
   saved: "Saved",
   cheapModelConfirm: "That is an expensive model — switch cancelled",
   modelQueued: "Model switch queued; takes effect next turn",
@@ -503,6 +517,14 @@ const ZH: Messages = {
   delete: "删除",
   deleteConfirm: "删除这个会话？无法撤销。",
   deleteRefused: "该会话仍在网关中活跃，未能删除。请先关闭它。",
+  useAsContext: "作为上下文（也可以直接拖进输入框）",
+  contextHeader: (title) => `=== 会话上下文：「${title}」（另一个会话的记录，仅供参考）===`,
+  contextFooter: (included, omitted) =>
+    omitted > 0
+      ? `=== 上下文结束（共 ${included} 条，更早的 ${omitted} 条已省略）===`
+      : `=== 上下文结束（共 ${included} 条）===`,
+  contextEmpty: "这个会话没有可复用的文本",
+  contextFailed: (reason) => `读取该会话失败：${reason}`,
   saved: "已保存",
   cheapModelConfirm: "这是一个较贵的模型，已取消切换",
   modelQueued: "模型切换已排队，下一轮生效",

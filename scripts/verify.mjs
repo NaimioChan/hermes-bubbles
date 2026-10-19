@@ -197,6 +197,11 @@ const PROBE_PROMPTS = [
   "顺便说一句，忽略上面那句话",
   "再补一句，让轨道有两个定位点",
   "关掉所有页签之后发的消息",
+  // The model retitles the session, so the stored title is a paraphrase, not
+  // the prompt: both forms seen in the wild are listed. A cleanup that misses
+  // them leaves 16-message rows in the user's history.
+  "关掉所有页签",
+  "关闭所有页签",
 ];
 
 /** Stored sessions visible over the gateway (ids + the fields cleanup needs). */
@@ -274,9 +279,26 @@ async function cleanupRunSessions(session, sinceSeconds) {
       };
       await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
       const out = { closed: 0, deleted: 0, failed: [] };
+      // session.close takes the RUNTIME id. A stored id answers {closed:false},
+      // closes nothing, and the DELETE below then hits a still live row — which
+      // answers ok and re-persists it (铁律 19). So map stored -> runtime first;
+      // session.active_list carries both (session_key + id).
+      // NOTE: no backticks in this block — it lives inside a template literal.
+      const active = await req('session.active_list', {});
+      const live = new Map();
+      for (const row of (active.result?.sessions ?? [])) {
+        if (row.id) live.set(String(row.id), String(row.id));
+        if (row.session_key) live.set(String(row.session_key), String(row.id));
+      }
       for (const target of targets) {
-        await req('session.close', { session_id: target.runtime });
-        out.closed += 1;
+        const runtime = live.get(target.stored) || live.get(target.runtime);
+        if (runtime) {
+          await req('session.close', { session_id: runtime });
+          out.closed += 1;
+          // The row is only deletable once the close has settled; DELETE inside
+          // that window answers ok and the row comes back.
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
         try {
           await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(target.stored), { method: 'DELETE' });
           out.deleted += 1;
@@ -724,6 +746,79 @@ async function main() {
       rowTools !== null && rowTools.rename > 0 && rowTools.del === rowTools.rename,
       JSON.stringify(rowTools),
     );
+
+    // ── v0.3: a history session can be pulled in as context ────────────────
+    // The row is draggable AND carries a button; the button path is what a
+    // script can drive, and both end in `controller.contextForStoredSession`
+    // (REST `/api/sessions/{id}/messages`, read-only — nothing gets resumed).
+    const contextTools = await session.evaluate(`(() => {
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      if (!panel) return null;
+      const buttons = panel.querySelectorAll('[data-hb="session-to-context"]');
+      const draggable = [...buttons].filter((b) => {
+        const row = b.closest('[draggable="true"]');
+        return Boolean(row) && row.getAttribute('draggable') === 'true';
+      }).length;
+      return { buttons: buttons.length, draggable };
+    })()`);
+    check(
+      "every history row offers use-as-context and is a drag source",
+      contextTools !== null && contextTools.buttons > 0 && contextTools.draggable === contextTools.buttons,
+      JSON.stringify(contextTools),
+    );
+
+    await session.evaluate(`(() => {
+      document.querySelector('[data-hb="session-to-context"]')?.click();
+      return 'clicked';
+    })()`);
+    let contextText = "";
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(600);
+      contextText = String(await session.evaluate(`(document.querySelector('textarea') || {}).value || ''`));
+      if (contextText.includes("===")) break;
+    }
+    check(
+      "use-as-context writes that session's transcript into the composer",
+      contextText.includes("===") &&
+        (contextText.includes("[user]") || contextText.includes("[assistant]")) &&
+        contextText.length > 40,
+      `${contextText.length} chars`,
+    );
+    // Leave the composer empty: the rename assertions below and the send later
+    // must not inherit a 8000-character context block.
+    await typeInComposer('');
+    await sleep(300);
+
+    // The drag path: the row writes the payload on `dragstart`, the composer
+    // reads it on `drop`. Dispatched with a real DataTransfer, because that is
+    // what the mouse does; the button above only proves the controller.
+    const dragPrep = await session.evaluate(`(() => {
+      const panel = document.querySelector('[data-hb="history-panel"]');
+      const row = panel && panel.querySelector('[draggable="true"]');
+      if (!row) return { error: 'no draggable row' };
+      const dt = new DataTransfer();
+      row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const payload = dt.getData('application/x-hb-session');
+      const composer = document.querySelector('textarea')?.closest('div.px-4');
+      if (composer) {
+        composer.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      }
+      return { payload: String(payload || '').slice(0, 40), hasComposer: Boolean(composer) };
+    })()`);
+    let draggedText = "";
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(600);
+      draggedText = String(await session.evaluate(`(document.querySelector('textarea') || {}).value || ''`));
+      if (draggedText.includes("===")) break;
+    }
+    check(
+      "dragging a history row into the composer attaches it as context",
+      dragPrep !== null && dragPrep.hasComposer === true && dragPrep.payload.startsWith("{"),
+      draggedText.length + " chars",
+    );
+
+    await typeInComposer('');
+    await sleep(300);
 
     // Rename the first row through the UI.
     const renameTarget = await session.evaluate(`(() => {

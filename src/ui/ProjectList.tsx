@@ -11,6 +11,7 @@
  */
 
 import { messagesFor, type Locale } from "../core/i18n";
+import { SESSION_CONTEXT_MIME, sessionDragPayload } from "../core/context";
 import { lastActiveOf, type ProjectRow, type ProjectSessionRow } from "../core/projects";
 import type { HermesPluginSdk } from "./sdk";
 import { relativeTime } from "./HistoryPanel";
@@ -60,6 +61,19 @@ export function ProjectList(props: ProjectListProps) {
         "data-hb": "project-session",
         className: "hb-proj-session",
         title: row.preview || title,
+        // Drag source, same payload as the Recent tab: drop on the composer to
+        // pull this transcript in as context. No hover button here — this view
+        // deliberately keeps its rows to open/expand.
+        draggable: true,
+        onDragStart: (event: { dataTransfer?: DataTransfer; stopPropagation: () => void }) => {
+          event.stopPropagation();
+          const payload = sessionDragPayload({ id: row.id, title: row.title || "" });
+          if (event.dataTransfer) {
+            event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
+            event.dataTransfer.setData("text/plain", payload);
+            event.dataTransfer.effectAllowed = "copy";
+          }
+        },
         style: { background: isActive ? "var(--color-muted)" : "transparent" },
         onClick: () => props.onOpen(row.id),
       },

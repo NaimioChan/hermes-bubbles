@@ -23,6 +23,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Composer auto-grow | Done | The input box follows the draft's height (32–192px) and then scrolls, instead of staying one row and hiding everything after the first line |
 | Session history | Done | `session.history` projects into the same bubble structure, so a reload keeps the conversation |
 | Session management | Done | Rename and delete from the history panel, which also shows a status lamp: lit = open in a tab, pulsing = running |
+| Session as context | Done | Every history row has a ⇩ button, and the row itself can be dragged into the composer: the plugin reads that session's transcript (REST `/api/sessions/{id}/messages`, read-only — it never becomes the active session), folds it into a bounded plain-text block (newest messages first, per-message cap, tool and hidden rows skipped) and puts it in the draft, ready for your own question above/below it |
 | Tabs survive navigation | Done | Switch to Config and back — open tabs and in-flight replies are still there |
 | Approval & clarify cards | Done | Both render from the server's own `choices`; `multi_select` is joined into the string the wire expects; one option per line |
 | Message actions | Done | Timestamp, branch in new chat, copy, regenerate — matching the desktop app |
@@ -88,6 +89,7 @@ src/
 │   ├── types.ts        timeline model (bubbles, tool cards, notices, usage)
 │   ├── reduce.ts       events → timeline
 │   ├── history.ts      stored rows → timeline
+│   ├── context.ts      another session → a bounded prompt block, plus the drag payload
 │   ├── sessions.ts     multi-session store: tabs, event routing, history replay
 │   ├── markdown.ts     Markdown → node tree (never HTML)
 │   ├── rail.ts         locator-rail geometry
@@ -128,9 +130,9 @@ The protocol is Hermes' internal implementation with no OpenAPI description, so 
 ## Verification
 
 ```bash
-npm test                  # 431 unit tests, 21 files, no browser
+npm test                  # 548 unit tests, 26 files, no browser
 npm run typecheck         # tsc --noEmit
-node scripts/verify.mjs   # 72 checks against a real dashboard (needs one on 9119)
+node scripts/verify.mjs   # 93 checks against a real dashboard (needs one on 9119)
 node scripts/audit-classes.mjs
 ```
 

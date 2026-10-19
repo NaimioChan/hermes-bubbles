@@ -8,6 +8,17 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-19 12:14 · hermes · 右侧会话列表可以把会话拖进输入框当上下文
+
+- 背景：用户要「从右侧会话列表把会话作为上下文拖入当前会话，拖拽或菜单哪个方便做哪个」。两条路都做了：悬停按钮 `⇩`（`data-hb="session-to-context"`）与整行拖拽（`application/x-hb-session`，载荷 `{id,title}` JSON），终点都是同一个方法。
+- 协议发现（重要）：`session.history` **只认活着的 runtime 会话**——拿 stored id 调会回 `4001 session not found`（实测 0.22.2 / `d923a5eb487`），契约文档原来写的「两者都收」是错的。要在不 resume 的前提下读存量会话，得用 REST `GET /api/sessions/{id}/messages?limit=200&order=latest`（返回 `role` / `content` / `display_content` / `display_kind`，没有 `text`）。`session.resume` 不能用：它会让那一行变成后端活跃会话，撞上铁律 19 的删除限制。第一条实现走 RPC，验收 92 项里唯一失败的就是它，改 REST 后通过。
+- 改：新增 `src/core/context.ts`（`sessionContextBlock`：只留 user/assistant 非隐藏行，从最新往前取到 8000 字符、单条 1500 上限、附中英框题与省略计数；`textOf` 同时认 `text` / `content`（字符串或 parts）/ `display_content`；`sessionDragPayload` / `parseSessionDrop` / `insertContext`）；`app/controller.ts` 新增 `contextForStoredSession`（走 `fetchJSON`）；`ui/HistoryPanel.ts` 行加 `draggable` + dragstart + `⇩` 按钮；`ui/ProjectList.tsx` 会话行也成拖拽源（项目视图不加按钮，保持「只用来找和打开」）；`ui/Composer.ts` 新增 `insertion`（seq 一次性写入）与 `onDropSession`，上下文块插在草稿**上方**；`ui/ChatPage.ts` 接线；`core/i18n.ts` 5 条文案（en+zh）。
+- 验收脚本：新增 3 项（每行都有 ⇩ 且是拖拽源、点按钮后输入框出现记录、用真 `DragEvent`+`DataTransfer` 走拖拽路径），93 项。顺手修了两个存量验收问题：①清理只按 `session.close` 的 `runtime` 字段，而 `session.list` 不返回 `resolved_id`，于是 close 实际拿到 stored id 回 `{closed:false}`、DELETE 撞活跃行返回 ok 却删不掉——改成先 `session.active_list` 建 stored→runtime 映射再 close，并在 close 与 DELETE 之间等 400ms；②模型会把空状态那条探针改写成「关闭所有页签后…」，清理的文案匹配放宽到「关掉/关闭所有页签」。清理掉的 3 条历史残留会话（`120202_2cc022`、`115407_7b3ad5` + 级联子会话）已用 REST 删干净。
+- 文档：`docs/01-protocol-contract.md` 改 `session.history` 一节（live-only）并记 REST 取舍；`GLOSSARY.md` 加「上下文块」；`AGENTS.md` 铁律 15 钩子清单加 `session-to-context`；两份 README 能力表、文件树与项数（550 单测 / 93 验收）。
+- 验证：`tsc --noEmit` 干净；`vitest run` 550 passed / 26 文件（新增 `tests/context.test.ts` 13 条、controller 3 条）；`audit-classes.mjs` 177/177；`verify.mjs` 93/93 且 `cleanup: 3 → closed:3, deleted:3 ; still listed: 0`；另用 `.cache/probe-context.mjs` 与 `.cache/probe-drag.mjs` 单独确认「点 ⇩ 后输入框 365 字符」和「合成拖拽后同样 365 字符」。
+- 遗留：没有给「插入的上下文」做 UI 上的可折叠卡片（它就是输入框里的文字，改起来直接）；大会话的上限是固定 8000 字符，没有按模型上下文窗口自适应；项目视图只有拖拽，没有 ⇩ 按钮（有意）。
+
+
 ## 2026-10-19 11:44 · hermes · 验收脚本清理现场 + 修掉被改写的会话标题
 
 - 背景：用户发现会话历史里有一堆「回复收到」和 `verify-…` 标题。查库确认两件事：①「回复收到」是 `scripts/verify.mjs` 每跑一轮 mint 的测试会话（页面加载、新页签、空状态发送、选目录重开各一个），累计 137 条；②`verify-renamed-…` 是改名断言干的——它一律改「历史面板第一行」，而那行是最新的真实会话，于是 15 个真对话的标题被换成 `verify-renamed-mv…`。

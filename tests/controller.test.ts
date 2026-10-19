@@ -884,6 +884,53 @@ describe("stored-session management", () => {
   });
 });
 
+describe("session context", () => {
+  it("reads a stored transcript over REST, resuming nothing", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const calls: { path: string; method: string }[] = [];
+    controller.setHttpFetcher((path, init) => {
+      calls.push({ path, method: String(init.method) });
+      return Promise.resolve({
+        messages: [
+          { role: "user", content: "why does it fail" },
+          { role: "tool", content: '{"output":"raw"}' },
+          { role: "assistant", content: "because the socket was not open yet" },
+          { role: "assistant", content: "hidden bit", display_kind: "hidden" },
+        ],
+      });
+    });
+
+    const block = await controller.contextForStoredSession("20261018_100000_zzz", "Older work");
+
+    expect(calls).toEqual([
+      { path: "/api/sessions/20261018_100000_zzz/messages?limit=200&order=latest", method: "GET" },
+    ]);
+    // `session.history` is live-only (4001 for a stored id) and `resume` would
+    // make the pointed-at row the backend's active session. Neither belongs here.
+    const methods = socket.frames().map((frame) => frame.method);
+    expect(methods).not.toContain("session.resume");
+    expect(methods).not.toContain("session.history");
+    expect(block.text).toContain("Older work");
+    expect(block.text).toContain("why does it fail");
+    expect(block.text).toContain("socket was not open yet");
+    expect(block.text).not.toContain("raw");
+    expect(block.text).not.toContain("hidden bit");
+    expect(block.included).toBe(2);
+  });
+
+  it("reports an empty block for a session with nothing reusable", async () => {
+    const { controller } = await connectAndOpen();
+    controller.setHttpFetcher(() => Promise.resolve({ messages: [] }));
+    expect((await controller.contextForStoredSession("20261018_110000_empty")).text).toBe("");
+  });
+
+  it("surfaces a REST failure instead of inserting a placeholder", async () => {
+    const { controller } = await connectAndOpen();
+    controller.setHttpFetcher(() => Promise.reject(new Error("404 Not Found")));
+    await expect(controller.contextForStoredSession("missing")).rejects.toThrow(/404/);
+  });
+});
+
 describe("edit a sent message", () => {
   /** A finished turn whose user row carries a durable id. */
   async function withDurableTurn() {

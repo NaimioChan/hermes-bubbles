@@ -192,6 +192,11 @@ var HermesBubbles = (() => {
     delete: "Delete",
     deleteConfirm: "Delete this session? This cannot be undone.",
     deleteRefused: "The session is still active on the gateway, so it was not deleted. Close it first.",
+    useAsContext: "Use as context (drag into the input too)",
+    contextHeader: (title) => `=== Session context: "${title}" (another conversation, reference only) ===`,
+    contextFooter: (included, omitted) => omitted > 0 ? `=== End of context (${included} messages; ${omitted} earlier ones omitted) ===` : `=== End of context (${included} messages) ===`,
+    contextEmpty: "That session has no text to reuse",
+    contextFailed: (reason) => `Could not read that session: ${reason}`,
     saved: "Saved",
     cheapModelConfirm: "That is an expensive model \u2014 switch cancelled",
     modelQueued: "Model switch queued; takes effect next turn",
@@ -351,6 +356,11 @@ var HermesBubbles = (() => {
     delete: "\u5220\u9664",
     deleteConfirm: "\u5220\u9664\u8FD9\u4E2A\u4F1A\u8BDD\uFF1F\u65E0\u6CD5\u64A4\u9500\u3002",
     deleteRefused: "\u8BE5\u4F1A\u8BDD\u4ECD\u5728\u7F51\u5173\u4E2D\u6D3B\u8DC3\uFF0C\u672A\u80FD\u5220\u9664\u3002\u8BF7\u5148\u5173\u95ED\u5B83\u3002",
+    useAsContext: "\u4F5C\u4E3A\u4E0A\u4E0B\u6587\uFF08\u4E5F\u53EF\u4EE5\u76F4\u63A5\u62D6\u8FDB\u8F93\u5165\u6846\uFF09",
+    contextHeader: (title) => `=== \u4F1A\u8BDD\u4E0A\u4E0B\u6587\uFF1A\u300C${title}\u300D\uFF08\u53E6\u4E00\u4E2A\u4F1A\u8BDD\u7684\u8BB0\u5F55\uFF0C\u4EC5\u4F9B\u53C2\u8003\uFF09===`,
+    contextFooter: (included, omitted) => omitted > 0 ? `=== \u4E0A\u4E0B\u6587\u7ED3\u675F\uFF08\u5171 ${included} \u6761\uFF0C\u66F4\u65E9\u7684 ${omitted} \u6761\u5DF2\u7701\u7565\uFF09===` : `=== \u4E0A\u4E0B\u6587\u7ED3\u675F\uFF08\u5171 ${included} \u6761\uFF09===`,
+    contextEmpty: "\u8FD9\u4E2A\u4F1A\u8BDD\u6CA1\u6709\u53EF\u590D\u7528\u7684\u6587\u672C",
+    contextFailed: (reason) => `\u8BFB\u53D6\u8BE5\u4F1A\u8BDD\u5931\u8D25\uFF1A${reason}`,
     saved: "\u5DF2\u4FDD\u5B58",
     cheapModelConfirm: "\u8FD9\u662F\u4E00\u4E2A\u8F83\u8D35\u7684\u6A21\u578B\uFF0C\u5DF2\u53D6\u6D88\u5207\u6362",
     modelQueued: "\u6A21\u578B\u5207\u6362\u5DF2\u6392\u961F\uFF0C\u4E0B\u4E00\u8F6E\u751F\u6548",
@@ -439,6 +449,104 @@ var HermesBubbles = (() => {
     const minutes = Math.floor(seconds / 60);
     const rest = Math.round(seconds % 60);
     return `${minutes}m${rest}s`;
+  }
+
+  // src/core/context.ts
+  var SESSION_CONTEXT_MIME = "application/x-hb-session";
+  var CONTEXT_MAX_CHARS = 8e3;
+  var CONTEXT_PER_MESSAGE_CHARS = 1500;
+  function usable(row) {
+    if (row.display_kind === "hidden") return null;
+    const role = row.role === "user" || row.role === "assistant" ? row.role : null;
+    if (!role) return null;
+    const text = (textOf(row.display_content) || textOf(row.text) || textOf(row.content)).trim();
+    if (!text) return null;
+    return { role, text };
+  }
+  function textOf(value) {
+    if (typeof value === "string") return value;
+    if (!Array.isArray(value)) return "";
+    const parts = [];
+    for (const part of value) {
+      if (typeof part === "string") {
+        parts.push(part);
+        continue;
+      }
+      if (!part || typeof part !== "object") continue;
+      const record = part;
+      const text = typeof record.text === "string" ? record.text : record.content;
+      if (typeof text === "string" && text) parts.push(text);
+    }
+    return parts.join("\n");
+  }
+  function clip(text, limit) {
+    if (text.length <= limit) return text;
+    return `${text.slice(0, limit).trimEnd()}\u2026`;
+  }
+  function render(role, text) {
+    return `[${role}]
+${text}`;
+  }
+  function sessionContextBlock(ref, messages, options) {
+    const t = messagesFor(options.locale);
+    const budget = options.maxChars ?? CONTEXT_MAX_CHARS;
+    const perMessage = options.perMessageChars ?? CONTEXT_PER_MESSAGE_CHARS;
+    const header = t.contextHeader(ref.title || ref.id.slice(0, 8));
+    const footerReserve = 120;
+    const room = Math.max(budget - header.length - footerReserve, 0);
+    const kept = [];
+    let used = 0;
+    let omitted = 0;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const row = messages[i];
+      const entry = row ? usable(row) : null;
+      if (!entry) {
+        omitted += 1;
+        continue;
+      }
+      const block = render(entry.role, clip(entry.text, perMessage));
+      const cost = block.length + 2;
+      if (used + cost > room) {
+        omitted += i + 1;
+        break;
+      }
+      kept.push(block);
+      used += cost;
+    }
+    if (!kept.length) return { text: "", included: 0, omitted };
+    kept.reverse();
+    const footer = t.contextFooter(kept.length, omitted);
+    return { text: `${header}
+
+${kept.join("\n\n")}
+
+${footer}`, included: kept.length, omitted };
+  }
+  function sessionDragPayload(ref) {
+    return JSON.stringify({ id: ref.id, title: ref.title });
+  }
+  function parseSessionDrop(raw) {
+    const value = (raw ?? "").trim();
+    if (!value) return null;
+    if (value.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed.id === "string" && parsed.id) {
+          return { id: parsed.id, title: typeof parsed.title === "string" ? parsed.title : "" };
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    }
+    return /^[A-Za-z0-9_.:-]+$/.test(value) ? { id: value, title: "" } : null;
+  }
+  function insertContext(draft, block) {
+    const body = draft.trim();
+    if (!body) return block;
+    return `${block}
+
+${body}`;
   }
 
   // src/core/gitinfo.ts
@@ -1247,7 +1355,7 @@ var HermesBubbles = (() => {
     historyCounter += 1;
     return `h${prefix}-${historyCounter}`;
   }
-  function textOf(value) {
+  function textOf2(value) {
     if (typeof value === "string") return value;
     if (value === null || value === void 0) return "";
     try {
@@ -1291,7 +1399,7 @@ var HermesBubbles = (() => {
           // the only signal and it is a display projection, not a verdict.
           status: "ok",
           args: row.args ?? void 0,
-          resultText: row.content === void 0 ? void 0 : textOf(row.content)
+          resultText: row.content === void 0 ? void 0 : textOf2(row.content)
         };
         items.push(item);
         continue;
@@ -2303,6 +2411,24 @@ var HermesBubbles = (() => {
       return result.sessions ?? [];
     }
     /**
+     * Read a stored session's transcript as a context block.
+     *
+     * Goes through REST (`GET /api/sessions/{id}/messages`), NOT `session.history`:
+     * that RPC is live-session-only (`_with_session` answers 4001 for a stored id)
+     * and `session.resume` would make the row the backend's active session just
+     * because the user pointed at it. The dashboard's own router reads the store
+     * read-only, which is exactly the semantics wanted here.
+     */
+    async contextForStoredSession(storedId, title = "") {
+      const payload = await this.fetchJSON(
+        `/api/sessions/${encodeURIComponent(storedId)}/messages?limit=200&order=latest`,
+        { method: "GET" }
+      );
+      return sessionContextBlock({ id: storedId, title }, payload?.messages ?? [], {
+        locale: this.locale
+      });
+    }
+    /**
      * Give the focused tab a backend session if it does not have one.
      *
      * A draft becomes real here rather than at page load, so opening a second tab
@@ -2782,7 +2908,7 @@ var HermesBubbles = (() => {
       const timeline = state.sessions[key];
       if (!timeline) return;
       const p = event.payload ?? {};
-      const textOf2 = (value) => typeof value === "string" ? value : "";
+      const textOf3 = (value) => typeof value === "string" ? value : "";
       let fallback = "";
       for (let i = timeline.items.length - 1; i >= 0; i -= 1) {
         const item = timeline.items[i];
@@ -2791,12 +2917,12 @@ var HermesBubbles = (() => {
           break;
         }
       }
-      const error = event.type === "error" ? textOf2(p.message) || "error" : textOf2(p.error) || textOf2(p.failure_reason) || void 0;
+      const error = event.type === "error" ? textOf3(p.message) || "error" : textOf3(p.error) || textOf3(p.failure_reason) || void 0;
       this.noticeSink({
         kind: "complete",
         sessionKey: key,
         title: timeline.meta.title,
-        text: textOf2(p.text) || fallback,
+        text: textOf3(p.text) || fallback,
         error
       });
     }
@@ -4423,6 +4549,7 @@ var HermesBubbles = (() => {
     const [menuDismissed, setMenuDismissed] = useState(false);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
+    const appliedInsertion = useRef(0);
     const fitInput = useCallback(() => {
       const el = inputRef.current;
       if (!el) return;
@@ -4456,6 +4583,21 @@ var HermesBubbles = (() => {
         el.setSelectionRange(props.editingText.length, props.editingText.length);
       });
     }, [props.editingText]);
+    useEffect(() => {
+      const entry = props.insertion;
+      if (!entry || entry.seq === appliedInsertion.current) return;
+      appliedInsertion.current = entry.seq;
+      const next = insertContext(text, entry.text);
+      setText(next);
+      setCaret(next.length);
+      setMenuDismissed(true);
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
+      });
+    }, [props.insertion, text]);
     useEffect(() => {
       setMenuIndex(0);
     }, [items.length, slashToken?.query]);
@@ -4531,6 +4673,12 @@ var HermesBubbles = (() => {
     );
     const onDrop = useCallback(
       (event) => {
+        const session = event.dataTransfer?.getData?.(SESSION_CONTEXT_MIME) ?? "";
+        if (session) {
+          event.preventDefault();
+          props.onDropSession?.(session);
+          return;
+        }
         const files = Array.from(event.dataTransfer?.files ?? []);
         if (!files.length) return;
         event.preventDefault();
@@ -4879,6 +5027,19 @@ var HermesBubbles = (() => {
           "data-hb": "project-session",
           className: "hb-proj-session",
           title: row.preview || title,
+          // Drag source, same payload as the Recent tab: drop on the composer to
+          // pull this transcript in as context. No hover button here — this view
+          // deliberately keeps its rows to open/expand.
+          draggable: true,
+          onDragStart: (event) => {
+            event.stopPropagation();
+            const payload = sessionDragPayload({ id: row.id, title: row.title || "" });
+            if (event.dataTransfer) {
+              event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
+              event.dataTransfer.setData("text/plain", payload);
+              event.dataTransfer.effectAllowed = "copy";
+            }
+          },
           style: { background: isActive ? "var(--color-muted)" : "transparent" },
           onClick: () => props.onOpen(row.id)
         },
@@ -5128,6 +5289,18 @@ var HermesBubbles = (() => {
             {
               key: session.id,
               className: "cursor-pointer px-2 py-1.5 text-xs",
+              // The row is also a drag source: dropping it on the composer
+              // attaches its transcript as context (see `core/context.ts`).
+              draggable: true,
+              onDragStart: (event) => {
+                event.stopPropagation();
+                const payload = sessionDragPayload({ id: session.id, title: session.title });
+                if (event.dataTransfer) {
+                  event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
+                  event.dataTransfer.setData("text/plain", payload);
+                  event.dataTransfer.effectAllowed = "copy";
+                }
+              },
               style: {
                 borderRadius: "calc(var(--radius) * 0.6)",
                 color: "var(--color-card-foreground)",
@@ -5201,6 +5374,21 @@ var HermesBubbles = (() => {
               React.createElement(
                 "span",
                 { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    title: t.useAsContext,
+                    "aria-label": t.useAsContext,
+                    "data-hb": "session-to-context",
+                    className: "hb-action-btn",
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      props.onUseAsContext(session.id, session.title);
+                    }
+                  },
+                  "\u21E9"
+                ),
                 React.createElement(
                   "button",
                   {
@@ -6250,6 +6438,8 @@ var HermesBubbles = (() => {
     const [projectSessionCache, setProjectSessionCache] = useState({});
     const [loadingProjectId, setLoadingProjectId] = useState(null);
     const [editing, setEditing] = useState(null);
+    const [insertion, setInsertion] = useState(null);
+    const insertionSeq = useRef(0);
     const [notifyOn, setNotifyOn] = useState(() => notifyEnabled());
     const [notifyPermission, setNotifyPermission] = useState(
       () => notificationPermission()
@@ -6510,6 +6700,28 @@ var HermesBubbles = (() => {
       },
       [controller, refreshStored]
     );
+    const onUseAsContext = useCallback(
+      (id, title) => {
+        controller.contextForStoredSession(id, title).then((block) => {
+          if (!block.text) {
+            setError(t.contextEmpty);
+            return;
+          }
+          insertionSeq.current += 1;
+          setInsertion({ seq: insertionSeq.current, text: block.text });
+        }).catch(
+          (err) => setError(t.contextFailed(err instanceof Error ? err.message : String(err)))
+        );
+      },
+      [controller, t]
+    );
+    const onDropSession = useCallback(
+      (payload) => {
+        const ref = parseSessionDrop(payload);
+        if (ref) onUseAsContext(ref.id, ref.title);
+      },
+      [onUseAsContext]
+    );
     const onCopy = useCallback((text) => {
       const write = navigator.clipboard?.writeText(text);
       if (write) write.catch(() => fallbackCopy2(text));
@@ -6667,6 +6879,8 @@ var HermesBubbles = (() => {
             onOpenModelPicker: openModelPicker,
             onPickReasoning,
             onError: setError,
+            insertion,
+            onDropSession,
             workspace: state.workspace,
             workspaceCurrent: timeline.meta.cwd,
             workspaceOptions: wsOptions,
@@ -6712,6 +6926,7 @@ var HermesBubbles = (() => {
           onRefresh: refreshStored,
           onRename,
           onDelete,
+          onUseAsContext,
           onClose: () => setHistoryOpen(false)
         })
       ),

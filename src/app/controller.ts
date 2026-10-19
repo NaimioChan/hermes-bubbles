@@ -11,6 +11,7 @@
 
 import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
 import { EventDedupe } from "../core/dedupe";
+import { sessionContextBlock, type ContextBlock, type ContextSourceMessage } from "../core/context";
 import { messagesFor, normalizeLocale, type Locale } from "../core/i18n";
 import { editTargetFor, retitleStoredSession } from "../core/sessions";
 import { reduceEvent, type GatewayEvent } from "../core/reduce";
@@ -378,6 +379,25 @@ export class ChatController {
       sessions: { id: string; title: string; preview: string; started_at: number; message_count: number }[];
     }>("session.list", { limit });
     return result.sessions ?? [];
+  }
+
+  /**
+   * Read a stored session's transcript as a context block.
+   *
+   * Goes through REST (`GET /api/sessions/{id}/messages`), NOT `session.history`:
+   * that RPC is live-session-only (`_with_session` answers 4001 for a stored id)
+   * and `session.resume` would make the row the backend's active session just
+   * because the user pointed at it. The dashboard's own router reads the store
+   * read-only, which is exactly the semantics wanted here.
+   */
+  async contextForStoredSession(storedId: string, title = ""): Promise<ContextBlock> {
+    const payload = await this.fetchJSON<{ messages?: ContextSourceMessage[] }>(
+      `/api/sessions/${encodeURIComponent(storedId)}/messages?limit=200&order=latest`,
+      { method: "GET" },
+    );
+    return sessionContextBlock({ id: storedId, title }, payload?.messages ?? [], {
+      locale: this.locale,
+    });
   }
 
   /**

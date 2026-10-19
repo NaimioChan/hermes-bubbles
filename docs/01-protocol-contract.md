@@ -178,6 +178,17 @@
 
 参数 `{session_id}`（stored id 或 runtime id）→ `{count, messages: TranscriptMessage[]}`。
 
+**实测（0.22.2 / `d923a5eb487`）：这条 RPC 只认活着的 runtime 会话。** 它走 `_with_session`，拿一个只有在库里、没被 resume 的 stored id 调会回 `4001 session not found`——契约文档早期写的「两者都收」是错的。要在不 resume 的前提下读存量会话，用 REST `GET /api/sessions/{id}/messages?limit=200&order=latest`（返回 `{messages: [...]}`，字段是 `role` / `content` / `display_content` / `display_kind`，不是 `text`）。
+
+### 「会话当上下文」的客户端做法（v0.3）
+
+协议里**没有**「把另一个会话作为本次对话的背景」这个动词：`session.branch_stored` 是把父会话整条记录复制成一个**新会话**，`prompt.submit` 只收文本。插件的做法是读 REST `/api/sessions/{id}/messages`，在本地压成一段有上限的纯文本（`core/context.ts`：只留 user / assistant 的非隐藏行，从最新往前取到 8000 字符、单条 1500 字符封顶，附中/英框题与省略计数），塞进输入框草稿，由用户决定什么时候连着自己的问题一起发。
+
+两条取舍：
+
+- **不 resume、也不用 `session.history`。** 前者会把那一行变成后端上的活跃会话（还会撞上铁律 19 的删除限制），后者根本读不到存量会话。REST `/messages` 是只读的，和桌面端预取历史走同一条。
+- **框题按界面语言本地化，记录原文不动。** 这是写给模型的普通文本，不依赖任何后端特性，网关升级也不会失效。
+
 ### `session.resume`
 
 参数 `{session_id, omit_messages?, inline_images?}` → `LiveSessionSnapshot`（含 `messages`、`info`、`running`、`pending_approval`、`open_requests`、`todo_state`）。

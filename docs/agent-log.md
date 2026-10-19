@@ -15,6 +15,7 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 - 清理：仓库 `.cache/`（147 个历史探针与日志，2.9 MB）与 `__pycache__` 已删（`.gitignore` 本来就不收）；系统 Temp 下 107 个 `edge-cdp-*` 浏览器 profile（18.1 GB）已删；`hermes-bubbles` 的 12 条残留验收会话（`回答两个字：收到` / `只回复两个字：收到` / `关掉所有页签之后发的消息` / `scratch session for delete test`，覆盖 10-18 到 10-19）走 `session.close` + REST DELETE 删净，复查 still listed 0、孤立消息 0；库内同类会话只剩 1 条 `20261018_135116_a2fefa`（cwd 是 hermes 根目录，不是本项目的验收残留，留着）。`config.yaml` 与备份逐字节一致，`model.default` 仍是 `cn:deepseek-v4.1-flash`。
 - 推送：`8039b28`（确认对话框）已推到 origin/main，本地与远端同步。`dashboard/dist/index.js` 重新构建过，与源码一致。
 - 环境：503 是用户的反代被限流，用户自行配 fallback，不用再动。
+- 补（22:50）：三个验收脚本现在跑完会删掉自己的 `edge-cdp-*` profile（约 800 MB/个，带三次重试，Edge 退出与删除会赛跑），这是那 18.1 GB 的来源。`c5d67e9` 已推。
 
 ## 2026-10-19 22:05 · hermes · 网关要求确认的模型切换要有确认按钮
 

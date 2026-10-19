@@ -118,6 +118,11 @@ export interface Messages {
   approvalAlways: string;
   approvalDeny: string;
   submit: string;
+  /** The gateway refused a model switch until the client re-sends it confirmed. */
+  modelConfirmTitle: string;
+  modelConfirmFallback: string;
+  modelConfirmAccept: string;
+  cancel: string;
   /** Composer affordances. */
   attachFiles: string;
   pickModel: string;
@@ -192,7 +197,6 @@ export interface Messages {
   contextEmpty: string;
   contextFailed: (reason: string) => string;
   saved: string;
-  cheapModelConfirm: string;
   modelQueued: string;
   /** Notices. */
   steered: string;
@@ -285,6 +289,10 @@ const EN: Messages = {
   approvalAlways: "Always allow",
   approvalDeny: "Deny",
   submit: "Submit",
+  modelConfirmTitle: "Confirm the model switch",
+  modelConfirmFallback: "This switch needs your confirmation.",
+  modelConfirmAccept: "Switch anyway",
+  cancel: "Cancel",
   attachFiles: "Add files",
   pickModel: "Model and reasoning",
   workspace: "Workspace",
@@ -357,7 +365,6 @@ const EN: Messages = {
   contextEmpty: "That session has no text to reuse",
   contextFailed: (reason) => `Could not read that session: ${reason}`,
   saved: "Saved",
-  cheapModelConfirm: "That is an expensive model — switch cancelled",
   modelQueued: "Model switch queued; takes effect next turn",
   steered: "Inserted into the running turn; the model sees it at its next step",
   redirected: "Turn redirected",
@@ -454,6 +461,10 @@ const ZH: Messages = {
   approvalAlways: "总是允许",
   approvalDeny: "拒绝",
   submit: "提交",
+  modelConfirmTitle: "确认切换模型",
+  modelConfirmFallback: "这次切换需要你确认。",
+  modelConfirmAccept: "仍然切换",
+  cancel: "取消",
   attachFiles: "添加文件",
   pickModel: "模型与思考强度",
   workspace: "工作区",
@@ -526,7 +537,6 @@ const ZH: Messages = {
   contextEmpty: "这个会话没有可复用的文本",
   contextFailed: (reason) => `读取该会话失败：${reason}`,
   saved: "已保存",
-  cheapModelConfirm: "这是一个较贵的模型，已取消切换",
   modelQueued: "模型切换已排队，下一轮生效",
   steered: "已插入当前任务，模型会在下一步看到它",
   redirected: "已改为新方向",

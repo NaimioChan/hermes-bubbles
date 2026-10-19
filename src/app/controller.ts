@@ -865,10 +865,16 @@ export class ChatController {
       value: `${model} --provider ${provider}${scope}`,
       ...(options.confirmExpensive ? { confirm_expensive_model: true } : {}),
     });
-    if (result?.warning) this.notice(result.warning);
+    // A `confirm_required` reply has applied NOTHING: the pick is still the
+    // user's to accept or drop. Its message belongs in the confirmation dialog,
+    // not in the transcript, where a notice was the only trace of a decision the
+    // client could no longer make. The same text usually rides in `warning`, so a
+    // notice here would also print it twice.
+    const confirmRequired = result?.confirm_required === true;
+    if (!confirmRequired && result?.warning) this.notice(result.warning);
     return {
       deferred: result?.deferred,
-      confirmRequired: result?.confirm_required,
+      confirmRequired,
       confirmMessage: result?.confirm_message,
     };
   }

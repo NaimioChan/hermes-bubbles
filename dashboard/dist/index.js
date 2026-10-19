@@ -129,6 +129,10 @@ var HermesBubbles = (() => {
     approvalAlways: "Always allow",
     approvalDeny: "Deny",
     submit: "Submit",
+    modelConfirmTitle: "Confirm the model switch",
+    modelConfirmFallback: "This switch needs your confirmation.",
+    modelConfirmAccept: "Switch anyway",
+    cancel: "Cancel",
     attachFiles: "Add files",
     pickModel: "Model and reasoning",
     workspace: "Workspace",
@@ -198,7 +202,6 @@ var HermesBubbles = (() => {
     contextEmpty: "That session has no text to reuse",
     contextFailed: (reason) => `Could not read that session: ${reason}`,
     saved: "Saved",
-    cheapModelConfirm: "That is an expensive model \u2014 switch cancelled",
     modelQueued: "Model switch queued; takes effect next turn",
     steered: "Inserted into the running turn; the model sees it at its next step",
     redirected: "Turn redirected",
@@ -293,6 +296,10 @@ var HermesBubbles = (() => {
     approvalAlways: "\u603B\u662F\u5141\u8BB8",
     approvalDeny: "\u62D2\u7EDD",
     submit: "\u63D0\u4EA4",
+    modelConfirmTitle: "\u786E\u8BA4\u5207\u6362\u6A21\u578B",
+    modelConfirmFallback: "\u8FD9\u6B21\u5207\u6362\u9700\u8981\u4F60\u786E\u8BA4\u3002",
+    modelConfirmAccept: "\u4ECD\u7136\u5207\u6362",
+    cancel: "\u53D6\u6D88",
     attachFiles: "\u6DFB\u52A0\u6587\u4EF6",
     pickModel: "\u6A21\u578B\u4E0E\u601D\u8003\u5F3A\u5EA6",
     workspace: "\u5DE5\u4F5C\u533A",
@@ -362,7 +369,6 @@ var HermesBubbles = (() => {
     contextEmpty: "\u8FD9\u4E2A\u4F1A\u8BDD\u6CA1\u6709\u53EF\u590D\u7528\u7684\u6587\u672C",
     contextFailed: (reason) => `\u8BFB\u53D6\u8BE5\u4F1A\u8BDD\u5931\u8D25\uFF1A${reason}`,
     saved: "\u5DF2\u4FDD\u5B58",
-    cheapModelConfirm: "\u8FD9\u662F\u4E00\u4E2A\u8F83\u8D35\u7684\u6A21\u578B\uFF0C\u5DF2\u53D6\u6D88\u5207\u6362",
     modelQueued: "\u6A21\u578B\u5207\u6362\u5DF2\u6392\u961F\uFF0C\u4E0B\u4E00\u8F6E\u751F\u6548",
     steered: "\u5DF2\u63D2\u5165\u5F53\u524D\u4EFB\u52A1\uFF0C\u6A21\u578B\u4F1A\u5728\u4E0B\u4E00\u6B65\u770B\u5230\u5B83",
     redirected: "\u5DF2\u6539\u4E3A\u65B0\u65B9\u5411",
@@ -2794,10 +2800,11 @@ ${body}`;
         value: `${model} --provider ${provider}${scope}`,
         ...options.confirmExpensive ? { confirm_expensive_model: true } : {}
       });
-      if (result?.warning) this.notice(result.warning);
+      const confirmRequired = result?.confirm_required === true;
+      if (!confirmRequired && result?.warning) this.notice(result.warning);
       return {
         deferred: result?.deferred,
-        confirmRequired: result?.confirm_required,
+        confirmRequired,
         confirmMessage: result?.confirm_message
       };
     }
@@ -4877,6 +4884,7 @@ ${body}`;
               "button",
               {
                 type: "button",
+                "data-hb": "model-picker-open",
                 title: `${t.pickModel}: ${props.model || "default"}`,
                 className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
                 style: { color: "var(--color-muted-foreground)" },
@@ -5000,6 +5008,99 @@ ${body}`;
       accepted: list.filter((file) => acceptedNames.has(file.name)).map((file, index) => ({ file, id: `att-${Date.now()}-${index}` })),
       rejected
     };
+  }
+
+  // src/ui/ConfirmDialog.ts
+  function ConfirmDialog(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    return React.createElement(
+      "div",
+      {
+        className: "fixed inset-0 z-50 flex items-start justify-center p-8",
+        style: { background: "rgba(0,0,0,0.45)" },
+        onClick: props.onCancel
+      },
+      React.createElement(
+        "div",
+        {
+          className: "hb-max-h-70vh flex w-full flex-col overflow-hidden",
+          "data-hb": "model-confirm",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": props.title,
+          style: {
+            maxWidth: "32rem",
+            background: "var(--color-card)",
+            color: "var(--color-card-foreground)",
+            borderRadius: "var(--radius)",
+            boxShadow: "0 12px 40px rgba(0,0,0,0.4)"
+          },
+          onClick: (event) => event.stopPropagation()
+        },
+        React.createElement(
+          "div",
+          { className: "flex items-center gap-2 border-b p-3", style: { borderColor: "var(--color-border)" } },
+          React.createElement("span", { className: "text-xs font-medium" }, props.title),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "model-confirm-close",
+              className: "ml-auto cursor-pointer px-2 text-sm",
+              style: { color: "var(--color-muted-foreground)" },
+              onClick: props.onCancel
+            },
+            "\xD7"
+          )
+        ),
+        // The backend's message is prose with blank lines between the guard's own
+        // text and the switch's warning, so it is rendered as-is, preserving
+        // newlines, instead of being flattened into one line.
+        React.createElement(
+          "div",
+          {
+            className: "min-h-0 flex-1 overflow-y-auto p-3 text-xs hb-scroll",
+            style: { whiteSpace: "pre-wrap", lineHeight: 1.5, color: "var(--color-muted-foreground)" }
+          },
+          props.message
+        ),
+        React.createElement(
+          "div",
+          { className: "hb-choice-col p-3", style: { borderTop: "1px solid var(--color-border)" } },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "model-confirm-accept",
+              className: "hb-action-btn-text hb-choice-row",
+              style: {
+                background: "var(--color-primary)",
+                color: "var(--color-primary-foreground)",
+                borderRadius: "calc(var(--radius) * 0.6)"
+              },
+              onClick: props.onAccept
+            },
+            props.acceptLabel
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "model-confirm-cancel",
+              className: "hb-action-btn-text hb-choice-row",
+              style: {
+                background: "var(--color-muted)",
+                color: "var(--color-muted-foreground)",
+                borderRadius: "calc(var(--radius) * 0.6)"
+              },
+              onClick: props.onCancel
+            },
+            props.cancelLabel
+          )
+        )
+      )
+    );
   }
 
   // src/ui/ProjectList.tsx
@@ -6424,6 +6525,7 @@ ${body}`;
     const [pickerLoading, setPickerLoading] = useState(false);
     const [providers, setProviders] = useState([]);
     const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
+    const [pendingSwitch, setPendingSwitch] = useState(null);
     const [reasoning, setReasoning] = useState("medium");
     const [workspaces, setWorkspaces] = useState(null);
     const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -6661,16 +6763,33 @@ ${body}`;
         setModelChoice({ model: result.model, provider: result.provider });
       }).catch((err) => setError(err instanceof Error ? err.message : String(err))).finally(() => setPickerLoading(false));
     }, [controller]);
+    const applyModel = useCallback(
+      (model, provider, confirmed) => {
+        controller.setModel(model, provider, { sessionOnly: true, confirmExpensive: confirmed }).then((result) => {
+          if (result.confirmRequired) {
+            setPendingSwitch({
+              model,
+              provider,
+              message: result.confirmMessage || t.modelConfirmFallback
+            });
+            return;
+          }
+          setPendingSwitch(null);
+          setModelChoice({ model, provider });
+          if (result.deferred) controller.notice(t.modelQueued);
+        }).catch((err) => {
+          setPendingSwitch(null);
+          setError(err instanceof Error ? err.message : String(err));
+        });
+      },
+      [controller, t]
+    );
     const onPickModel = useCallback(
       (model, provider) => {
         setPickerOpen(false);
-        setModelChoice({ model, provider });
-        controller.setModel(model, provider, { sessionOnly: true }).then((result) => {
-          if (result.confirmRequired) controller.notice(result.confirmMessage || t.cheapModelConfirm, "error");
-          else if (result.deferred) controller.notice(t.modelQueued);
-        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        applyModel(model, provider, false);
       },
-      [controller, t]
+      [applyModel]
     );
     const onPickReasoning = useCallback(
       (level) => {
@@ -6942,7 +7061,16 @@ ${body}`;
         onPick: onPickModel,
         onPickReasoning,
         onClose: () => setPickerOpen(false)
-      })
+      }),
+      pendingSwitch ? React.createElement(ConfirmDialog, {
+        sdk,
+        title: t.modelConfirmTitle,
+        message: pendingSwitch.message,
+        acceptLabel: t.modelConfirmAccept,
+        cancelLabel: t.cancel,
+        onAccept: () => applyModel(pendingSwitch.model, pendingSwitch.provider, true),
+        onCancel: () => setPendingSwitch(null)
+      }) : null
     );
   }
   function fallbackCopy2(text) {

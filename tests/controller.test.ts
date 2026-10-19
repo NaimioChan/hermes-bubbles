@@ -451,6 +451,47 @@ describe("model & reasoning", () => {
     expect(result.confirmMessage).toBe("很贵");
   });
 
+  it("keeps a confirm-required message out of the transcript", async () => {
+    // The reply applied NOTHING, so the message has to reach the user through a
+    // dialog with an accept control. As a notice it was a dead end: the switch
+    // stayed unapplied and there was no way to say yes. The gateway repeats the
+    // same text in `warning`, so a notice would also print it twice.
+    const { controller, socket } = await connectAndOpen();
+    const before = activeTimeline(controller.getSnapshot()).items.length;
+    const switching = controller.setModel("pricey", "openai");
+    await tick();
+    socket.replyTo("config.set", {
+      key: "model",
+      warning: "很贵",
+      confirm_required: true,
+      confirm_message: "很贵",
+    });
+    const result = await switching;
+    expect(result.confirmRequired).toBe(true);
+    expect(activeTimeline(controller.getSnapshot()).items.length).toBe(before);
+  });
+
+  it("re-sends the accepted pick with confirm_expensive_model", async () => {
+    // The flag name says "expensive", but the gateway treats it as the generic
+    // "the user said yes" marker for every selection guard (cost, data policy,
+    // and the large-live-context case this dialog exists for).
+    const { controller, socket } = await connectAndOpen();
+    const switching = controller.setModel("pricey", "openai", {
+      sessionOnly: true,
+      confirmExpensive: true,
+    });
+    await tick();
+    expect(socket.frames().find((f) => f.method === "config.set")).toMatchObject({
+      params: {
+        key: "model",
+        value: "pricey --provider openai --session",
+        confirm_expensive_model: true,
+      },
+    });
+    socket.replyTo("config.set", { key: "model", value: "pricey" });
+    expect((await switching).confirmRequired).toBe(false);
+  });
+
   it("sends a session-scoped reasoning level", async () => {
     const { controller, socket } = await connectAndOpen();
     const setting = controller.setReasoning("high");

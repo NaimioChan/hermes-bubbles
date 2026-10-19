@@ -8,6 +8,16 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-19 22:05 · hermes · 网关要求确认的模型切换要有确认按钮
+
+- 背景：用户报「长上下文情况下中途换模型，桌面端会弹窗口手动确认、终端要回车，气泡插件只弹一条警告没有确认键，对话继续不下去」。
+- 协议发现（关键）：`config.set` 回 `confirm_required: true` + `confirm_message` 时**什么都没写**——不是失败也不是已生效，客户端必须带 `confirm_expensive_model: true` 原样重发同一个 `value` 才落地。这个标志名叫「贵」，网关把它当通用的「用户已同意」，`hermes_cli/model_selection_guards.py` 里三类守卫共用它：贵模型（cost）、会拿数据训练的供应商（data_policy）、**大上下文切换**（context_cache，会话已测上下文 ≥ `model.switch_context_confirm_tokens`，默认 100000）。第三类才是「长对话换模型」的来源，跟价格无关。`warning` 字段通常是同一段文字（兼容旧客户端），照着再打一条提示就是双份。
+- 改：新增 `src/ui/ConfirmDialog.ts`（阻塞对话框：标题 + 守卫原文 `white-space: pre-wrap` + 接受/取消，无钩子，纯 props 渲染）；`ui/ChatPage.ts` 把 `onPickModel` 拆成 `applyModel(model, provider, confirmed)`——回 `confirmRequired` 就存 `pendingSwitch` 弹框、接受时带 `confirmExpensive: true` 重发同一对 model/provider；**`modelChoice` 改成落地后才更新**（原来先乐观写入，被守卫拦下时输入框会顶着没生效的模型名）；`ui/Composer.ts` 模型按钮补 `data-hb="model-picker-open"` 钩子（之前没有，验收和探针只能靠文案找）；`app/controller.ts` 的 `setModel` 在 `confirm_required` 时不再往转写区打 notice（那段文字属于对话框）；`core/i18n.ts` 用 `modelConfirmTitle` / `modelConfirmFallback` / `modelConfirmAccept` / `cancel` 四个键替掉只描述「已取消切换」的 `cheapModelConfirm`（en + zh）。
+- 文档：`docs/01-protocol-contract.md` 的 `config.set` 模型一节重写（三类守卫、确认后仍可能 `deferred`、客户端契约）；`AGENTS.md` 铁律 15 钩子清单补 4 个并加一句「后端要求确认的操作必须给出可点的确认控件」；`GLOSSARY.md` 加「切换确认」；两份 README 功能表与文件树、单测项数（552）。
+- 验证：`tsc --noEmit` 干净；`vitest run` 552 passed / 26 文件（controller 新增 2 条：确认消息不进转写区、接受后重发带 `confirm_expensive_model`）；`node scripts/audit-classes.mjs` 177/177；`.cache/probe-confirm.mjs` 10/10 —— 真仪表盘真模型，临时把 `model.switch_context_confirm_tokens` 设成 1：无守卫的切换直接生效不弹框 → 跑完一轮（~21,922 tokens 上下文）→ 换模型弹出对话框（原文含 `!!! LARGE CONTEXT MODEL SWITCH !!!`）→ 取消后模型不变 → 再选并接受，切换落地且没有多余提示，`config.yaml` 逐字节还原、探针会话 close + DELETE 干净。
+- 环境：当晚 `cn:deepseek-v4.1-flash`（profile 默认路由）在 workbuddy2api 侧连续 503，`global:deepseek-v4.1-flash` 正常；`hermes chat -q` 也能复现「Provider temporarily unavailable」重试 5 轮。所以 `verify.mjs` 期间临时把 `model.default` 指到 global 那条，跑完从 `.cache/config.yaml.bak` 还原。
+- 遗留：`verify.mjs` 92/93，唯一失败是「deleting a history row removes it from the backend」（victim `20261019_215141_731c4c`，空标题、2 条消息）。运行时该行仍是 live：控制器只在页签有 `runtimeId` 时才发 `session.close`，从存量行打开的页签没有 runtime id，于是 DELETE 撞活跃行——返回 ok 但行被重新持久化（铁律 19 的原样复现）。事后单独 DELETE 该行成功，说明行没被写死，是 close 那步漏了。这条不在本次改动范围，没动。另：那次 verify 的 cleanup 漏了 `20261019_215243_2ddeb2`（「关掉所有页签之后发的消息 #2」，首条消息不在 `PROBE_PROMPTS` 里），已手工删除。
+
 ## 2026-10-19 12:14 · hermes · 右侧会话列表可以把会话拖进输入框当上下文
 
 - 背景：用户要「从右侧会话列表把会话作为上下文拖入当前会话，拖拽或菜单哪个方便做哪个」。两条路都做了：悬停按钮 `⇩`（`data-hb="session-to-context"`）与整行拖拽（`application/x-hb-session`，载荷 `{id,title}` JSON），终点都是同一个方法。

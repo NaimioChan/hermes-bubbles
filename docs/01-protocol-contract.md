@@ -268,7 +268,10 @@
 ```
 
 - 加 ` --session` 后缀只影响本会话；不加则同时写 profile 默认。
-- 返回 `confirm_required: true` 时表示这是个贵模型，要带 `confirm_expensive_model: true` 重发。
+- 返回 `confirm_required: true` + `confirm_message` 表示**这次切换没有发生**：`config.set` 什么都没写，客户端必须让用户确认后再带 `confirm_expensive_model: true` 原样重发同一个 `value`。`warning` 里通常是同一段文字（兼容旧客户端），不要再当独立提示显示一遍。
+  - 这个标志名说的是「贵」，但网关把它当成通用的「用户已经同意」，触发的守卫有三类（`hermes_cli/model_selection_guards.py`，按顺序求值）：贵模型（`cost`）、会拿你的数据训练的供应商（`data_policy`）、**大上下文切换**（`context_cache`，会话已测上下文 ≥ `model.switch_context_confirm_tokens`，默认 100000，0 关闭——换模型会让下一次回复整段重读未命中的 prompt 缓存）。第三类就是「长对话中途换模型」弹确认的来源，与模型价格无关。
+  - 确认后的重发可能再回 `deferred: true`（有 turn 在跑，切换排队到下一轮），两者可以同时出现。
+  - 客户端契约：`confirm_message` 要进一个带「接受 / 取消」的阻塞对话框，不能只当提示打印——否则用户没有任何办法同意，切换永远落不下去。接受 = 带标志重发；取消 = 丢弃这次选择，会话仍用原模型。
 - 返回 `deferred: true` 表示切换被排队到下一轮开始；**不要**立刻重查模型名（会读回旧值盖掉用户的选择），等 `session.info` 事件来同步。
 
 **推理强度**：

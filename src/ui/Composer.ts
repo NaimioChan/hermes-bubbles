@@ -511,6 +511,7 @@ export function Composer(props: ComposerProps) {
             "button",
             {
               type: "button",
+              "data-hb": "model-picker-open",
               title: `${t.pickModel}: ${props.model || "default"}`,
               className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
               style: { color: "var(--color-muted-foreground)" },

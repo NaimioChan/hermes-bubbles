@@ -22,6 +22,10 @@
 
 `items` 数组里的一个元素，六种之一：`user` / `assistant` / `reasoning` / `tool` / `subagents` / `notice`。**不是**「消息」——思考块、工具行、子代理批次卡和提示行都不是消息。
 
+## 切换确认（switch confirmation）
+
+`config.set` 用 `confirm_required: true` + `confirm_message` 回答的那一类结果：守卫在切换生效前拦了一下，**什么都没写**，等客户端把同一个选择带 `confirm_expensive_model: true` 重发。**不是**错误，也**不是**已生效的切换——所以它要进一个带接受/取消的对话框，不能当提示行打印（当提示打印时用户没有任何办法同意）。三类触发：贵模型、会拿数据训练的供应商、大上下文（`model.switch_context_confirm_tokens`）。
+
 ## 服务端请求（server request）
 
 后端发给客户端的、要客户端回答的 JSON-RPC 帧。**不是**客户端发的请求。判别依据：帧的 `id` 是字符串（客户端发的请求用数字 id）。

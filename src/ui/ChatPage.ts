@@ -29,6 +29,7 @@ import { ChatController, type ModelOptionProvider, type ServerRequestCard } from
 import { createControllerHolder } from "../app/persistent";
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryPanel, type HistoryMode, type StoredSession } from "./HistoryPanel";
 import { LocatorRail } from "./LocatorRail";
 import { ModelPicker } from "./ModelPicker";
@@ -127,6 +128,13 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [pickerLoading, setPickerLoading] = useState(false);
   const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
   const [modelChoice, setModelChoice] = useState({ model: "", provider: "" });
+  // A pick the gateway wants confirmed before it applies. Holds the pair to
+  // re-send, so accepting the dialog repeats the exact switch the user made.
+  const [pendingSwitch, setPendingSwitch] = useState<{
+    model: string;
+    provider: string;
+    message: string;
+  } | null>(null);
   const [reasoning, setReasoning] = useState("medium");
   // Workspace picker: the host's project/repo list, plus its own load state.
   // The pick itself lives in the controller (it has to survive a route change
@@ -541,19 +549,48 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       .finally(() => setPickerLoading(false));
   }, [controller]);
 
+  /**
+   * Send a pick, then either report it or ask the user to confirm it.
+   *
+   * `confirm_required` is not a failure and not an applied switch: the gateway
+   * wrote nothing and will only move when the SAME pick comes back with
+   * `confirm_expensive_model: true`. Showing that message as a notice (the old
+   * behaviour) left no way to say yes, so a long-context switch could not be
+   * completed at all. `modelChoice` is therefore only updated once the reply is
+   * not a confirmation request — otherwise the composer would label itself with
+   * a model the session is not on.
+   */
+  const applyModel = useCallback(
+    (model: string, provider: string, confirmed: boolean) => {
+      controller
+        .setModel(model, provider, { sessionOnly: true, confirmExpensive: confirmed })
+        .then((result) => {
+          if (result.confirmRequired) {
+            setPendingSwitch({
+              model,
+              provider,
+              message: result.confirmMessage || t.modelConfirmFallback,
+            });
+            return;
+          }
+          setPendingSwitch(null);
+          setModelChoice({ model, provider });
+          if (result.deferred) controller.notice(t.modelQueued);
+        })
+        .catch((err: unknown) => {
+          setPendingSwitch(null);
+          setError(err instanceof Error ? err.message : String(err));
+        });
+    },
+    [controller, t],
+  );
+
   const onPickModel = useCallback(
     (model: string, provider: string) => {
       setPickerOpen(false);
-      setModelChoice({ model, provider });
-      controller
-        .setModel(model, provider, { sessionOnly: true })
-        .then((result) => {
-          if (result.confirmRequired) controller.notice(result.confirmMessage || t.cheapModelConfirm, "error");
-          else if (result.deferred) controller.notice(t.modelQueued);
-        })
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+      applyModel(model, provider, false);
     },
-    [controller, t],
+    [applyModel],
   );
 
   const onPickReasoning = useCallback(
@@ -894,6 +931,18 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       onPickReasoning,
       onClose: () => setPickerOpen(false),
     }),
+
+    pendingSwitch
+      ? React.createElement(ConfirmDialog, {
+          sdk,
+          title: t.modelConfirmTitle,
+          message: pendingSwitch.message,
+          acceptLabel: t.modelConfirmAccept,
+          cancelLabel: t.cancel,
+          onAccept: () => applyModel(pendingSwitch.model, pendingSwitch.provider, true),
+          onCancel: () => setPendingSwitch(null),
+        })
+      : null,
   );
 }
 

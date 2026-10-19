@@ -68,7 +68,7 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 | 会话列表与切换 | 已交付 | 侧栏两段：打开中的 tab 与历史会话，可新建、切换、关闭、重开 |
 | 多开会话 | 已交付 | 一条 socket 承载多个会话，事件按 `session_id` 分流，每个 tab 独立时间线 |
 | 附件 | 已交付 | `+` 按钮与拖放/粘贴；按类型走 `image.attach_bytes` / `pdf.attach` / `file.attach` |
-| 模型选择 | 已交付 | `model.options` 列表 + `config.set`；会话级切换，贵的模型会回报确认要求 |
+| 模型选择 | 已交付 | `model.options` 列表 + `config.set`；会话级切换，七档思考强度。网关要求确认的切换（贵模型、会拿数据训练的供应商、**大上下文**）会弹对话框显示守卫原文，「仍然切换」把同一个选择带 `confirm_expensive_model` 重发——不说同意就什么都没写 |
 | 思考强度 | 已交付 | 七档 `config.set key=reasoning scope=session` |
 | 思考过程半显式 | 已交付 | 流式时显示最后一行 + 光标，结束后收成一行摘要，可展开全文 |
 | 实时指标 | 已交付 | 上下文条 + 占用百分比、缓存命中率、输出速度、花费，随 `session.usage` 更新 |
@@ -127,6 +127,7 @@ src/
 │   ├── LocatorRail.ts 定位轨道
 │   ├── RequestCards.ts 审批卡与选择题卡
 │   ├── ModelPicker.ts 模型与思考强度选择器
+│   ├── ConfirmDialog.ts 网关要求确认时的接受/取消对话框
 │   ├── format.ts      纯展示逻辑（工具名、截断、耗时）
 │   └── style.css      变量驱动的手写样式
 └── index.ts       注册入口
@@ -149,7 +150,7 @@ src/
 
 ## 验证
 
-- `npm test` — 534 项 / 25 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、工作区列表整形与存储、项目树排序与拍平、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写、工作区下发）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
+- `npm test` — 552 项 / 26 个文件，覆盖归约、历史投影、多会话分流、Markdown 解析（含「对一条消息的每个前缀都不抛异常」的性质检查）、斜杠解析与补全、附件队列、用量指标、工作区列表整形与存储、项目树排序与拍平、去重闸门、JSON-RPC 通道（含心跳与服务端请求应答）、控制器（多开、模型切换、附件、重连、编辑重发、会话读写、工作区下发）、定位轨道，以及**四条源码级守卫**：`hook-order`（钩子不得出现在提前 return 之后）、`layout-classes`（宿主 CSS 里没有的类会静默失效）、`theme-vars`（宿主从不定义 `--color-foreground` / `--color-background`）、`architecture`（`core/` 无 DOM、无 `innerHTML`）。
 - `node scripts/verify.mjs` — 93 项，对**真实仪表盘**跑真模型真往返：插件接管 `/chat`、内置 xterm 消失、流式气泡、Markdown 结构与配色实测、页签与历史面板布局、改名/删除落库、切页后页签保持、状态灯、定位轨道、工作区按钮（新开页签→选仓库→会话被重开到该目录、偏好用掉即清空、Git 徽标跟着显示分支）、项目视图（页签切换、项目行、新建对话按钮、展开出会话、切回最近、中英双语切换）、空状态可输入等等。跑不了的项（模型这次没输出代码块）标 `SKIP` 而不是空转通过。
 
   它**会清理自己造的东西**：改名那条断言先记下原标题、断完再 PATCH 回去（历史第一行可能正是用户自己的对话）；跑完 `session.close` + REST DELETE 掉本次新建的会话（判据：空会话，或首条消息是本套件的探针文案），所以跑一百次也不会在历史里堆「回复收到」。

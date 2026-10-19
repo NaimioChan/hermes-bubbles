@@ -33,7 +33,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Locator rail | Done | One tick per user message down the right edge; hover to preview, click to jump |
 | Slash commands | Done | `/` opens a menu; the catalog is fetched once and filtered locally, not truncated |
 | Attachments | Done | `+`, drag-drop and paste; routed to `image.attach_bytes` / `pdf.attach` / `file.attach` |
-| Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers |
+| Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers. A switch the gateway wants confirmed (expensive model, data-policy provider, or a large live context) opens a dialog with the guard's own message and an accept control that re-sends the pick confirmed — nothing is written until you say yes |
 | Live metrics | Done | Context bar and percentage, cache hit rate, output speed, cost, updating from `session.usage` |
 | Interface language | Done | English by default; follows the dashboard's language switch without a reload |
 
@@ -115,6 +115,7 @@ src/
 │   ├── LocatorRail.ts  the jump rail
 │   ├── RequestCards.ts approval and clarify cards
 │   ├── ModelPicker.ts  model and reasoning picker
+│   ├── ConfirmDialog.ts  accept/cancel for a switch the gateway held back
 │   └── style.css       the small amount of hand-written CSS
 └── index.ts       registration entry
 
@@ -130,7 +131,7 @@ The protocol is Hermes' internal implementation with no OpenAPI description, so 
 ## Verification
 
 ```bash
-npm test                  # 548 unit tests, 26 files, no browser
+npm test                  # 552 unit tests, 26 files, no browser
 npm run typecheck         # tsc --noEmit
 node scripts/verify.mjs   # 93 checks against a real dashboard (needs one on 9119)
 node scripts/audit-classes.mjs

@@ -29,7 +29,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { rmSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -419,6 +419,16 @@ async function main() {
       child.kill();
     } catch {
       // already gone
+    }
+    // The per-run profile is ~800 MB; leaving it behind is how the temp dir grew
+    // to 107 copies / 18 GB. Removal can race Edge's own shutdown, hence the retry.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        rmSync(USER_DATA, { recursive: true, force: true });
+        break;
+      } catch {
+        await sleep(1000);
+      }
     }
     console.log(failures === 0 ? "\nall checks passed" : `\n${failures} check(s) failed`);
     process.exit(failures === 0 ? 0 : 1);

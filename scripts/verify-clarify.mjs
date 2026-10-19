@@ -12,7 +12,7 @@
 
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 const PORT = 9254;
 const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
@@ -164,4 +164,9 @@ try {
     console.log("cleanup skipped:", error && error.message);
   }
   child.kill();
+  // The per-run browser profile is ~800 MB; leaving one behind is how the temp
+  // dir grew to 107 copies / 18 GB. Removal can race Edge's own shutdown.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { rmSync(UD, { recursive: true, force: true }); break; } catch { await sleep(1000); }
+  }
 }

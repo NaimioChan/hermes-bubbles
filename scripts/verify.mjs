@@ -11,7 +11,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -2095,6 +2095,16 @@ async function main() {
     // user's history is full of probe chats after a handful of runs.
     if (liveSession) await cleanupRunSessions(liveSession, runStartedAt);
     child.kill();
+    // The per-run browser profile is ~800 MB; leaving one behind per run is how
+    // the temp dir reached 107 copies / 18 GB. Removal can race Edge's shutdown.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        rmSync(USER_DATA, { recursive: true, force: true });
+        break;
+      } catch {
+        await sleep(1000);
+      }
+    }
   }
 
   const skipped = results.filter((r) => !r.ok && r.soft).length;

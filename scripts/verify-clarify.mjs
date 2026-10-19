@@ -123,5 +123,45 @@ try {
     })`));
   }
 } finally {
+  // Leave no trace: this script sends a real prompt to a real model, which mints
+  // a real session. Same rule as verify.mjs — close the live one, then delete the
+  // row (close first, or the row re-persists: AGENTS.md 铁律 19).
+  try {
+    const cleaned = await ev(`(async () => {
+      const sdk = window.__HERMES_PLUGIN_SDK__;
+      const url = await sdk.buildWsUrl('/api/ws');
+      const ws = new WebSocket(url);
+      const waiting = new Map(); let nextId = 1;
+      const req = (method, params) => new Promise((resolve) => {
+        const reqId = nextId++;
+        waiting.set(reqId, resolve);
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: reqId, method, params }));
+        setTimeout(() => resolve({}), 8000);
+      });
+      ws.onmessage = (e) => {
+        const f = JSON.parse(e.data);
+        if (f.id === undefined) return;
+        const done = waiting.get(f.id);
+        if (done) { waiting.delete(f.id); done(f); }
+      };
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const listed = await req('session.list', { limit: 20 });
+      const rows = (listed.result?.sessions ?? []).filter((row) =>
+        ((row.preview || '') + (row.title || '')).includes('clarify'));
+      const out = { matched: rows.length, deleted: 0 };
+      for (const row of rows) {
+        await req('session.close', { session_id: row.resolved_id ?? row.id });
+        try {
+          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(row.id), { method: 'DELETE' });
+          out.deleted += 1;
+        } catch (error) { /* already gone */ }
+      }
+      ws.close();
+      return JSON.stringify(out);
+    })()`, true);
+    console.log("cleanup:", cleaned);
+  } catch (error) {
+    console.log("cleanup skipped:", error && error.message);
+  }
   child.kill();
 }

@@ -181,9 +181,130 @@ async function typeAndSend(session, text) {
   );
 }
 
+/**
+ * Prompts this suite sends to the live model.
+ *
+ * A session whose transcript starts with one of these was created by the
+ * harness, not by the user — that is the only thing cleanup is allowed to
+ * delete. `verify` runs against the real gateway, so every tab / new chat /
+ * empty-state send it exercises mints a real session row; without this the
+ * user's history fills up with "回复收到" conversations.
+ */
+const PROBE_PROMPTS = [
+  "回答两个字：收到",
+  "只回复两个字：收到",
+  "请调用 terminal 工具运行 sleep 15",
+  "顺便说一句，忽略上面那句话",
+  "再补一句，让轨道有两个定位点",
+  "关掉所有页签之后发的消息",
+];
+
+/** Stored sessions visible over the gateway (ids + the fields cleanup needs). */
+async function listSessionRows(session, limit = 100) {
+  const raw = await session.evaluate(`(async () => {
+    const sdk = window.__HERMES_PLUGIN_SDK__;
+    const url = await sdk.buildWsUrl('/api/ws');
+    const ws = new WebSocket(url);
+    let resolveList;
+    const listed = new Promise((res) => { resolveList = res; });
+    ws.onmessage = (e) => {
+      const f = JSON.parse(e.data);
+      if (f.id === 1) resolveList(f);
+    };
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'session.list', params: { limit: ${JSON.stringify(
+      limit,
+    )} } }));
+    const frame = await Promise.race([listed, new Promise((res) => setTimeout(() => res({}), 8000))]);
+    ws.close();
+    return (frame.result?.sessions ?? []).map((r) => ({
+      id: r.id, runtime: r.resolved_id ?? r.id, title: r.title ?? '',
+      preview: r.preview ?? '', messages: r.message_count ?? 0, source: r.source ?? '',
+      startedAt: r.started_at ?? 0,
+    }));
+  })()`, { awaitPromise: true });
+  return Array.isArray(raw) ? raw : [];
+}
+
+/** Is this row one the harness made? Empty, or opening with one of its probes. */
+function isHarnessSession(row) {
+  if (row.source && row.source !== "desktop") return false;
+  if ((row.messages ?? 0) === 0) return true;
+  const text = `${row.title ?? ""}\n${row.preview ?? ""}`;
+  return PROBE_PROMPTS.some((probe) => text.includes(probe));
+}
+
+/**
+ * Delete every session this run created.
+ *
+ * Selection is "harness-shaped AND started after this run began", not a diff of
+ * the session list: the page mints a session on load, before this script can
+ * read the list for the first time, so a diff would keep exactly the one row
+ * everybody notices. `session.close` comes first — REST DELETE on a live row
+ * answers `{ok:true}` and the row comes straight back (AGENTS.md 铁律 19).
+ */
+async function cleanupRunSessions(session, sinceSeconds) {
+  try {
+    const rows = await listSessionRows(session);
+    const doomed = rows.filter(
+      (row) => isHarnessSession(row) && (row.startedAt ?? 0) >= sinceSeconds - 5,
+    );
+    if (!doomed.length) {
+      console.log("\ncleanup: this run left no sessions behind");
+      return;
+    }
+    const report = await session.evaluate(`(async () => {
+      const sdk = window.__HERMES_PLUGIN_SDK__;
+      const targets = ${JSON.stringify(doomed.map((row) => ({ stored: row.id, runtime: row.runtime })))};
+      const url = await sdk.buildWsUrl('/api/ws');
+      const ws = new WebSocket(url);
+      const waiting = new Map();
+      let nextId = 1;
+      const req = (method, params) => new Promise((resolve) => {
+        const id = nextId++;
+        waiting.set(id, resolve);
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+        setTimeout(() => resolve({ error: 'timeout' }), 8000);
+      });
+      ws.onmessage = (e) => {
+        const f = JSON.parse(e.data);
+        if (f.id === undefined) return;
+        const done = waiting.get(f.id);
+        if (done) { waiting.delete(f.id); done(f); }
+      };
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const out = { closed: 0, deleted: 0, failed: [] };
+      for (const target of targets) {
+        await req('session.close', { session_id: target.runtime });
+        out.closed += 1;
+        try {
+          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(target.stored), { method: 'DELETE' });
+          out.deleted += 1;
+        } catch (error) {
+          out.failed.push(target.stored + ': ' + (error && error.message));
+        }
+      }
+      ws.close();
+      return JSON.stringify(out);
+    })()`, { awaitPromise: true });
+    const left = (await listSessionRows(session)).filter((row) => doomed.some((d) => d.id === row.id));
+    console.log(
+      `\ncleanup: ${doomed.length} harness session(s) → ${report} ; still listed: ${left.length}`,
+    );
+    if (left.length) console.log(`  leftovers: ${left.map((r) => r.id).join(", ")}`);
+  } catch (error) {
+    console.log(`\ncleanup failed (leaving the rows alone): ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function main() {
   console.log(`dashboard: ${DASHBOARD}`);
   console.log(`cdp: 127.0.0.1:${PORT}\n`);
+
+  // Everything this run mints starts after this instant; cleanup uses it to tell
+  // the harness's sessions from the user's older ones.
+  const runStartedAt = Date.now() / 1000;
+  let liveSession = null;
 
   const child = spawn(
     EDGE,
@@ -213,6 +334,7 @@ async function main() {
     if (!ready) throw new Error("headless Edge never came up");
 
     const session = await connect();
+    liveSession = session;
     await session.send("Page.navigate", { url: `${DASHBOARD}/chat` });
     await sleep(2500);
 
@@ -613,7 +735,7 @@ async function main() {
     await sleep(700);
     const editorShown = await session.evaluate(`(() => {
       const input = document.querySelector('[data-hb="rename-input"]');
-      return input ? { present: true, seeded: Boolean(input.value) } : { present: false, seeded: false };
+      return input ? { present: true, seeded: Boolean(input.value), title: input.value } : { present: false, seeded: false, title: "" };
     })()`);
     check(
       "rename opens an editor seeded with the current title",
@@ -671,6 +793,43 @@ async function main() {
       if (renamed) break;
     }
     check("renaming a history row persists to the backend", renamed === true, NEW_TITLE);
+
+    // Put the seeded title back. The first row of Recent is simply the newest
+    // session — usually this run's own (and deleted by cleanup), but right after a
+    // real conversation it is the USER's chat, and a harness must never leave
+    // `verify-renamed-…` on somebody's history.
+    const originalTitle = String(editorShown.title ?? "");
+    if (originalTitle) {
+      const target = (await listViaRpc()).find((row) => (row.title || "") === NEW_TITLE);
+      const restored = await session.evaluate(`(async () => {
+        const sdk = window.__HERMES_PLUGIN_SDK__;
+        try {
+          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(${JSON.stringify(target?.id ?? "")}), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: ${JSON.stringify(originalTitle)} }),
+          });
+          return 'ok';
+        } catch (error) {
+          return 'ERR ' + (error && error.message);
+        }
+      })()`);
+      let back = false;
+      for (let i = 0; i < 8; i += 1) {
+        await sleep(600);
+        const rows = await listViaRpc();
+        back =
+          Array.isArray(rows) &&
+          rows.some((row) => (row.title || "") === originalTitle) &&
+          !rows.some((row) => (row.title || "") === NEW_TITLE);
+        if (back) break;
+      }
+      check(
+        "the seeded title is put back after the rename assertion",
+        back,
+        `${restored}; wanted "${originalTitle}"`,
+      );
+    }
 
     // Delete a DISPOSABLE session, never the one this run is chatting in: that
     // session is active by definition and the gateway refuses it (4023), while
@@ -1837,6 +1996,9 @@ async function main() {
     console.log("\n── console tail ──");
     console.log(session.consoleLines.slice(-12).join("\n") || "(empty)");
   } finally {
+    // Before the browser dies: every session this run minted has to go, or the
+    // user's history is full of probe chats after a handful of runs.
+    if (liveSession) await cleanupRunSessions(liveSession, runStartedAt);
     child.kill();
   }
 

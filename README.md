@@ -148,6 +148,8 @@ node scripts/audit-classes.mjs
 
 `scripts/verify-clarify.mjs` is an on-demand check for the request cards, kept separate because it depends on the model choosing to call `clarify` — a check that depends on that would fail at random.
 
+`scripts/verify-confirm.mjs` covers the confirmation dialog for a held-back model switch. The large-context guard only fires once a session has enough measured context, so the check is on demand: `--edit-config` backs up `config.yaml`, drops `model.switch_context_confirm_tokens` to 1, asserts the cancel and accept paths, then restores the file byte for byte.
+
 ## Design notes
 
 **The host's CSS is the floor, not a framework.** The plugin renders inside the dashboard's precompiled stylesheet, which only contains the classes the dashboard's own source used. Anything invented that the host lacks fails silently — no error, no warning, the property just never applies. Three visible bugs came from exactly that (`resize-none`, `max-h-[70vh]`, `text-[0.625rem]`). New styles go into `src/ui/style.css` as explicit `hb-` classes, and `audit-classes.mjs` lists anything that would silently do nothing.

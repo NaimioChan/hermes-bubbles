@@ -156,6 +156,7 @@ src/
   它**会清理自己造的东西**：改名那条断言先记下原标题、断完再 PATCH 回去（历史第一行可能正是用户自己的对话）；跑完 `session.close` + REST DELETE 掉本次新建的会话（判据：空会话，或首条消息是本套件的探针文案），所以跑一百次也不会在历史里堆「回复收到」。
 
 - `node scripts/verify-clarify.mjs` — 审批/选择题卡片的按需检查，单独放：它依赖模型主动调用 `clarify`，进主验收会随机失败。跑完同样会删掉它建的那个会话。
+- `node scripts/verify-confirm.mjs` — 模型切换被网关拦下时的确认对话框。大上下文守卫要会话攒够上下文才触发，所以按需跑；加 `--edit-config` 会先把 `config.yaml` 备份、临时把 `model.switch_context_confirm_tokens` 设成 1，断言取消与接受两条路，最后逐字节还原。
 
 验收截图由该脚本产出，落在 `.cache/shots/`。
 

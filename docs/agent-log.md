@@ -8,6 +8,14 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-19 22:40 · hermes · 验收脚本落地 + 工作区清理 + 上游反馈
+
+- 改：`.cache/probe-confirm.mjs` 正式收进仓库成 `scripts/verify-confirm.mjs`（12 项）。默认不动配置（守卫没触发就报「守卫没触发，加 --edit-config」）；`--edit-config` 备份 `config.yaml` → 把 `model.switch_context_confirm_tokens` 设成 1 → 断言无守卫切换不弹框 / 弹框 / 双按钮 / 取消不变 / 接受落地 / 无多余提示 → `finally` 逐字节还原并 close+DELETE 自己建的会话。`AGENTS.md`、两份 README 记了它的用法。
+- 上游：查过 NousResearch/hermes-agent 的 issue，`confirm_required` 相关的 18 条全是「某个界面没做往返」（#90365 / #140545 / #95293 / #102729）或「没给拒绝路径」（#112458），没有人提过**契约本身**的问题。以助手身份开了一则反馈 #141596：`confirm_required` 只回 `confirm_message` 文本，不回 `SelectionWarning.kind`，而三类守卫（cost / data_policy / context_cache）共用 `confirm_expensive_model` 这一个「贵」标志；建议加 `confirm_reason` + 通用确认别名，`warning` 与 `confirm_message` 重复也一并记了。
+- 清理：仓库 `.cache/`（147 个历史探针与日志，2.9 MB）与 `__pycache__` 已删（`.gitignore` 本来就不收）；系统 Temp 下 107 个 `edge-cdp-*` 浏览器 profile（18.1 GB）已删；`hermes-bubbles` 的 12 条残留验收会话（`回答两个字：收到` / `只回复两个字：收到` / `关掉所有页签之后发的消息` / `scratch session for delete test`，覆盖 10-18 到 10-19）走 `session.close` + REST DELETE 删净，复查 still listed 0、孤立消息 0；库内同类会话只剩 1 条 `20261018_135116_a2fefa`（cwd 是 hermes 根目录，不是本项目的验收残留，留着）。`config.yaml` 与备份逐字节一致，`model.default` 仍是 `cn:deepseek-v4.1-flash`。
+- 推送：`8039b28`（确认对话框）已推到 origin/main，本地与远端同步。`dashboard/dist/index.js` 重新构建过，与源码一致。
+- 环境：503 是用户的反代被限流，用户自行配 fallback，不用再动。
+
 ## 2026-10-19 22:05 · hermes · 网关要求确认的模型切换要有确认按钮
 
 - 背景：用户报「长上下文情况下中途换模型，桌面端会弹窗口手动确认、终端要回车，气泡插件只弹一条警告没有确认键，对话继续不下去」。

@@ -75,6 +75,8 @@ npm run install-plugin
 
 另有 `node scripts/verify-clarify.mjs`：审批/选择题卡片只在**模型主动调用 clarify** 时才出现，所以它单独放，不进主验收（依赖模型行为的断言会随机失败）。卡片逻辑的单测在 `tests/requests.test.ts`。
 
+还有 `node scripts/verify-confirm.mjs`：模型切换被网关拦下时的确认对话框。大上下文守卫只在会话已测上下文 ≥ `model.switch_context_confirm_tokens` 时触发，测试机上达不到，所以默认不改配置、只报「守卫没触发」；要断言整条链路就加 `--edit-config`，它先把 `config.yaml` 备份、临时把阈值设成 1，`finally` 里逐字节还原。跑完照同样规则删掉自己建的会话。
+
 三套「静默失效」守卫值得单独说，因为它们的失败方式都不报错：`scripts/audit-classes.mjs` 查「用了但宿主 CSS 里没有的类」，`tests/theme-vars.test.ts` 查「引了但宿主没定义的 CSS 变量」，`tests/layout-classes.test.ts` 查「hb- 类没在自己样式表里定义」。加新样式或新颜色时先跑它们。
 
 还有一类更隐蔽的：宿主用**标签名**（不是类名）定的全局规则会钻进我们的组件。宿主的 `code { display: inline; color: var(--background) }` 就把每个 `<pre>` 里的 `<code>` 变成了内联的浅底黑字小块——代码块因此既不铺满气泡又看不清。`hb-md-pre code` / `hb-output code` 显式覆盖它。写新组件时，如果元素是 `code` / `pre` / `a` / `table` 这类会被全局选中的标签，先假设宿主会插手。

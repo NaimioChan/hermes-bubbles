@@ -4848,7 +4848,7 @@ ${body}`;
         React.createElement(
           "div",
           {
-            className: "flex items-end gap-1.5 px-2 py-1.5",
+            className: "hb-composer-row flex items-end gap-1.5 px-2 py-1.5",
             style: {
               background: "var(--color-card)",
               borderRadius: "var(--radius)",
@@ -4908,7 +4908,7 @@ ${body}`;
           // right: model + reasoning + send/stop
           React.createElement(
             "div",
-            { className: "flex shrink-0 items-center gap-1" },
+            { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
             React.createElement(
               "button",
               {
@@ -5044,14 +5044,14 @@ ${body}`;
     return React.createElement(
       "div",
       {
-        className: "fixed inset-0 z-50 flex items-start justify-center p-8",
+        className: "hb-modal-scrim fixed inset-0 z-50 flex items-start justify-center p-8",
         style: { background: "rgba(0,0,0,0.45)" },
         onClick: props.onCancel
       },
       React.createElement(
         "div",
         {
-          className: "hb-max-h-70vh flex w-full flex-col overflow-hidden",
+          className: "hb-modal-card hb-max-h-70vh flex w-full flex-col overflow-hidden",
           "data-hb": "model-confirm",
           role: "dialog",
           "aria-modal": "true",
@@ -5323,243 +5323,255 @@ ${body}`;
     const [draft, setDraft] = useState("");
     if (!props.open) return null;
     return React.createElement(
-      "div",
-      {
-        className: "flex h-full min-h-0 flex-col",
-        "data-hb": "history-panel",
-        style: { width: "17rem", borderLeft: "1px solid var(--color-border)" }
-      },
+      React.Fragment,
+      null,
+      // Backdrop for the phone bottom-sheet (see `.hb-hist-backdrop` in style.css):
+      // `display:none` on desktop, a dimming layer under 768px. Tapping it closes
+      // the panel, which becomes an overlay there instead of a squeezed column.
+      React.createElement("div", {
+        className: "hb-hist-backdrop",
+        "data-hb": "history-backdrop",
+        onClick: props.onClose
+      }),
       React.createElement(
         "div",
-        { className: "flex shrink-0 items-center gap-1 px-3 py-2" },
-        React.createElement(
-          "span",
-          {
-            className: "hb-text-micro uppercase tracking-[0.06em]",
-            style: { color: "var(--color-muted-foreground)" }
-          },
-          t.history
-        ),
+        {
+          className: "flex h-full min-h-0 flex-col",
+          "data-hb": "history-panel",
+          style: { width: "17rem", borderLeft: "1px solid var(--color-border)" }
+        },
         React.createElement(
           "div",
-          { className: "ml-auto flex items-center gap-1" },
+          { className: "flex shrink-0 items-center gap-1 px-3 py-2" },
+          React.createElement(
+            "span",
+            {
+              className: "hb-text-micro uppercase tracking-[0.06em]",
+              style: { color: "var(--color-muted-foreground)" }
+            },
+            t.history
+          ),
+          React.createElement(
+            "div",
+            { className: "ml-auto flex items-center gap-1" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                title: t.refreshTitle,
+                className: "cursor-pointer px-1.5 text-xs",
+                style: { color: "var(--color-muted-foreground)" },
+                onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh
+              },
+              "\u27F3"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                title: t.collapse,
+                className: "cursor-pointer px-1.5 text-xs",
+                style: { color: "var(--color-muted-foreground)" },
+                onClick: props.onClose
+              },
+              "\xBB"
+            )
+          )
+        ),
+        // Recent vs Projects. Two words, not icons: the difference is a grouping
+        // rule, and a glyph pair would need a legend.
+        React.createElement(
+          "div",
+          { className: "hb-proj-tabs shrink-0" },
           React.createElement(
             "button",
             {
               type: "button",
-              title: t.refreshTitle,
-              className: "cursor-pointer px-1.5 text-xs",
-              style: { color: "var(--color-muted-foreground)" },
-              onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh
+              "data-hb": "history-mode-recent",
+              "data-active": props.mode === "recent" ? "true" : "false",
+              className: "hb-proj-tab",
+              onClick: () => props.onModeChange("recent")
             },
-            "\u27F3"
+            t.recent
           ),
           React.createElement(
             "button",
             {
               type: "button",
-              title: t.collapse,
-              className: "cursor-pointer px-1.5 text-xs",
-              style: { color: "var(--color-muted-foreground)" },
-              onClick: props.onClose
+              "data-hb": "history-mode-projects",
+              "data-active": props.mode === "projects" ? "true" : "false",
+              className: "hb-proj-tab",
+              onClick: () => props.onModeChange("projects")
             },
-            "\xBB"
+            t.projects
           )
-        )
-      ),
-      // Recent vs Projects. Two words, not icons: the difference is a grouping
-      // rule, and a glyph pair would need a legend.
-      React.createElement(
-        "div",
-        { className: "hb-proj-tabs shrink-0" },
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            "data-hb": "history-mode-recent",
-            "data-active": props.mode === "recent" ? "true" : "false",
-            className: "hb-proj-tab",
-            onClick: () => props.onModeChange("recent")
-          },
-          t.recent
         ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            "data-hb": "history-mode-projects",
-            "data-active": props.mode === "projects" ? "true" : "false",
-            className: "hb-proj-tab",
-            onClick: () => props.onModeChange("projects")
-          },
-          t.projects
-        )
-      ),
-      props.mode === "projects" ? React.createElement(ProjectList, {
-        sdk: props.sdk,
-        locale: props.locale,
-        ...props.projectView
-      }) : React.createElement(
-        "div",
-        { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
-        props.loading ? React.createElement(
+        props.mode === "projects" ? React.createElement(ProjectList, {
+          sdk: props.sdk,
+          locale: props.locale,
+          ...props.projectView
+        }) : React.createElement(
           "div",
-          { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
-          t.historyLoading
-        ) : props.sessions.length === 0 ? React.createElement(
-          "div",
-          { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
-          t.historyEmpty
-        ) : props.sessions.map((session) => {
-          const isActive = session.id === props.activeStoredId;
-          return React.createElement(
+          { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
+          props.loading ? React.createElement(
             "div",
-            {
-              key: session.id,
-              className: "cursor-pointer px-2 py-1.5 text-xs",
-              // The row is also a drag source: dropping it on the composer
-              // attaches its transcript as context (see `core/context.ts`).
-              draggable: true,
-              onDragStart: (event) => {
-                event.stopPropagation();
-                const payload = sessionDragPayload({ id: session.id, title: session.title });
-                if (event.dataTransfer) {
-                  event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
-                  event.dataTransfer.setData("text/plain", payload);
-                  event.dataTransfer.effectAllowed = "copy";
-                }
-              },
-              style: {
-                borderRadius: "calc(var(--radius) * 0.6)",
-                color: "var(--color-card-foreground)",
-                background: isActive ? "var(--color-muted)" : "transparent"
-              },
-              title: session.preview || session.title,
-              onClick: () => props.onOpen(session.id, session.title || session.id.slice(0, 8)),
-              onMouseEnter: (event) => {
-                if (!isActive) event.currentTarget.style.background = "var(--color-muted)";
-              },
-              onMouseLeave: (event) => {
-                if (!isActive) event.currentTarget.style.background = "transparent";
-              }
-            },
-            React.createElement(
-              "div",
-              { className: "flex items-baseline gap-1.5" },
-              renamingId === session.id ? React.createElement("input", {
-                autoFocus: true,
-                value: draft,
-                "data-hb": "rename-input",
-                className: "hb-input hb-flex-fill",
-                style: { fontSize: "0.75rem", padding: "0.1rem 0.3rem" },
-                onClick: (event) => event.stopPropagation(),
-                onChange: (event) => setDraft(event.target.value),
-                // Read the value off the ELEMENT rather than the `draft`
-                // state: React commits state on its own schedule, so a
-                // fast type-then-Enter (or a scripted one) would otherwise
-                // commit the previous value and rename to the old title.
-                onKeyDown: (event) => {
-                  event.stopPropagation();
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    const next = event.currentTarget.value.trim();
-                    if (next) props.onRename(session.id, next);
-                    setRenamingId(null);
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    setRenamingId(null);
-                  }
-                }
-              }) : React.createElement(
-                "span",
-                { className: "hb-flex-fill hb-truncate" },
-                session.title || t.untitled
-              ),
-              // A small lamp, the same signal the tab strip uses: filled and
-              // pulsing while that session is running, dim while merely open.
-              props.openStoredIds.includes(session.id) ? React.createElement("span", {
-                className: props.busyStoredIds.includes(session.id) ? "hb-dot hb-caret" : "hb-dot",
-                "data-hb": "session-active",
-                "data-state": props.busyStoredIds.includes(session.id) ? "busy" : "open",
-                title: props.busyStoredIds.includes(session.id) ? t.sessionRunning : t.sessionOpen,
-                style: {
-                  width: "0.4rem",
-                  height: "0.4rem",
-                  borderRadius: "9999px",
-                  background: "var(--color-primary)",
-                  opacity: session.id === props.activeStoredId ? 1 : 0.45
-                }
-              }) : null,
-              React.createElement(
-                "span",
-                {
-                  className: "hb-text-tiny shrink-0",
-                  style: { color: "var(--color-muted-foreground)" }
-                },
-                relativeTime(session.started_at, sdk, props.locale)
-              ),
-              // Hidden until the row is hovered, so the list stays quiet.
-              React.createElement(
-                "span",
-                { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    title: t.useAsContext,
-                    "aria-label": t.useAsContext,
-                    "data-hb": "session-to-context",
-                    className: "hb-action-btn",
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      props.onUseAsContext(session.id, session.title);
-                    }
-                  },
-                  "\u21E9"
-                ),
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    title: t.rename,
-                    "aria-label": t.rename,
-                    "data-hb": "rename-session",
-                    className: "hb-action-btn",
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      setDraft(session.title || "");
-                      setRenamingId(session.id);
-                    }
-                  },
-                  "\u270E"
-                ),
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    title: t.delete,
-                    "aria-label": t.delete,
-                    "data-hb": "delete-session",
-                    className: "hb-action-btn",
-                    onClick: (event) => {
-                      event.stopPropagation();
-                      if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
-                    }
-                  },
-                  "\u{1F5D1}"
-                )
-              )
-            ),
-            session.preview ? React.createElement(
+            { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
+            t.historyLoading
+          ) : props.sessions.length === 0 ? React.createElement(
+            "div",
+            { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
+            t.historyEmpty
+          ) : props.sessions.map((session) => {
+            const isActive = session.id === props.activeStoredId;
+            return React.createElement(
               "div",
               {
-                className: "hb-text-tiny hb-truncate",
-                style: { color: "var(--color-muted-foreground)" }
+                key: session.id,
+                className: "cursor-pointer px-2 py-1.5 text-xs",
+                // The row is also a drag source: dropping it on the composer
+                // attaches its transcript as context (see `core/context.ts`).
+                draggable: true,
+                onDragStart: (event) => {
+                  event.stopPropagation();
+                  const payload = sessionDragPayload({ id: session.id, title: session.title });
+                  if (event.dataTransfer) {
+                    event.dataTransfer.setData(SESSION_CONTEXT_MIME, payload);
+                    event.dataTransfer.setData("text/plain", payload);
+                    event.dataTransfer.effectAllowed = "copy";
+                  }
+                },
+                style: {
+                  borderRadius: "calc(var(--radius) * 0.6)",
+                  color: "var(--color-card-foreground)",
+                  background: isActive ? "var(--color-muted)" : "transparent"
+                },
+                title: session.preview || session.title,
+                onClick: () => props.onOpen(session.id, session.title || session.id.slice(0, 8)),
+                onMouseEnter: (event) => {
+                  if (!isActive) event.currentTarget.style.background = "var(--color-muted)";
+                },
+                onMouseLeave: (event) => {
+                  if (!isActive) event.currentTarget.style.background = "transparent";
+                }
               },
-              session.preview
-            ) : null
-          );
-        })
+              React.createElement(
+                "div",
+                { className: "flex items-baseline gap-1.5" },
+                renamingId === session.id ? React.createElement("input", {
+                  autoFocus: true,
+                  value: draft,
+                  "data-hb": "rename-input",
+                  className: "hb-input hb-flex-fill",
+                  style: { fontSize: "0.75rem", padding: "0.1rem 0.3rem" },
+                  onClick: (event) => event.stopPropagation(),
+                  onChange: (event) => setDraft(event.target.value),
+                  // Read the value off the ELEMENT rather than the `draft`
+                  // state: React commits state on its own schedule, so a
+                  // fast type-then-Enter (or a scripted one) would otherwise
+                  // commit the previous value and rename to the old title.
+                  onKeyDown: (event) => {
+                    event.stopPropagation();
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const next = event.currentTarget.value.trim();
+                      if (next) props.onRename(session.id, next);
+                      setRenamingId(null);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      setRenamingId(null);
+                    }
+                  }
+                }) : React.createElement(
+                  "span",
+                  { className: "hb-flex-fill hb-truncate" },
+                  session.title || t.untitled
+                ),
+                // A small lamp, the same signal the tab strip uses: filled and
+                // pulsing while that session is running, dim while merely open.
+                props.openStoredIds.includes(session.id) ? React.createElement("span", {
+                  className: props.busyStoredIds.includes(session.id) ? "hb-dot hb-caret" : "hb-dot",
+                  "data-hb": "session-active",
+                  "data-state": props.busyStoredIds.includes(session.id) ? "busy" : "open",
+                  title: props.busyStoredIds.includes(session.id) ? t.sessionRunning : t.sessionOpen,
+                  style: {
+                    width: "0.4rem",
+                    height: "0.4rem",
+                    borderRadius: "9999px",
+                    background: "var(--color-primary)",
+                    opacity: session.id === props.activeStoredId ? 1 : 0.45
+                  }
+                }) : null,
+                React.createElement(
+                  "span",
+                  {
+                    className: "hb-text-tiny shrink-0",
+                    style: { color: "var(--color-muted-foreground)" }
+                  },
+                  relativeTime(session.started_at, sdk, props.locale)
+                ),
+                // Hidden until the row is hovered, so the list stays quiet.
+                React.createElement(
+                  "span",
+                  { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      title: t.useAsContext,
+                      "aria-label": t.useAsContext,
+                      "data-hb": "session-to-context",
+                      className: "hb-action-btn",
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        props.onUseAsContext(session.id, session.title);
+                      }
+                    },
+                    "\u21E9"
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      title: t.rename,
+                      "aria-label": t.rename,
+                      "data-hb": "rename-session",
+                      className: "hb-action-btn",
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        setDraft(session.title || "");
+                        setRenamingId(session.id);
+                      }
+                    },
+                    "\u270E"
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      title: t.delete,
+                      "aria-label": t.delete,
+                      "data-hb": "delete-session",
+                      className: "hb-action-btn",
+                      onClick: (event) => {
+                        event.stopPropagation();
+                        if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
+                      }
+                    },
+                    "\u{1F5D1}"
+                  )
+                )
+              ),
+              session.preview ? React.createElement(
+                "div",
+                {
+                  className: "hb-text-tiny hb-truncate",
+                  style: { color: "var(--color-muted-foreground)" }
+                },
+                session.preview
+              ) : null
+            );
+          })
+        )
       )
     );
   }
@@ -5702,14 +5714,14 @@ ${body}`;
     return React.createElement(
       "div",
       {
-        className: "fixed inset-0 z-50 flex items-start justify-center p-8",
+        className: "hb-modal-scrim fixed inset-0 z-50 flex items-start justify-center p-8",
         style: { background: "rgba(0,0,0,0.45)" },
         onClick: props.onClose
       },
       React.createElement(
         "div",
         {
-          className: "hb-max-h-70vh flex w-full flex-col overflow-hidden",
+          className: "hb-modal-card hb-max-h-70vh flex w-full flex-col overflow-hidden",
           style: {
             maxWidth: "34rem",
             background: "var(--color-card)",

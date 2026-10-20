@@ -1088,6 +1088,9 @@ div:hover > .hb-row-tools,
   position: relative;
   display: flex;
   align-items: center;
+  /* Let the chip and the git badge wrap on a narrow screen instead of pushing
+   * the row wider than the viewport (they sum to ~40rem, only a phone wraps). */
+  flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.15rem 0.5rem 0;
 }
@@ -1453,6 +1456,141 @@ div:hover > .hb-row-tools,
 
 .hb-proj-more:hover {
   background: var(--color-muted);
+}
+
+/* ── responsive: phone / narrow viewports ─────────────────────────────────── */
+
+/* The history sheet's dimming layer. Invisible on desktop (the panel is an
+   in-flow column there); the media query below turns it into a real backdrop.
+   Rendered only while the panel is open, so it is never an inert overlay. */
+.hb-hist-backdrop {
+  display: none;
+}
+
+/*
+ * The dashboard is now reachable from a phone (public bind + a WS ticket), but
+ * every affordance in this page was sized for a desktop cockpit. At ~390px the
+ * failures are structural, not cosmetic:
+ *
+ *   - the history panel is a fixed 17rem column; it eats a third of the screen
+ *     and squeezes the transcript into a sliver;
+ *   - the composer row puts the `+`, the textarea, the model chip, the
+ *     reasoning chip and Send on one line — the textarea is left ~4 characters
+ *     wide and the row overflows horizontally;
+ *   - the 32px controls are below the 44px touch minimum, and the action rows
+ *     (`.hb-actions`, `.hb-row-tools`) are `opacity: 0` until `:hover`, which
+ *     never fires on a touchscreen, so copy / rename / delete are unreachable;
+ *   - the locator rail is a hover-driven column that only costs width here;
+ *   - popovers sized in `rem` for a mouse (21rem / 34rem) can run off a narrow
+ *     screen.
+ *
+ * This block is the ONE place that adapts the page to narrow screens. It keys
+ * off width (not a JS check), so the same shipped bundle serves desktop and
+ * phone. Breakpoint 768px = phones + small tablets; above it nothing changes.
+ */
+@media (max-width: 768px) {
+  /* Backdrop for the history sheet. Rendered only while the panel is open (the
+     panel itself returns null when closed) and transparent on desktop, where
+     the panel is a normal in-flow column. */
+  .hb-hist-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  /* History becomes a bottom sheet: fixed (out of the row's flow, so it does
+     not squeeze the transcript), full width, most of the screen. */
+  [data-hb="history-panel"] {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto !important;
+    height: 72vh;
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+    background: var(--color-card);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+    z-index: 41;
+  }
+
+  /* Hover-driven and redundant with normal scrolling on a phone; it also steals
+     width from the bubbles. */
+  .hb-rail {
+    display: none;
+  }
+
+  /* Bubbles nearly fill a phone. The components set `max-width: min(72ch, 82%)`
+     inline, so the override has to be `!important` to beat that inline style.
+     The 72ch/82% pair leaves a blank gutter and shortens every line on a ~390px
+     screen; here the character cap can never bind anyway. */
+  .hb-bubble-text,
+  .hb-think,
+  .hb-tool,
+  .hb-sub-card,
+  [data-hb="message-actions"],
+  [data-hb="request-card"] {
+    max-width: 100% !important;
+  }
+
+  /* 32px is a mouse target; 44px is the platform minimum for touch. */
+  .hb-composer-btn,
+  .hb-action-btn {
+    min-width: 44px;
+    height: 44px;
+  }
+  .hb-action-btn {
+    width: 44px;
+  }
+  [data-hb="notify-toggle"],
+  [data-hb="tab-new"],
+  [data-hb="history-toggle"],
+  [data-hb="tab"] {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* Touch has no hover: reveal the action rows permanently, or copy / branch /
+     rename / delete / use-as-context are invisible and unclickable. */
+  .hb-actions,
+  .hb-row-tools {
+    opacity: 1;
+  }
+
+  /* Composer: the textarea takes the first line (next to `+`), the model /
+     reasoning / send cluster wraps to a second line instead of crushing it.
+     `flex-wrap` is right HERE — these are inline pills, not the column-of-rows
+     list options 铁律 20 is about. */
+  .hb-composer-row {
+    flex-wrap: wrap;
+    row-gap: 0.375rem;
+  }
+  .hb-composer-row .hb-composer-input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .hb-composer-tools {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
+  /* Popovers and modals: keep them inside a narrow screen. */
+  .hb-workspace-panel {
+    left: 0.5rem !important;
+    right: 0.5rem;
+    width: auto !important;
+    max-height: 60vh;
+  }
+  .hb-modal-scrim {
+    padding: 0.75rem !important;
+  }
+  .hb-modal-card {
+    max-width: 100% !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

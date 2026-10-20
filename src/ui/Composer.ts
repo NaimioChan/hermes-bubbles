@@ -450,7 +450,7 @@ export function Composer(props: ComposerProps) {
       React.createElement(
         "div",
         {
-          className: "flex items-end gap-1.5 px-2 py-1.5",
+          className: "hb-composer-row flex items-end gap-1.5 px-2 py-1.5",
           style: {
             background: "var(--color-card)",
             borderRadius: "var(--radius)",
@@ -513,7 +513,7 @@ export function Composer(props: ComposerProps) {
         // right: model + reasoning + send/stop
         React.createElement(
           "div",
-          { className: "flex shrink-0 items-center gap-1" },
+          { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
           React.createElement(
             "button",
             {

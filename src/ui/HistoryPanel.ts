@@ -82,12 +82,23 @@ export function HistoryPanel(props: HistoryPanelProps) {
   if (!props.open) return null;
 
   return React.createElement(
-    "div",
-    {
-      className: "flex h-full min-h-0 flex-col",
-      "data-hb": "history-panel",
-      style: { width: "17rem", borderLeft: "1px solid var(--color-border)" },
-    },
+    React.Fragment,
+    null,
+    // Backdrop for the phone bottom-sheet (see `.hb-hist-backdrop` in style.css):
+    // `display:none` on desktop, a dimming layer under 768px. Tapping it closes
+    // the panel, which becomes an overlay there instead of a squeezed column.
+    React.createElement("div", {
+      className: "hb-hist-backdrop",
+      "data-hb": "history-backdrop",
+      onClick: props.onClose,
+    }),
+    React.createElement(
+      "div",
+      {
+        className: "flex h-full min-h-0 flex-col",
+        "data-hb": "history-panel",
+        style: { width: "17rem", borderLeft: "1px solid var(--color-border)" },
+      },
 
     React.createElement(
       "div",
@@ -346,5 +357,6 @@ export function HistoryPanel(props: HistoryPanelProps) {
               );
             }),
         ),
+      ),
   );
 }

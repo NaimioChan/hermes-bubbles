@@ -103,6 +103,10 @@ The user bubble's large radius sits on three corners with a small one on the low
 
 Spacing between turns is `--spacing-mul`-scaled so the dashboard's compact/comfortable/spacious density setting actually moves this page.
 
+### Narrow screens
+
+The page is also reached from a phone, so below 768px (`src/ui/style.css`, one media block) the layout restructures rather than shrinks: bubbles go full-width (the 72ch cap can never bind on a ~390px screen, and 82% just steals gutter), the composer wraps to two lines so the textarea keeps a usable width, controls grow to the 44px touch minimum, hover-only action rows become permanently visible (touch has no hover — otherwise copy / rename / delete are unreachable), the history panel turns into a bottom sheet over a dimmed backdrop, and the locator rail is dropped. It is all width-based CSS, so one bundle serves both.
+
 ## Elevation & Depth
 
 There are no shadows and no elevation steps. Depth is carried by the two-tone surface split (card vs. tinted card) and by a 1px inset ring in `--color-border` on the assistant bubble only. In a terminal-adjacent UI, stacked shadows read as clutter.

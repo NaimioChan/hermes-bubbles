@@ -33,14 +33,14 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   return React.createElement(
     "div",
     {
-      className: "fixed inset-0 z-50 flex items-start justify-center p-8",
+      className: "hb-modal-scrim fixed inset-0 z-50 flex items-start justify-center p-8",
       style: { background: "rgba(0,0,0,0.45)" },
       onClick: props.onCancel,
     },
     React.createElement(
       "div",
       {
-        className: "hb-max-h-70vh flex w-full flex-col overflow-hidden",
+        className: "hb-modal-card hb-max-h-70vh flex w-full flex-col overflow-hidden",
         "data-hb": "model-confirm",
         role: "dialog",
         "aria-modal": "true",

@@ -8,6 +8,17 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-20 16:52 · hermes · 移动端适配（手机访问 dashboard 不再挤成一团）
+
+- 背景：用户现在能从手机访问 dashboard，但气泡页没给移动尺寸做适配，用着很难受。要求适配。
+- 排查（桌面 390px 下的真实问题，非外观问题）：① 历史面板是固定 `17rem` 竖栏，手机上吃掉三分之一宽、把转写区挤成一条缝；② 输入行把 `+`、textarea、模型芯片、思考芯片、发送塞一行，草稿框只剩几个字宽、整行还横向溢出；③ 控件 32px 低于 44px 触控最小尺寸，且 `.hb-actions` / `.hb-row-tools` 靠 `:hover` 才 `opacity:1`——触屏没有 hover，复制/改名/删除直接点不到；④ 定位轨道是 hover 驱动又只占宽度；⑤ 弹出层按 `rem` 给鼠标设计（21rem / 34rem），窄屏会跑出屏幕。
+- 改（集中在 `src/ui/style.css` 的一个 `@media (max-width:768px)` 块，纯宽度判断，同一份产物同时服务桌面和手机）：气泡 / 思考 / 工具 / 子代理 / 请求卡 `max-width:100% !important`（组件是**内联** `max-width:min(72ch,82%)`，不加 `!important` 压不住，第一版就漏了这条，实测仍 82%）；`.hb-actions,.hb-row-tools{opacity:1}`；控件 44px；历史面板改固定底部抽屉（72vh，靠 `data-hb="history-panel"` 选中）+ 新增 `.hb-hist-backdrop`（桌面 `display:none`，窄屏变遮罩，点击关闭）；`.hb-rail{display:none}`；输入行新增钩子 `.hb-composer-row`（可换行）与 `.hb-composer-tools`（换到第二行右对齐，textarea 独占第一行）；`.hb-workspace-panel` 左右收边、`.hb-modal-scrim/.hb-modal-card` 收边（ModelPicker / ConfirmDialog 各加类）。另把 `.hb-workspace-wrap` 改 `flex-wrap:wrap`（chip + git 徽标在窄屏换行，纯增益）。
+- 验证（自动化）：`tsc --noEmit` 干净；`vitest run` **554 passed**（`tests/layout-classes.test.ts` 新增一条「adapts to a phone」，断言媒体查询存在、message-actions 的 `max-width:100% !important`、动作行 `opacity:1`、Composer 带两个钩子）；`audit-classes` 188/188。
+- 验证（视觉，受限于登录）：**这台仪表盘今早已开 basic-auth（`/chat` 302 → `/login`，`config.yaml` 的 basic_auth 却是空、真实口令在 `.env` 的 `HERMES_DASHBOARD_BASIC_AUTH_*`）。我没有密码、也不会去读/输入它，故无法登入真页面截 390px 图。** 改用**忠实静态 harness**：同一目录放**真实产物** `dashboard/dist/style.css` + **真实宿主** `index-Ckq2QD_K.css`（布局靠宿主 `.flex/.items-end/.gap-*` 等预编译类，缺了会测歪——第一版只引插件 CSS，tab strip 假性换行），HTML 按各组件 `React.createElement` 的 class/内联样式复刻，Edge CDP `setDeviceMetricsOverride` 量 390 与 1280。结果：390 下 `docScrollWidth==390`（无横向溢出）、textarea 295px 独占第一行、模型/Medium/Send 落到第二行（y 744 vs 704）、rail `none`、历史 `fixed` 72vh + 遮罩 `block`、动作行 `opacity:1`、Send 44px、气泡 360px（占满）；工作区面板 23→368、模型弹窗 11→379 均不出屏。1280 下全部还原（气泡 `min(553,82%)`、rail `block`、历史 `static`、动作行 `opacity:0`、Send 32px）——桌面零改动。
+- 文档：`README.md` / `README.zh-CN.md` 功能表各加一行「Mobile / narrow screens · 移动端适配」并给「定位器」补「手机上隐藏」；`DESIGN.md` Layout 段加 `Narrow screens`。
+- **未完成（需用户）**：`AGENTS.md` 铁律 15 的 data-hb 钩子清单想补 `history-backdrop`，写入被保护审批拦截（超时未确认），按规则未重试。清单缺这一个钩子；要补请用户放行后再改。
+- 部署：`npm run install-plugin` 已把新产物装到 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`。前端 bundle 改动靠 `/api/dashboard/plugins/rescan` 生效（无需重启；但 rescan 本身要登录态，我这边 401）。手机浏览器强刷一次即可看到。未提交 git（等确认）。
+
 ## 2026-10-20 11:18 · hermes · 运行指示换成鲸鱼尾巴 + 输入框字体与控件对齐
 
 - 背景：用户报三件事。① DeepSeek harness 桌面端思考时有个鲸鱼尾巴小动画，问能不能给气泡页也装一个；② 输入框里的英文是窄衬线体，不好读；③ 输入框左边的 `+`、右边的发送按钮和输入框没对齐。

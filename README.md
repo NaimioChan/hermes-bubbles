@@ -30,7 +30,8 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Edit a sent message | Done | Edit a user bubble and sending rewrites the turn from there, truncating what followed |
 | Mid-turn input | Done | Send while a turn runs; the backend queues, steers or redirects, and the result is reported inline |
 | Multi-session | Done | One socket carries several sessions; events are routed by `session_id`, each tab has its own timeline |
-| Locator rail | Done | One tick per user message down the right edge; hover to preview, click to jump |
+| Locator rail | Done | One tick per user message down the right edge; hover to preview, click to jump. Hidden on phones, where it only costs width |
+| Mobile / narrow screens | Done | The page adapts under 768px: full-width bubbles, the composer wraps to two lines so the textarea stays usable, controls grow to 44px touch targets, hover-only action rows stay visible (copy / rename / delete are reachable), the history panel becomes a bottom sheet, and the locator rail is hidden. All of it is width-based CSS, so one bundle serves desktop and phone |
 | Slash commands | Done | `/` opens a menu; the catalog is fetched once and filtered locally, not truncated |
 | Attachments | Done | `+`, drag-drop and paste; routed to `image.attach_bytes` / `pdf.attach` / `file.attach` |
 | Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers. A switch the gateway wants confirmed (expensive model, data-policy provider, or a large live context) opens a dialog with the guard's own message and an accept control that re-sends the pick confirmed — nothing is written until you say yes |

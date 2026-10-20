@@ -113,6 +113,20 @@ describe("layout classes", () => {
     expect(ownCss).toMatch(/\.hb-text-tiny\s*\{[^}]*font-size:\s*0\.625rem/);
   });
 
+  it("adapts to a phone without changing a desktop", () => {
+    // The mobile layout is one `@media (max-width: 768px)` block in style.css.
+    // Its two load-bearing wins are easy to lose silently: the bubbles must beat
+    // their inline `max-width` (needs !important), and the touch-only action rows
+    // must stop being `opacity:0` (hover never fires on a phone).
+    expect(ownCss).toMatch(/@media\s*\(max-width:\s*768px\)/);
+    expect(ownCss).toMatch(/\[data-hb="message-actions"\][^{]*\{[^}]*max-width:\s*100%\s*!important/);
+    expect(ownCss).toMatch(/\.hb-actions,\s*\.hb-row-tools\s*\{\s*opacity:\s*1/);
+    // The composer wrap relies on these two hooks existing on the row and cluster.
+    const composer = readFileSync(join(UI_DIR, "Composer.ts"), "utf8");
+    expect(composer).toContain("hb-composer-row");
+    expect(composer).toContain("hb-composer-tools");
+  });
+
   it("keeps thinking blocks and tool rows out of the bubble treatment", () => {
     // Both were bubbles once: reasoning rode on the assistant row (an empty card
     // per think-only segment) and every tool call was a padded card. Their

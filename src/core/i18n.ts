@@ -159,6 +159,14 @@ export interface Messages {
   reasoningLow: string;
   reasoningMedium: string;
   reasoningHigh: string;
+  // Approval mode (dangerous-command confirmation), a profile-wide setting.
+  approvalMode: string;
+  approvalModeManual: string;
+  approvalModeSmart: string;
+  approvalModeOff: string;
+  approvalModeTitle: (mode: string) => string;
+  approvalModeHint: string;
+  approvalModeCycleHint: string;
   stopReasoningTitle: string;
   filterModels: string;
   noModels: string;
@@ -325,6 +333,13 @@ const EN: Messages = {
   reasoningLow: "Low",
   reasoningMedium: "Medium",
   reasoningHigh: "High",
+  approvalMode: "Approvals",
+  approvalModeManual: "Manual",
+  approvalModeSmart: "Smart",
+  approvalModeOff: "Off",
+  approvalModeTitle: (mode) => `Approval mode: ${mode}`,
+  approvalModeHint: "How dangerous commands are approved — applies to all conversations on this profile",
+  approvalModeCycleHint: "Click to change · applies to all conversations on this profile",
   stopReasoningTitle: "Stop the current turn",
   filterModels: "Filter models…",
   noModels: "No matching models",
@@ -497,6 +512,13 @@ const ZH: Messages = {
   reasoningLow: "低",
   reasoningMedium: "中",
   reasoningHigh: "高",
+  approvalMode: "审批",
+  approvalModeManual: "手动",
+  approvalModeSmart: "智能",
+  approvalModeOff: "关闭",
+  approvalModeTitle: (mode) => `审批模式：${mode}`,
+  approvalModeHint: "危险命令如何审批——作用于本配置下的所有对话",
+  approvalModeCycleHint: "点一下切换 · 作用于本配置下的所有对话",
   stopReasoningTitle: "停止当前任务",
   filterModels: "筛选模型…",
   noModels: "没有匹配的模型",
@@ -609,6 +631,21 @@ const REASONING_LABELS: Record<Locale, Record<string, string>> = {
 
 export function reasoningLabel(value: string, locale: Locale): string {
   return REASONING_LABELS[locale]?.[value] ?? value;
+}
+
+/** Human label for an approval mode (`manual` / `smart` / `off`). */
+export function approvalModeLabel(value: string, locale: Locale): string {
+  const m = messagesFor(locale);
+  switch (value) {
+    case "manual":
+      return m.approvalModeManual;
+    case "off":
+      return m.approvalModeOff;
+    case "smart":
+      return m.approvalModeSmart;
+    default:
+      return value || m.approvalMode;
+  }
 }
 
 /**

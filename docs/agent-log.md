@@ -8,6 +8,16 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-20 17:45 · hermes · 三处反馈：移动端溢出、审批模式按钮、标题变回复（上游 bug）
+
+- 背景：用户手机实测反馈三件事。① 加载对话后中央聊天区过宽、撑到屏幕两边、还不能左右滑动；② 想在输入框下面加个按钮调审批模式；③ 换了提供商后会话标题变成「模型在标题里回复」。
+- ① 移动端溢出（真·布局 bug，插件内可修复）：用**临时的独立 HERMES_HOME + 回环实例（9121，无鉴权、不改用户库）**登录真实页面复现。量到 `[data-hb=transcript]` 在 390 视口里 `clientWidth=890`：一条长代码行 / 长 token 的 **min-content 宽**把整条 flex 链撑开，而 flex item 默认 `min-width:auto` 不肯收缩——于是转写区渲染到屏幕两侧之外、又被宿主 `main` 的 `overflow:hidden` 裁掉，所以既超出又没法横滑。修法：`ui/ChatPage.ts` 的转写 flex 链（`flex min-h-0 flex-1` / `... flex-col` / `relative flex ...`）全加 `min-w-0`；`style.css` 给 `.hb-md-pre` 加 `overflow-x:auto;max-width:100%`（代码块**自己**横滑）、`.hb-md-p` 加 `overflow-wrap:anywhere`（长 token 换行）。实测：注入同样的宽代码块后 `docScrollWidth==390`、scroller 368、pre 315 且 `sw=1163,overflow auto`，气泡不再溢出；桌面布局零变化（sidebar+单行 composer 正常）。
+- ② 审批模式按钮：查 `tui_gateway/methods_config_set.py` 确认 `config.set key="approvals.mode" value=manual|smart|off`，且 `config.get key="approvals.mode"` 可读；这是 **profile 级**配置，后端**没有** per-session 审批覆盖。新增 `ui/ApprovalModeChip.ts`（chip + 上弹菜单，三项带说明「对本配置下所有对话生效」，`data-hb=approval-mode/approval-panel/approval-option`），`controller.ts` 加 `getApprovalMode/setApprovalMode`，`ChatPage` 挂载时读一次、切换乐观更新+失败回滚，`Composer` 放在工作区 chip 下一行。实测：菜单上弹不出屏，点 Manual 后 chip 变「Approvals · Manual」、刷新后仍是（已写进临时 config 的 `approvals.mode: manual`）。
+- ③ 标题变回复：**不是插件问题，是上游 hermes-agent 的 bug**。查 `state.db`：换新提供商后最近 4 条会话 `title_source='llm'` 但存的是助手回复原文（53/34/52 CJK 字），老的是正常短标题。根因在 `agent/title_generator.py::generate_title` 的「答非所问」护栏用 `len(title.split()) > _MAX_TITLE_WORDS(12)` 按**空格**数词——中文没有空格，76 字的回复只算 3 个「词」，护栏形同虚设，话痨模型就把回复存成了标题。这是 `%LOCALAPPDATA%\hermes\hermes-agent` 下的文件（AGENTS 禁区，插件不得改）。已在 **NousResearch/hermes-agent** 开 issue **#141969**，附证据表与补丁（按脚本加 CJK 字符数上限 `_MAX_TITLE_CJK_CHARS=30`；本地用真实标题验证：4 条回复标题全被拒、所有合法标题保留）。临时兜底已告知用户：把 `auxiliary.title_generation.model` 指到守 JSON 的小模型，或 `model_upgrade_enabled:false` 保留派生标题。
+- 验证：`tsc` 干净；`vitest run` **557 passed**（新增 layout-classes 两条：min-w-0 链 + 代码块自滑、审批 chip；controller 一条：approval 读写）；`audit-classes` 199/199。临时实例与临时 HERMES_HOME 已删除、进程已停。**用户自己的 9119 本次未由我启动/停止**（17:37 `install-plugin` 时它已报未运行；那是用户之前自己在操作）。
+- 部署：`npm run install-plugin` 已更新 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`。前端改动用户重启/刷新即生效。
+- 未完成（需用户）：`AGENTS.md` 铁律 15 钩子清单想补 `approval-mode/approval-panel/approval-option`（上一轮 `history-backdrop` 也没加成），该文件是受保护文件、审批超时，未重试。git 未提交（等确认）。
+
 ## 2026-10-20 16:52 · hermes · 移动端适配（手机访问 dashboard 不再挤成一团）
 
 - 背景：用户现在能从手机访问 dashboard，但气泡页没给移动尺寸做适配，用着很难受。要求适配。

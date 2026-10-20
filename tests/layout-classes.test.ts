@@ -127,6 +127,25 @@ describe("layout classes", () => {
     expect(composer).toContain("hb-composer-tools");
   });
 
+  it("lets the chat column shrink so a long line cannot overflow the page", () => {
+    // A flex item defaults to min-width:auto and refuses to shrink below its
+    // content's min-content width. One long code line then blew the transcript
+    // to ~900px on a 390px phone — content past both edges, host clips it, no
+    // horizontal scroll. The transcript flex chain must carry min-w-0, the code
+    // block must own its overflow, and prose must wrap long tokens.
+    const chat = readFileSync(join(UI_DIR, "ChatPage.ts"), "utf8");
+    expect(chat).toContain("flex min-h-0 min-w-0 flex-1");
+    expect(ownCss).toMatch(/\.hb-md-pre\s*\{[^}]*overflow-x:\s*auto/);
+    expect(ownCss).toMatch(/\.hb-md-p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+
+  it("mounts the approval-mode chip and gives it a popover", () => {
+    const composer = readFileSync(join(UI_DIR, "Composer.ts"), "utf8");
+    expect(composer).toContain("ApprovalModeChip");
+    expect(ownCss).toMatch(/\.hb-approval-panel\s*\{/);
+    expect(ownCss).toMatch(/\.hb-approval-chip\s*\{/);
+  });
+
   it("keeps thinking blocks and tool rows out of the bubble treatment", () => {
     // Both were bubbles once: reasoning rode on the assistant row (an empty card
     // per think-only segment) and every tool call was a padded card. Their

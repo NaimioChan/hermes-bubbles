@@ -148,6 +148,9 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const [gitLoading, setGitLoading] = useState(false);
   /** Bumped to force a re-probe (manual click, or a turn that may have written files). */
   const [gitTick, setGitTick] = useState(0);
+  // Dangerous-command approval mode (profile-wide). Read once on mount; the
+  // chip writes it back through the controller.
+  const [approvalMode, setApprovalModeValue] = useState("");
   // History panel: flat recents vs project grouping. The tree is fetched lazily
   // (its first read git-probes every distinct session cwd on the host).
   const [historyMode, setHistoryMode] = useState<HistoryMode>("recent");
@@ -305,6 +308,32 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   useEffect(() => {
     void loadWorkspaces(false);
   }, [loadWorkspaces]);
+
+  // Approval mode is profile-scoped config, not session state: read it once.
+  useEffect(() => {
+    let live = true;
+    controller
+      .getApprovalMode()
+      .then((mode) => {
+        if (live && mode) setApprovalModeValue(mode);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [controller]);
+
+  const onApprovalModeChange = useCallback(
+    (mode: string) => {
+      const previous = approvalMode;
+      setApprovalModeValue(mode); // optimistic
+      controller.setApprovalMode(mode).catch((err: unknown) => {
+        setApprovalModeValue(previous);
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    },
+    [controller, approvalMode],
+  );
 
   const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
 
@@ -732,16 +761,23 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     }),
 
     // ── transcript + history ────────────────────────────────────────────
+    // `min-w-0` on every flex item in this chain: a flex item defaults to
+    // `min-width:auto`, i.e. it refuses to shrink below its content's
+    // min-content width. One long code line or unbreakable token then blows the
+    // whole chat column out to ~900px on a 390px phone — the transcript renders
+    // past both edges and the host's `overflow:hidden` clips it with no way to
+    // scroll. `min-w-0` lets the column shrink to the viewport and pushes the
+    // overflow down into the code block's own scroller.
     React.createElement(
       "div",
-      { className: "flex min-h-0 flex-1" },
+      { className: "flex min-h-0 min-w-0 flex-1" },
 
       React.createElement(
         "div",
-        { className: "flex min-h-0 flex-1 flex-col" },
+        { className: "flex min-h-0 min-w-0 flex-1 flex-col" },
         React.createElement(
           "div",
-          { className: "relative flex min-h-0 flex-1" },
+          { className: "relative flex min-h-0 min-w-0 flex-1" },
         React.createElement(
           "div",
           {
@@ -872,6 +908,8 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           onRefreshGit: refreshGit,
           onPickWorkspace,
           onRescanWorkspaces,
+          approvalMode,
+          onApprovalModeChange,
         }),
       ),
 

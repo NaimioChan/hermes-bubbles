@@ -890,6 +890,25 @@ export class ChatController {
     });
   }
 
+  /**
+   * Read the current dangerous-command approval mode.
+   *
+   * `config.get` reports `{value}` for `approvals.mode`; the value is `manual`
+   * (ask before every guarded command), `smart` (only ask for the risky ones)
+   * or `off` (never ask). This is a **profile-scoped** setting, not a session
+   * one: the backend has no per-conversation approval override, so switching
+   * here changes it for every conversation on this profile — the UI says so.
+   */
+  async getApprovalMode(): Promise<string> {
+    const result = await this.rpc<{ value?: string }>("config.get", { key: "approvals.mode" });
+    return (result?.value ?? "").trim();
+  }
+
+  /** Persist the approval mode (`approvals.mode`) for this profile. */
+  async setApprovalMode(mode: string): Promise<void> {
+    await this.rpc("config.set", { key: "approvals.mode", value: mode });
+  }
+
   // ── attachments ──────────────────────────────────────────────────────────
 
   /**

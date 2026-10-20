@@ -69,6 +69,7 @@ curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/dashboard/pl
 | 多开会话 | 已交付 | 一条 socket 承载多个会话，事件按 `session_id` 分流，每个 tab 独立时间线 |
 | 附件 | 已交付 | `+` 按钮与拖放/粘贴；按类型走 `image.attach_bytes` / `pdf.attach` / `file.attach` |
 | 模型选择 | 已交付 | `model.options` 列表 + `config.set`；会话级切换，七档思考强度。网关要求确认的切换（贵模型、会拿数据训练的供应商、**大上下文**）会弹对话框显示守卫原文，「仍然切换」把同一个选择带 `confirm_expensive_model` 重发——不说同意就什么都没写 |
+| 审批模式 | 已交付 | 输入框下面一枚 chip，设置危险命令的审批模式（`manual` / `smart` / `off`，走 `config.set key=approvals.mode`）。它是**配置级**（对本配置下所有对话生效，菜单里有说明），因为后端没有单会话的审批覆盖 |
 | 思考强度 | 已交付 | 七档 `config.set key=reasoning scope=session` |
 | 思考过程半显式 | 已交付 | 流式时显示最后一行，结束后收成一行摘要，可展开全文 |
 | 运行指示 | 已交付 | 正在跑的那一步旁边是一只摆尾的小鲸鱼（动画 PNG，即 DeepSeek harness 用的那个资源）：思考流式时在思考行上，工具执行时在工具行上。它作为 alpha 遮罩盖在 `currentColor` 上，所以跟着主题变色；不支持 mask 的引擎或系统开了「减少动态效果」时，退化成同一只尾巴的静态 SVG |

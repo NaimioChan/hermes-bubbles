@@ -32,6 +32,7 @@ import {
 import type { Usage } from "../core/types";
 import type { HermesPluginSdk } from "./sdk";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { ApprovalModeChip } from "./ApprovalModeChip";
 
 export interface ModelChoice {
   model: string;
@@ -70,6 +71,9 @@ export interface ComposerProps {
   onRefreshGit: () => void;
   onPickWorkspace: (cwd: string) => void;
   onRescanWorkspaces: () => void;
+  /** Dangerous-command approval mode (profile-wide) and its setter. */
+  approvalMode: string;
+  onApprovalModeChange: (mode: string) => void;
   /** Text of the message being rewritten, or null when composing normally. */
   editingText?: string | null;
   onCancelEdit?: () => void;
@@ -603,6 +607,15 @@ export function Composer(props: ComposerProps) {
         onRefreshGit: props.onRefreshGit,
         onPick: props.onPickWorkspace,
         onRescan: props.onRescanWorkspaces,
+      }),
+
+      // Approval mode sits next to the workspace chip: both are "how the next
+      // command behaves", not transcript content.
+      React.createElement(ApprovalModeChip, {
+        sdk,
+        locale: props.locale,
+        value: props.approvalMode,
+        onChange: props.onApprovalModeChange,
       }),
 
       // ── status + metrics ─────────────────────────────────────────────────

@@ -165,6 +165,13 @@ var HermesBubbles = (() => {
     reasoningLow: "Low",
     reasoningMedium: "Medium",
     reasoningHigh: "High",
+    approvalMode: "Approvals",
+    approvalModeManual: "Manual",
+    approvalModeSmart: "Smart",
+    approvalModeOff: "Off",
+    approvalModeTitle: (mode) => `Approval mode: ${mode}`,
+    approvalModeHint: "How dangerous commands are approved \u2014 applies to all conversations on this profile",
+    approvalModeCycleHint: "Click to change \xB7 applies to all conversations on this profile",
     stopReasoningTitle: "Stop the current turn",
     filterModels: "Filter models\u2026",
     noModels: "No matching models",
@@ -332,6 +339,13 @@ var HermesBubbles = (() => {
     reasoningLow: "\u4F4E",
     reasoningMedium: "\u4E2D",
     reasoningHigh: "\u9AD8",
+    approvalMode: "\u5BA1\u6279",
+    approvalModeManual: "\u624B\u52A8",
+    approvalModeSmart: "\u667A\u80FD",
+    approvalModeOff: "\u5173\u95ED",
+    approvalModeTitle: (mode) => `\u5BA1\u6279\u6A21\u5F0F\uFF1A${mode}`,
+    approvalModeHint: "\u5371\u9669\u547D\u4EE4\u5982\u4F55\u5BA1\u6279\u2014\u2014\u4F5C\u7528\u4E8E\u672C\u914D\u7F6E\u4E0B\u7684\u6240\u6709\u5BF9\u8BDD",
+    approvalModeCycleHint: "\u70B9\u4E00\u4E0B\u5207\u6362 \xB7 \u4F5C\u7528\u4E8E\u672C\u914D\u7F6E\u4E0B\u7684\u6240\u6709\u5BF9\u8BDD",
     stopReasoningTitle: "\u505C\u6B62\u5F53\u524D\u4EFB\u52A1",
     filterModels: "\u7B5B\u9009\u6A21\u578B\u2026",
     noModels: "\u6CA1\u6709\u5339\u914D\u7684\u6A21\u578B",
@@ -429,6 +443,19 @@ var HermesBubbles = (() => {
   };
   function reasoningLabel(value, locale) {
     return REASONING_LABELS[locale]?.[value] ?? value;
+  }
+  function approvalModeLabel(value, locale) {
+    const m = messagesFor(locale);
+    switch (value) {
+      case "manual":
+        return m.approvalModeManual;
+      case "off":
+        return m.approvalModeOff;
+      case "smart":
+        return m.approvalModeSmart;
+      default:
+        return value || m.approvalMode;
+    }
   }
   function clockTime(millis) {
     if (!Number.isFinite(millis) || millis <= 0) return "";
@@ -2818,6 +2845,23 @@ ${body}`;
         scope: "session"
       });
     }
+    /**
+     * Read the current dangerous-command approval mode.
+     *
+     * `config.get` reports `{value}` for `approvals.mode`; the value is `manual`
+     * (ask before every guarded command), `smart` (only ask for the risky ones)
+     * or `off` (never ask). This is a **profile-scoped** setting, not a session
+     * one: the backend has no per-conversation approval override, so switching
+     * here changes it for every conversation on this profile — the UI says so.
+     */
+    async getApprovalMode() {
+      const result = await this.rpc("config.get", { key: "approvals.mode" });
+      return (result?.value ?? "").trim();
+    }
+    /** Persist the approval mode (`approvals.mode`) for this profile. */
+    async setApprovalMode(mode) {
+      await this.rpc("config.set", { key: "approvals.mode", value: mode });
+    }
     // ── attachments ──────────────────────────────────────────────────────────
     /**
      * Stage one file.
@@ -4563,6 +4607,76 @@ ${body}`;
     );
   }
 
+  // src/ui/ApprovalModeChip.ts
+  var MODES = ["manual", "smart", "off"];
+  function ApprovalModeChip(props) {
+    const { React } = props.sdk;
+    const { useState } = props.sdk.hooks;
+    const t = messagesFor(props.locale);
+    const [open, setOpen] = useState(false);
+    const current = props.value || "smart";
+    const label = approvalModeLabel(current, props.locale);
+    const close = () => setOpen(false);
+    return React.createElement(
+      "div",
+      { className: "hb-approval-wrap" },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          "data-hb": "approval-mode",
+          "data-mode": current,
+          title: `${t.approvalModeTitle(label)} \xB7 ${t.approvalModeHint}`,
+          "aria-haspopup": "listbox",
+          "aria-expanded": open ? "true" : "false",
+          className: "hb-approval-chip",
+          style: { color: "var(--color-muted-foreground)" },
+          onClick: () => setOpen((v) => !v)
+        },
+        React.createElement("span", { className: "hb-approval-caret" }, open ? "\u25BE" : "\u25B8"),
+        React.createElement("span", null, t.approvalMode),
+        React.createElement("span", { className: "hb-approval-sep" }, "\xB7"),
+        React.createElement("span", { className: "hb-approval-val" }, label)
+      ),
+      // Click-anywhere-outside to dismiss, without a document listener to tear down.
+      open ? React.createElement("div", { className: "hb-approval-backdrop", onClick: close }) : null,
+      open ? React.createElement(
+        "div",
+        {
+          className: "hb-approval-panel",
+          "data-hb": "approval-panel",
+          role: "listbox"
+        },
+        React.createElement("div", { className: "hb-approval-head" }, t.approvalModeHint),
+        MODES.map(
+          (mode) => React.createElement(
+            "button",
+            {
+              key: mode,
+              type: "button",
+              "data-hb": "approval-option",
+              "data-mode": mode,
+              "data-active": mode === current ? "true" : "false",
+              role: "option",
+              "aria-selected": mode === current ? "true" : "false",
+              className: "hb-approval-row",
+              style: {
+                background: mode === current ? "var(--color-accent, var(--color-muted))" : "transparent",
+                color: "var(--color-card-foreground)"
+              },
+              onClick: () => {
+                props.onChange(mode);
+                setOpen(false);
+              }
+            },
+            React.createElement("span", { className: "hb-approval-check" }, mode === current ? "\u2713" : ""),
+            React.createElement("span", { className: "hb-approval-row-label" }, approvalModeLabel(mode, props.locale))
+          )
+        )
+      ) : null
+    );
+  }
+
   // src/ui/Composer.ts
   var MENU_LIMIT = 200;
   var INPUT_MIN_PX = 32;
@@ -4995,6 +5109,14 @@ ${body}`;
           onRefreshGit: props.onRefreshGit,
           onPick: props.onPickWorkspace,
           onRescan: props.onRescanWorkspaces
+        }),
+        // Approval mode sits next to the workspace chip: both are "how the next
+        // command behaves", not transcript content.
+        React.createElement(ApprovalModeChip, {
+          sdk,
+          locale: props.locale,
+          value: props.approvalMode,
+          onChange: props.onApprovalModeChange
         }),
         // ── status + metrics ─────────────────────────────────────────────────
         React.createElement(
@@ -6572,6 +6694,7 @@ ${body}`;
     const [git, setGit] = useState(null);
     const [gitLoading, setGitLoading] = useState(false);
     const [gitTick, setGitTick] = useState(0);
+    const [approvalMode, setApprovalModeValue] = useState("");
     const [historyMode, setHistoryMode] = useState("recent");
     const [projectTree, setProjectTree] = useState(null);
     const [projectsLoading, setProjectsLoading] = useState(false);
@@ -6650,6 +6773,26 @@ ${body}`;
     useEffect(() => {
       void loadWorkspaces(false);
     }, [loadWorkspaces]);
+    useEffect(() => {
+      let live = true;
+      controller.getApprovalMode().then((mode) => {
+        if (live && mode) setApprovalModeValue(mode);
+      }).catch(() => void 0);
+      return () => {
+        live = false;
+      };
+    }, [controller]);
+    const onApprovalModeChange = useCallback(
+      (mode) => {
+        const previous = approvalMode;
+        setApprovalModeValue(mode);
+        controller.setApprovalMode(mode).catch((err) => {
+          setApprovalModeValue(previous);
+          setError(err instanceof Error ? err.message : String(err));
+        });
+      },
+      [controller, approvalMode]
+    );
     const wsOptions = useMemo(() => workspaceOptions(workspaces), [workspaces]);
     const onPickWorkspace = useCallback(
       (cwd) => {
@@ -6921,15 +7064,22 @@ ${body}`;
         onToggleHistory: () => setHistoryOpen((v) => !v)
       }),
       // ── transcript + history ────────────────────────────────────────────
+      // `min-w-0` on every flex item in this chain: a flex item defaults to
+      // `min-width:auto`, i.e. it refuses to shrink below its content's
+      // min-content width. One long code line or unbreakable token then blows the
+      // whole chat column out to ~900px on a 390px phone — the transcript renders
+      // past both edges and the host's `overflow:hidden` clips it with no way to
+      // scroll. `min-w-0` lets the column shrink to the viewport and pushes the
+      // overflow down into the code block's own scroller.
       React.createElement(
         "div",
-        { className: "flex min-h-0 flex-1" },
+        { className: "flex min-h-0 min-w-0 flex-1" },
         React.createElement(
           "div",
-          { className: "flex min-h-0 flex-1 flex-col" },
+          { className: "flex min-h-0 min-w-0 flex-1 flex-col" },
           React.createElement(
             "div",
-            { className: "relative flex min-h-0 flex-1" },
+            { className: "relative flex min-h-0 min-w-0 flex-1" },
             React.createElement(
               "div",
               {
@@ -7049,7 +7199,9 @@ ${body}`;
             gitLoading,
             onRefreshGit: refreshGit,
             onPickWorkspace,
-            onRescanWorkspaces
+            onRescanWorkspaces,
+            approvalMode,
+            onApprovalModeChange
           })
         ),
         React.createElement(HistoryPanel, {

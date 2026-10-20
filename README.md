@@ -35,6 +35,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Slash commands | Done | `/` opens a menu; the catalog is fetched once and filtered locally, not truncated |
 | Attachments | Done | `+`, drag-drop and paste; routed to `image.attach_bytes` / `pdf.attach` / `file.attach` |
 | Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers. A switch the gateway wants confirmed (expensive model, data-policy provider, or a large live context) opens a dialog with the guard's own message and an accept control that re-sends the pick confirmed — nothing is written until you say yes |
+| Approval mode | Done | A chip under the composer sets the dangerous-command approval mode (`manual` / `smart` / `off`, `config.set key=approvals.mode`). It is profile-wide — the menu says so — because the backend has no per-conversation override |
 | Live metrics | Done | Context bar and percentage, cache hit rate, output speed, cost, updating from `session.usage` |
 | Running indicator | Done | A flicking whale tail (animated PNG, the same asset the DeepSeek harness uses) beside the step that is running: the thinking header while reasoning streams, a tool row while it executes. It is an alpha mask over `currentColor`, so it takes the theme's colour; engines without mask support, and users who asked for reduced motion, get the same tail as a static SVG |
 | Interface language | Done | English by default; follows the dashboard's language switch without a reload |

@@ -503,6 +503,26 @@ describe("model & reasoning", () => {
     await setting;
   });
 
+  it("reads and writes the profile-wide approval mode", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const reading = controller.getApprovalMode();
+    await tick();
+    expect(socket.frames().find((f) => f.method === "config.get")).toMatchObject({
+      params: { key: "approvals.mode" },
+    });
+    socket.replyTo("config.get", { key: "approvals.mode", value: "smart" });
+    await expect(reading).resolves.toBe("smart");
+
+    const writing = controller.setApprovalMode("off");
+    await tick();
+    // No session id and no scope: approval mode is profile config, not per-session.
+    expect(socket.frames().find((f) => f.method === "config.set")).toMatchObject({
+      params: { key: "approvals.mode", value: "off" },
+    });
+    socket.replyTo("config.set", { key: "approvals.mode", value: "off" });
+    await writing;
+  });
+
   it("returns the model inventory", async () => {
     const { controller, socket } = await connectAndOpen();
     const listing = controller.listModels();

@@ -8,6 +8,15 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-20 21:25 · hermes · 生成标题后页签自动刷新
+
+- 改：`src/core/sessions.ts`（新增 `withTitleFromTimeline`，`routeEvent` 两条分支在写入 timeline 后同步 `tab.title`）、`tests/sessions.test.ts`（3 条）、`tests/controller.test.ts`（1 条）。
+- 问题：`session.title` / `session.info` 只写 `timeline.meta.title`，而标签来自 `core/sessions.ts::tabLabel(tab)`，读的是 `tab.title`。两者从不同步，标题到了、屏幕没变化,只有刷新页面重新 `bindSnapshot` 才带过来。上游确实会推：`prompt_turn.py:802` 的 `_on_session_title` 钩子发 `session.title`，payload 里的 `session_id` 是 stored key、外层 `params.session_id` 才是 runtime id，插件按外层过滤，命中。
+- 改法：写 timeline 之后调用 `withTitleFromTimeline`，`meta.title` 非空才覆盖 `tab.title`（空标题是「还没起名」的哨兵）。没动 reduce 层，也没让 UI 去读 `meta.title`：`tab.title` 另有 `bindSnapshot` 与历史面板重命名两处来源，保持单一读写口径。
+- 验证：`tsc --noEmit` 干净；`vitest run` **571 passed / 27 文件**（+4 条：session.title 改名、session.info 改名、空标题不覆盖、后台会话改名不动前台 tab）；`audit-classes` 200/200；`npm run install-plugin` 已装（rescan 仍 401，需刷新页面）。
+- 遗留：本机 9119 有 basic-auth，我没有口令，未能在真页面点一次「发消息 → 等标题 → 看页签」。事件路径由 controller 级测试覆盖（真帧走 `handleEvent → routeEvent → setState`）。
+- 下一步：刷新 `/chat` 发一条消息，确认页签从「未命名」变成生成的标题。
+
 ## 2026-10-20 20:40 · hermes · 审批 chip 挪到工作区同一行 + 代码字体 + 重开会话出现"发送消息"
 
 - 背景：用户三条反馈。① 审批按钮单独占一行，不好看；② 代码行是衬线体；③ 回看老会话会出现像"发送消息"的内容，要求检修。

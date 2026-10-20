@@ -1610,6 +1610,13 @@ ${body}`;
     }
     return { sessions, tabs, activeKey, workspace: state.workspace };
   }
+  function withTitleFromTimeline(state, key, timeline) {
+    const title = timeline.meta.title;
+    if (!title) return state;
+    const tab = state.tabs.find((candidate) => candidate.key === key);
+    if (!tab || tab.title === title) return state;
+    return { ...state, tabs: state.tabs.map((candidate) => candidate.key === key ? { ...candidate, title } : candidate) };
+  }
   function routeEvent(state, event, dedupe) {
     const isConnectionFrame = event.type === "gateway.ready" || event.type === "gateway.closed";
     if (isConnectionFrame) {
@@ -1628,14 +1635,16 @@ ${body}`;
       const timeline2 = timelineOf(state, key2);
       const next2 = reduceEvent(timeline2, event);
       if (next2 === timeline2) return { state, applied: false };
-      return { state: withTimeline(state, key2, next2), applied: true };
+      const withTimelineState2 = withTimeline(state, key2, next2);
+      return { state: withTitleFromTimeline(withTimelineState2, key2, next2), applied: true };
     }
     const key = state.activeKey;
     if (!key) return { state, applied: false };
     const timeline = timelineOf(state, key);
     const next = reduceEvent(timeline, event);
     if (next === timeline) return { state, applied: false };
-    return { state: withTimeline(state, key, next), applied: true };
+    const withTimelineState = withTimeline(state, key, next);
+    return { state: withTitleFromTimeline(withTimelineState, key, next), applied: true };
   }
   function appendUserToActive(state, text) {
     const key = state.activeKey;

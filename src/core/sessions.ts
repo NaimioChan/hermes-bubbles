@@ -178,6 +178,24 @@ export function renameTab(state: MultiState, key: string, title: string): MultiS
   return { ...state, tabs: state.tabs.map((tab) => (tab.key === key ? { ...tab, title } : tab)) };
 }
 
+/**
+ * Mirror a timeline's backend title onto its tab.
+ *
+ * `session.title` (auto-titling) and `session.info` write `meta.title`; the tab
+ * strip reads `tab.title`. Without this hop the strip keeps the placeholder the
+ * tab was opened with until the page is reloaded — the title arrives, nothing
+ * on screen changes, and only a fresh `bindSnapshot` shows it.
+ *
+ * An empty title never overwrites: it is the "not titled yet" sentinel.
+ */
+function withTitleFromTimeline(state: MultiState, key: string, timeline: Timeline): MultiState {
+  const title = timeline.meta.title;
+  if (!title) return state;
+  const tab = state.tabs.find((candidate) => candidate.key === key);
+  if (!tab || tab.title === title) return state;
+  return { ...state, tabs: state.tabs.map((candidate) => (candidate.key === key ? { ...candidate, title } : candidate)) };
+}
+
 export interface RouteResult {
   state: MultiState;
   /** True when the event was applied (the caller may want to know for tests). */
@@ -219,7 +237,8 @@ export function routeEvent(
     const timeline = timelineOf(state, key);
     const next = reduceEvent(timeline, event);
     if (next === timeline) return { state, applied: false };
-    return { state: withTimeline(state, key, next), applied: true };
+    const withTimelineState = withTimeline(state, key, next);
+    return { state: withTitleFromTimeline(withTimelineState, key, next), applied: true };
   }
 
   const key = state.activeKey;
@@ -227,7 +246,8 @@ export function routeEvent(
   const timeline = timelineOf(state, key);
   const next = reduceEvent(timeline, event);
   if (next === timeline) return { state, applied: false };
-  return { state: withTimeline(state, key, next), applied: true };
+  const withTimelineState = withTimeline(state, key, next);
+  return { state: withTitleFromTimeline(withTimelineState, key, next), applied: true };
 }
 
 /** Optimistically append the user's message to the active tab. */

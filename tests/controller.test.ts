@@ -259,6 +259,17 @@ describe("event routing", () => {
       reasoningEffort: "high",
     });
   });
+
+  it("retitles the tab as soon as auto-titling emits session.title", async () => {
+    const { controller, socket } = await connectAndOpen();
+    expect(controller.getSnapshot().tabs[0]?.title).toBe("");
+
+    socket.event("session.title", { title: "混音导出报错" }, { session_id: "runtime-1", seq: 1 });
+
+    // The strip reads `tab.title`; the timeline's meta is not enough.
+    expect(controller.getSnapshot().tabs[0]?.title).toBe("混音导出报错");
+    expect(activeTimeline(controller.getSnapshot()).meta.title).toBe("混音导出报错");
+  });
 });
 
 describe("multi-session", () => {

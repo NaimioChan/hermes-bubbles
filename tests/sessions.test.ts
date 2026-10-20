@@ -225,6 +225,47 @@ describe("routeEvent", () => {
     const result = routeEvent(emptyMultiState, event("status.update", { text: "x" }), dedupe);
     expect(result.applied).toBe(false);
   });
+
+  it("retitles the tab when the backend generates a title", () => {
+    let state = openDraft(emptyMultiState);
+    state = bindSnapshot(state, state.activeKey!, { session_id: "rt-a", messages: [], info: {} });
+    expect(state.tabs[0]?.title).toBe("");
+
+    const dedupe = new EventDedupe();
+    dedupe.setEpoch("e");
+    const result = routeEvent(state, event("session.title", { title: "编曲导出报错" }, { session_id: "rt-a", seq: 3 }), dedupe);
+
+    expect(timelineOf(result.state, "rt-a").meta.title).toBe("编曲导出报错");
+    // The strip reads `tab.title`, not the timeline: both have to move.
+    expect(result.state.tabs[0]?.title).toBe("编曲导出报错");
+  });
+
+  it("retitles the tab from session.info and refuses an empty title", () => {
+    let state = openDraft(emptyMultiState);
+    state = bindSnapshot(state, state.activeKey!, { session_id: "rt-a", messages: [], info: {} });
+
+    const dedupe = new EventDedupe();
+    let current = routeEvent(state, event("session.info", { title: "别名" }, { session_id: "rt-a", seq: 1 }), dedupe).state;
+    expect(current.tabs[0]?.title).toBe("别名");
+
+    // An empty title is the "not titled yet" sentinel; it must not wipe the tab.
+    current = routeEvent(current, event("session.info", { title: "" }, { session_id: "rt-a", seq: 2 }), dedupe).state;
+    expect(current.tabs[0]?.title).toBe("别名");
+  });
+
+  it("leaves the tab alone when a background session is retitled elsewhere", () => {
+    let state = openDraft(emptyMultiState);
+    state = bindSnapshot(state, state.activeKey!, { session_id: "rt-a", messages: [], info: {} });
+    state = openDraft(state);
+    state = bindSnapshot(state, state.activeKey!, { session_id: "rt-b", messages: [], info: {} });
+
+    const dedupe = new EventDedupe();
+    dedupe.setEpoch("e");
+    const result = routeEvent(state, event("session.title", { title: "后台的标题" }, { session_id: "rt-a", seq: 1 }), dedupe);
+
+    expect(result.state.tabs.find((tab) => tab.key === "rt-a")?.title).toBe("后台的标题");
+    expect(result.state.tabs.find((tab) => tab.key === "rt-b")?.title).toBe("");
+  });
 });
 
 describe("optimistic user bubbles", () => {

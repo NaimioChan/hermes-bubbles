@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 const dist = join(root, "dist");
 
+/** Placeholder in `src/ui/style.css` that the build swaps for the PNG's data URI. */
+const WHALE_TOKEN = "__WHALE_TAIL__";
+
 async function main() {
   await mkdir(dist, { recursive: true });
 
@@ -52,6 +55,21 @@ async function main() {
   );
   await cp(join(root, "manifest.json"), join(dist, "manifest.json"));
   await cp(join(root, "plugin_api.py"), join(dist, "plugin_api.py"));
+
+  // The running whale tail is the one binary the plugin ships. Inlining it
+  // keeps `dist/style.css` self-contained: no relative-URL resolution to get
+  // wrong against whoever serves the plugin's static files, and no second asset
+  // path in the manifest. The placeholder is asserted so a renamed token cannot
+  // ship a mask pointing at the literal string `__WHALE_TAIL__`.
+  const cssPath = join(dist, "style.css");
+  const css = await readFile(cssPath, "utf8");
+  const tail = await readFile(join(root, "src/ui/whale-tail.png"));
+  if (!css.includes(WHALE_TOKEN)) {
+    console.error(`build: ${WHALE_TOKEN} missing from src/ui/style.css — the whale tail would not render.`);
+    process.exitCode = 1;
+    return;
+  }
+  await writeFile(cssPath, css.split(WHALE_TOKEN).join(`data:image/png;base64,${tail.toString("base64")}`), "utf8");
 
   const bytes = Buffer.byteLength(bundle, "utf8");
   console.log(`built dist/index.js (${(bytes / 1024).toFixed(1)} KiB)`);

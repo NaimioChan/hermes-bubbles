@@ -8,6 +8,18 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-20 11:18 · hermes · 运行指示换成鲸鱼尾巴 + 输入框字体与控件对齐
+
+- 背景：用户报三件事。① DeepSeek harness 桌面端思考时有个鲸鱼尾巴小动画，问能不能给气泡页也装一个；② 输入框里的英文是窄衬线体，不好读；③ 输入框左边的 `+`、右边的发送按钮和输入框没对齐。
+- 找资源：`dsh` 的 UI 不在常规资源目录里，最终在 `%LOCALAPPDATA%/Programs/DeepSeek Harness/resources/app.asar` 内的 `dsh/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js` 找到（用 `grep -a -b` 定位字节偏移，再用一个小 Python 解析 asar header 反查文件，省下解包 182 MB）。它**不是 GIF**：`RunningWhaleTail` 组件用一个 28×28 / 60 帧、灰+alpha 的 **APNG** 当 `mask`，盖在 `background: currentColor` 上，所以它跟着文字颜色和主题走；`prefers-reduced-motion` 或不支持 mask 时换成同形静态 SVG（`REST_PATH`）。资源已取出为 `src/ui/whale-tail.png`，静态 SVG 路径抄进 `Bubble.ts` 的 `WHALE_STILL_PATH`。
+- 改：新增 `.hb-whale` / `.hb-whale-anim` / `.hb-whale-still`（`style.css`）；`build.mjs` 把 `src/ui/style.css` 里的占位符 `__WHALE_TAIL__` 换成 PNG 的 data URI（找不到占位符直接构建失败），生产 CSS 依旧单文件，不用赌插件静态文件的相对 URL 怎么解析。`ui/Bubble.ts` 加 `WhaleTail`，替换思考行与工具行运行中的 `●` 闪烁点（外层保留 `hb-think-live` / `hb-tool-live` 拿主色）。data URI 用自定义属性 `--hb-whale-tail` 收在一处，否则 `-webkit-mask` 与 `mask` 各抄一份、CSS 多 29 KB。
+- 字体：输入框原来写 `font-family: var(--font-sans)`，而宿主 `--font-sans` 是显示字体 `"Collapse"`（窄衬线），`html`/`body` 用的是 `--theme-font-sans`（`DM Sans` / 系统 UI 栈）。改成 `var(--theme-font-sans, system-ui, …)`，与仪表盘正文一致。
+- 对齐：五个控件原先各自按 padding + font-size 决定高度（`+` 16px、Send 12px、模型 11px），底边齐但字形中心不齐，实测中心差 2px。新增 `.hb-composer-btn`：统一 32px 高、内容居中、`font: inherit`，textarea 固定 `padding: 6px 0; line-height: 20px`，于是单行 = 6+20+6 = 32，与按钮同高，多行时最后一行的中心仍在底边上方 16px。实测（在真仪表盘上量的）：textarea 与四个按钮 `cy` 全是 511.69，单行、三行都对得上。
+- 测试：`--theme-font-sans` 进 `KNOWN_HOST_VARS`；`tests/theme-vars.test.ts` 现在把插件**自己声明**的 `--hb-*` 也算「已定义」（加了一条断言），否则 `--hb-whale-tail` 会被误报。`scripts/verify.mjs` 新增 1 项（94 项）：往页面挂一个 `.hb-whale`，断言计算出来的 `maskImage` 是 `url("data:image/png…`、尺寸 ≥ 8px —— 占位符忘了替换时这条会红，而不是静默看不见。
+- 文档：AGENTS 铁律 11 补二进制资源占位符约定；两份 README 功能表加「运行指示」行、单测数 552 → 553。
+- 验证：`tsc --noEmit` 干净；`vitest run` 553 passed / 26 文件；`audit-classes` 183/183；`node scripts/verify.mjs` **94/94**（cleanup: closed 3 / deleted 3 / still listed 0）；真仪表盘截图确认鲸鱼在工具行运行中以主色摆动、字体为 DM Sans、多行草稿也对齐。
+- 遗留：思考行的鲸鱼只在 `reasoning.delta` 流式期间出现，模型不吐 reasoning 时看不到（工具行不受影响）；鲸鱼尺寸取 `1.15em`，随家具字号缩放，没有单列一个 px 值。
+
 ## 2026-10-19 22:40 · hermes · 验收脚本落地 + 工作区清理 + 上游反馈
 
 - 改：`.cache/probe-confirm.mjs` 正式收进仓库成 `scripts/verify-confirm.mjs`（12 项）。默认不动配置（守卫没触发就报「守卫没触发，加 --edit-config」）；`--edit-config` 备份 `config.yaml` → 把 `model.switch_context_confirm_tokens` 设成 1 → 断言无守卫切换不弹框 / 弹框 / 双按钮 / 取消不变 / 接受落地 / 无多余提示 → `finally` 逐字节还原并 close+DELETE 自己建的会话。`AGENTS.md`、两份 README 记了它的用法。

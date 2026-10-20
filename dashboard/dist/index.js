@@ -3883,6 +3883,20 @@ ${body}`;
       ) : null
     );
   }
+  var WHALE_STILL_PATH = "M8.844 13.742C8.967 12.328 8.45 10.4 8.45 9.65C8.45 8.94 8.88 8.43 9.6 8.43C11.285 8.43 12.106 8.281 12.685 8.104C13.71 7.791 14.585 6.768 15.055 5.945C15.137 5.803 14.99 5.641 14.829 5.671C13.829 5.86 12.828 5.376 11.827 4.978C10.659 4.514 9.491 4.707 8.935 4.876C8.805 4.915 8.658 4.819 8.636 4.686C8.468 3.643 7.405 2.615 5.498 2.238C4.54 2.048 3.748 1.574 3.347 1.202C3.252 1.113 3.088 1.125 3.03 1.242C2.628 2.059 2.168 3.82 5.248 6.115C5.82 6.494 6.31 6.785 6.574 7.637C6.72 8.104 6.157 9.168 6.061 9.368C5.157 11.27 5.089 12.19 4.926 13.742";
+  function WhaleTail({ sdk }) {
+    const { React } = sdk;
+    return React.createElement(
+      "span",
+      { className: "hb-whale", "aria-hidden": "true", "data-hb": "running-whale" },
+      React.createElement("span", { className: "hb-whale-anim" }),
+      React.createElement(
+        "svg",
+        { className: "hb-whale-still", viewBox: "0 0 16 16", fill: "none" },
+        React.createElement("path", { d: WHALE_STILL_PATH, stroke: "currentColor", strokeWidth: 1 })
+      )
+    );
+  }
   function ReasoningRow({
     sdk,
     item,
@@ -3917,7 +3931,11 @@ ${body}`;
         },
         React.createElement("span", { className: "hb-think-caret" }, open ? "\u25BE" : "\u25B8"),
         React.createElement("span", { className: "hb-think-label" }, t.thought),
-        item.streaming ? React.createElement("span", { className: "hb-caret hb-think-live" }, "\u25CF") : null,
+        item.streaming ? React.createElement(
+          "span",
+          { className: "hb-think-live" },
+          React.createElement(WhaleTail, { sdk })
+        ) : null,
         React.createElement("span", { className: "hb-think-count" }, t.chars(trimmed.length)),
         // Collapsed, the segment is its own summary. The tail is the same string
         // that streams in, so the row stays one line as it updates.
@@ -4068,7 +4086,11 @@ ${body}`;
         },
         React.createElement("span", { className: "hb-tool-caret" }, open ? "\u25BE" : "\u25B8"),
         React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name, t)),
-        item.status === "running" ? React.createElement("span", { className: "hb-caret hb-tool-live" }, "\u25CF") : null,
+        item.status === "running" ? React.createElement(
+          "span",
+          { className: "hb-tool-live" },
+          React.createElement(WhaleTail, { sdk })
+        ) : null,
         item.summary ? React.createElement("span", { className: "hb-tool-summary" }, item.summary) : null,
         duration ? React.createElement("span", { className: "hb-tool-duration tabular-nums" }, duration) : null
       ),
@@ -4840,8 +4862,7 @@ ${body}`;
               type: "button",
               title: t.attachFiles,
               "aria-label": t.attachFiles,
-              className: "shrink-0 cursor-pointer px-2 py-1.5 text-base leading-none",
-              style: { color: "var(--color-muted-foreground)" },
+              className: "hb-composer-btn hb-composer-attach",
               onClick: () => fileRef.current?.click()
             },
             "+"
@@ -4864,8 +4885,16 @@ ${body}`;
             disabled: !props.connected,
             placeholder: props.connected ? t.composerPlaceholder : "\u2026",
             "aria-label": t.composerPlaceholder,
-            className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent py-1.5 text-sm outline-none",
-            style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
+            className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent text-sm outline-none",
+            // `--font-sans` is the host's display face ("Collapse", a narrow
+            // serif) and is NOT what body text uses — `html`/`body` take
+            // `--theme-font-sans`, the system UI stack. Pointing the textarea at
+            // the display face made every Latin character thin and hard to read at
+            // typing size, so the draft now matches the rest of the dashboard.
+            style: {
+              color: "var(--color-card-foreground)",
+              fontFamily: "var(--theme-font-sans, system-ui, -apple-system, 'Segoe UI', sans-serif)"
+            },
             onChange: (event) => {
               setText(event.target.value);
               setCaret(event.target.selectionStart ?? event.target.value.length);
@@ -4886,8 +4915,7 @@ ${body}`;
                 type: "button",
                 "data-hb": "model-picker-open",
                 title: `${t.pickModel}: ${props.model || "default"}`,
-                className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
-                style: { color: "var(--color-muted-foreground)" },
+                className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
                 onClick: props.onOpenModelPicker
               },
               props.model || "model"
@@ -4897,8 +4925,7 @@ ${body}`;
               {
                 type: "button",
                 title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
-                className: "hb-text-micro cursor-pointer px-2 py-1.5",
-                style: { color: "var(--color-muted-foreground)" },
+                className: "hb-composer-btn hb-text-micro",
                 onClick: () => {
                   const current = props.reasoning || "medium";
                   const index = REASONING_LEVELS.indexOf(current);
@@ -4918,7 +4945,7 @@ ${body}`;
                 type: "button",
                 title: t.stopReasoningTitle,
                 "data-hb": "stop-action",
-                className: "cursor-pointer px-2.5 py-1.5 text-xs",
+                className: "hb-composer-btn hb-composer-stop",
                 style: {
                   background: "var(--color-muted)",
                   color: "var(--color-muted-foreground)",
@@ -4935,7 +4962,7 @@ ${body}`;
                 disabled: !canSend,
                 title: props.running ? t.insert : t.send,
                 "data-hb": "primary-action",
-                className: "cursor-pointer px-3 py-1.5 text-xs",
+                className: "hb-composer-btn hb-composer-send",
                 style: {
                   background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                   color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",

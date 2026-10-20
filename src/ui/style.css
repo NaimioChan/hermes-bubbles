@@ -29,8 +29,11 @@
   max-height: 70vh;
 }
 
+/* Same number as `INPUT_MIN_PX` in `Composer.ts`, in px on purpose: the textarea
+ * is sized by script to a pixel height, so a rem-based floor under it would
+ * scale with the theme and leave the row's controls 1–2px out of line. */
 .hb-min-h-input {
-  min-height: 2rem;
+  min-height: 32px;
 }
 
 /*
@@ -45,6 +48,11 @@
 .hb-composer-input {
   max-height: 192px;
   overflow-y: auto;
+  /* One text line is exactly the row's control height (32px = 6 + 20 + 6), so
+   * the last line's centre sits where the buttons' centres sit: 16px above the
+   * row's bottom edge, at one line and at eight. */
+  padding: 6px 0;
+  line-height: 20px;
 }
 
 .hb-flex-none {
@@ -55,6 +63,112 @@
 .hb-flex-fill {
   min-height: 0;
   flex: 1 1 auto;
+}
+
+/* ── the running whale tail ───────────────────────────────────────────────── */
+
+/*
+ * The little flicking tail shown next to a running step, the same asset the
+ * DeepSeek harness uses for its own "working" row. It is an animated PNG (60
+ * frames, 28×28, grey+alpha) used as an ALPHA MASK over `currentColor`, which
+ * is what makes it follow the theme instead of pinning one colour: on a light
+ * theme it paints dark, on a dark theme light, inside a primary-coloured row it
+ * takes the primary. The binary lives at `src/ui/whale-tail.png`; the build
+ * swaps the placeholder token below for its data URI (see `build.mjs`), so this
+ * file stays reviewable and the shipped CSS stays single-file. The token is
+ * held in a custom property so the 28 KB URI is emitted once instead of once
+ * per vendor prefix.
+ *
+ * The static SVG fallback is drawn by `Bubble.ts` and shown when the engine has
+ * no mask support or the user asked for reduced motion.
+ */
+.hb-whale {
+  --hb-whale-tail: url("__WHALE_TAIL__");
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1.15em;
+  height: 1.15em;
+  align-items: center;
+  justify-content: center;
+}
+
+.hb-whale-anim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  -webkit-mask: var(--hb-whale-tail) center / 100% 100% no-repeat;
+  mask: var(--hb-whale-tail) center / 100% 100% no-repeat;
+}
+
+.hb-whale-still {
+  width: 100%;
+  height: 100%;
+}
+
+@supports (mask-image: url("")) or (-webkit-mask-image: url("")) {
+  @media (prefers-reduced-motion: no-preference) {
+    .hb-whale-anim {
+      display: block;
+    }
+
+    .hb-whale-still {
+      display: none;
+    }
+  }
+}
+
+/* ── composer controls ────────────────────────────────────────────────────── */
+
+/*
+ * One height for every control in the composer row: the attach button, the model
+ * and reasoning chips, send and stop.
+ *
+ * They used to be sized by their own padding and font-size (a 16px `+`, a 12px
+ * label, a 12px `Send`), so bottoms lined up but the glyph centres did not —
+ * the row looked hand-placed. A fixed 2rem box with centred content puts every
+ * centre 16px above the row's bottom edge, and since the textarea's own padding
+ * puts its last line's centre exactly there too, one-, three- and eight-line
+ * drafts all stay aligned. Both numbers are px and must match `INPUT_MIN_PX`.
+ */
+.hb-composer-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hb-composer-btn:hover {
+  color: var(--color-card-foreground);
+}
+
+/* The `+` is a glyph, not a word: keep it square-ish and a touch larger than
+ * body text so it reads as a button rather than a stray character. */
+.hb-composer-attach {
+  width: 2rem;
+  padding: 0;
+  font-size: 1.0625rem;
+}
+
+/* The two coloured actions override the ghost treatment. */
+.hb-composer-send {
+  padding: 0 0.75rem;
+  font-size: 0.75rem;
+}
+
+.hb-composer-stop {
+  padding: 0 0.625rem;
+  font-size: 0.75rem;
+  background: var(--color-muted);
 }
 
 /* ── typography ───────────────────────────────────────────────────────────── */

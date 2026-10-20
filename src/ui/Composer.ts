@@ -96,7 +96,7 @@ const MENU_LIMIT = 200;
 /**
  * The text box's height range, in px.
  *
- * The floor matches `.hb-min-h-input` (2rem); the ceiling is eight-ish lines of
+ * The floor matches `.hb-min-h-input` (32px); the ceiling is eight-ish lines of
  * `text-sm`, past which a long draft scrolls inside the box instead of pushing
  * the transcript and the send button off screen. `.hb-composer-input` carries
  * the same cap in CSS, so a frame with JS still starting up cannot open a
@@ -465,8 +465,7 @@ export function Composer(props: ComposerProps) {
             type: "button",
             title: t.attachFiles,
             "aria-label": t.attachFiles,
-            className: "shrink-0 cursor-pointer px-2 py-1.5 text-base leading-none",
-            style: { color: "var(--color-muted-foreground)" },
+            className: "hb-composer-btn hb-composer-attach",
             onClick: () => fileRef.current?.click(),
           },
           "+",
@@ -490,8 +489,16 @@ export function Composer(props: ComposerProps) {
           disabled: !props.connected,
           placeholder: props.connected ? t.composerPlaceholder : "…",
           "aria-label": t.composerPlaceholder,
-          className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent py-1.5 text-sm outline-none",
-          style: { color: "var(--color-card-foreground)", fontFamily: "var(--font-sans)" },
+          className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent text-sm outline-none",
+          // `--font-sans` is the host's display face ("Collapse", a narrow
+          // serif) and is NOT what body text uses — `html`/`body` take
+          // `--theme-font-sans`, the system UI stack. Pointing the textarea at
+          // the display face made every Latin character thin and hard to read at
+          // typing size, so the draft now matches the rest of the dashboard.
+          style: {
+            color: "var(--color-card-foreground)",
+            fontFamily: "var(--theme-font-sans, system-ui, -apple-system, 'Segoe UI', sans-serif)",
+          },
           onChange: (event: { target: { value: string; selectionStart: number } }) => {
             setText(event.target.value);
             setCaret(event.target.selectionStart ?? event.target.value.length);
@@ -513,8 +520,7 @@ export function Composer(props: ComposerProps) {
               type: "button",
               "data-hb": "model-picker-open",
               title: `${t.pickModel}: ${props.model || "default"}`,
-              className: "hb-text-micro hb-truncate hb-max-w-18ch cursor-pointer px-2 py-1.5",
-              style: { color: "var(--color-muted-foreground)" },
+              className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
               onClick: props.onOpenModelPicker,
             },
             props.model || "model",
@@ -524,8 +530,7 @@ export function Composer(props: ComposerProps) {
             {
               type: "button",
               title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
-              className: "hb-text-micro cursor-pointer px-2 py-1.5",
-              style: { color: "var(--color-muted-foreground)" },
+              className: "hb-composer-btn hb-text-micro",
               onClick: () => {
                 const current = props.reasoning || "medium";
                 const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
@@ -546,7 +551,7 @@ export function Composer(props: ComposerProps) {
                   type: "button",
                   title: t.stopReasoningTitle,
                   "data-hb": "stop-action",
-                  className: "cursor-pointer px-2.5 py-1.5 text-xs",
+                  className: "hb-composer-btn hb-composer-stop",
                   style: {
                     background: "var(--color-muted)",
                     color: "var(--color-muted-foreground)",
@@ -564,7 +569,7 @@ export function Composer(props: ComposerProps) {
               disabled: !canSend,
               title: props.running ? t.insert : t.send,
               "data-hb": "primary-action",
-              className: "cursor-pointer px-3 py-1.5 text-xs",
+              className: "hb-composer-btn hb-composer-send",
               style: {
                 background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                 color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",

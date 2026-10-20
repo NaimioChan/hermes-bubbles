@@ -35,6 +35,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Attachments | Done | `+`, drag-drop and paste; routed to `image.attach_bytes` / `pdf.attach` / `file.attach` |
 | Model & reasoning | Done | `model.options` listing, session-scoped switching, seven reasoning tiers. A switch the gateway wants confirmed (expensive model, data-policy provider, or a large live context) opens a dialog with the guard's own message and an accept control that re-sends the pick confirmed — nothing is written until you say yes |
 | Live metrics | Done | Context bar and percentage, cache hit rate, output speed, cost, updating from `session.usage` |
+| Running indicator | Done | A flicking whale tail (animated PNG, the same asset the DeepSeek harness uses) beside the step that is running: the thinking header while reasoning streams, a tool row while it executes. It is an alpha mask over `currentColor`, so it takes the theme's colour; engines without mask support, and users who asked for reduced motion, get the same tail as a static SVG |
 | Interface language | Done | English by default; follows the dashboard's language switch without a reload |
 
 ## Requirements
@@ -131,7 +132,7 @@ The protocol is Hermes' internal implementation with no OpenAPI description, so 
 ## Verification
 
 ```bash
-npm test                  # 552 unit tests, 26 files, no browser
+npm test                  # 553 unit tests, 26 files, no browser
 npm run typecheck         # tsc --noEmit
 node scripts/verify.mjs   # 93 checks against a real dashboard (needs one on 9119)
 node scripts/audit-classes.mjs

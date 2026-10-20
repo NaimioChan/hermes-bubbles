@@ -461,6 +461,34 @@ async function main() {
     );
     check("plugin stylesheet loaded", pluginCssLoaded === true, String(pluginCssLoaded));
 
+    // ── the running whale tail: the shipped mask has to resolve ────────────
+    // The APNG is inlined by the build. If the placeholder token is ever left
+    // unreplaced, or the rule dropped, the icon is simply invisible — no error,
+    // no missing element. So mount one and read what the browser computed.
+    const whale = await session.evaluate(`(() => {
+      const host = document.createElement('span');
+      host.className = 'hb-whale';
+      const anim = document.createElement('span');
+      anim.className = 'hb-whale-anim';
+      host.appendChild(anim);
+      document.body.appendChild(host);
+      const cs = getComputedStyle(anim);
+      const rect = anim.getBoundingClientRect();
+      const mask = cs.maskImage || cs.webkitMaskImage || '';
+      const out = { display: cs.display, mask: mask.slice(0, 34), w: Math.round(rect.width), h: Math.round(rect.height) };
+      host.remove();
+      return JSON.stringify(out);
+    })()`);
+    const whaleState = JSON.parse(whale);
+    check(
+      "running whale tail renders its inlined animation",
+      whaleState.display === "block" &&
+        whaleState.mask.startsWith('url("data:image/png') &&
+        whaleState.w >= 8 &&
+        whaleState.h >= 8,
+      JSON.stringify(whaleState),
+    );
+
     // ── the backend probe route ────────────────────────────────────────────
     // Must go through the SDK's fetchJSON: it injects the session-token header
     // that a bare fetch() lacks, and the plugin API route sits behind auth.

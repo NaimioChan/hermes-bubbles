@@ -33,6 +33,7 @@ const KNOWN_HOST_VARS = new Set([
   "--color-ring", "--color-secondary", "--color-secondary-foreground",
   "--color-success", "--color-text-secondary", "--color-warning", "--color-white",
   "--radius", "--font-sans", "--font-mono", "--spacing-mul", "--font-size-base",
+  "--theme-font-sans", "--theme-font-mono",
 ]);
 
 function hostVars(): Set<string> | null {
@@ -63,6 +64,17 @@ describe("theme variables", () => {
     join(UI_DIR, "style.css"),
   ];
   const host = hostVars();
+  /**
+   * Variables the plugin declares itself. A self-declared custom property is
+   * just as defined as a host one — the guard exists to catch `var(--typo)`
+   * pointing at nothing, not to forbid our own indirection (the whale tail's
+   * mask keeps a 28 KB data URI in one place that way).
+   */
+  const own = new Set(
+    [...readFileSync(join(UI_DIR, "style.css"), "utf8").matchAll(/(--hb-[a-z0-9-]+)\s*:/g)].map(
+      (m) => m[1] as string,
+    ),
+  );
 
   it("only references variables the host defines, or supplies a fallback", () => {
     const resolved = host ?? KNOWN_HOST_VARS;
@@ -71,7 +83,7 @@ describe("theme variables", () => {
       const name = file.split(/[\\/]/).pop();
       for (const ref of varRefs(readFileSync(file, "utf8"))) {
         if (ref.hasFallback) continue;
-        if (resolved.has(ref.name) || KNOWN_HOST_VARS.has(ref.name)) continue;
+        if (resolved.has(ref.name) || KNOWN_HOST_VARS.has(ref.name) || own.has(ref.name)) continue;
         offenders.push(`${name}: ${ref.name}`);
       }
     }
@@ -87,6 +99,11 @@ describe("theme variables", () => {
       if (banned.test(readFileSync(file, "utf8"))) offenders.push(file.split(/[\\/]/).pop() as string);
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("counts the plugin's own declarations as defined", () => {
+    expect(own.size).toBeGreaterThan(0);
+    expect([...own].every((name) => name.startsWith("--hb-"))).toBe(true);
   });
 
   it("guards the scanner itself", () => {

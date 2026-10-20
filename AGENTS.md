@@ -35,6 +35,7 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 9. **`gateway.ready` 必须走归约，不能提前 return。** 它是 `meta.connected` 变 true 的唯一来源，跳过它输入框会一直禁用。
 10. **组件里的钩子不能出现在提前 `return` 之后。** 钩子数量在两次渲染间变化会抛 React #310，整页白屏，而逻辑单测和 `tsc` 都看不见。`tests/hook-order.test.ts` 会在源码层面拦住它。
 11. **新样式写进 `src/ui/style.css`，别用宿主可能没有的 Tailwind 类。** 插件跑在仪表盘**预编译**的 CSS 上，那份产物只含它自己用过的类；我们造的类若不在其中，**静默失效**（不报错、不警告，属性就是不生效）。踩过三个：`resize-none`、`max-h-[70vh]`、`text-[0.625rem]`。改完跑 `node scripts/audit-classes.mjs`，`tests/layout-classes.test.ts` 会在 CI 层拦住。
+    **二进制资源不要手写进 CSS。** 目前只有运行指示的鲸鱼尾巴（`src/ui/whale-tail.png`，28×28 / 60 帧 APNG）：在 `style.css` 里写占位符 `__WHALE_TAIL__`，`build.mjs` 构建时替换成 data URI，找不到占位符就构建失败。它当 alpha 遮罩盖在 `currentColor` 上，所以颜色跟着主题走；静态 SVG 兜底写在 `Bubble.ts` 里给不支持 mask 或开了「减少动态效果」的场合。
 12. **运行中也要允许发消息。** Hermes 的行为是中途输入 = 打断修正，后端 `prompt.submit` 的 busy 路径会决定排队 / 插入 / 改向并在 `status` 里回报。别再把输入框禁用掉。
 13. **`src/core/markdown.ts` 是回复渲染的唯一来源。** 助手气泡的文本先解析成节点树（`src/core/markdown.ts`），再由 `src/ui/Markdown.ts` 用 `React.createElement` 渲染。**不许出现 `innerHTML` / `dangerouslySetInnerHTML`**——节点树让 React 负责转义，等于从根上删掉注入这一类问题，而不是在周边做净化。`tests/architecture.test.ts` 会拦。链接仍要过 `safeHref()`（React 不会替你拦 `javascript:` 协议）。
 14. **引 CSS 变量必须确认宿主真的定义了它，否则给 fallback。** 宿主从不定义 `--color-foreground` 与 `--color-background`（0.22.2 实测：23 个 `--color-*`，两个都不在其中）。`var(--undefined)` **不报错**，整条声明在计算值阶段被丢掉，元素静默继承或透出背景——`--color-background` 曾让代码块与审批卡变成全透明。`tests/theme-vars.test.ts` 对照真实编译产物查，离线时回退白名单。

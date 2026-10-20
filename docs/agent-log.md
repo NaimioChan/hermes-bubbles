@@ -19,6 +19,7 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 - 文档：AGENTS 铁律 11 补二进制资源占位符约定；两份 README 功能表加「运行指示」行、单测数 552 → 553。
 - 验证：`tsc --noEmit` 干净；`vitest run` 553 passed / 26 文件；`audit-classes` 183/183；`node scripts/verify.mjs` **94/94**（cleanup: closed 3 / deleted 3 / still listed 0）；真仪表盘截图确认鲸鱼在工具行运行中以主色摆动、字体为 DM Sans、多行草稿也对齐。
 - 推送：`00176ca` 推到 origin/main。注意本机的 `credential.helper = helper-selector`（GCM）在没有 tty 时会**卡住不报错**，`git push` 看起来在跑但其实在等凭据框；改用 `gh auth token` 拿 token，`git -c credential.helper= push https://x-access-token:$TOKEN@github.com/…` 一次就过。
+- 补（11:45）：用户反馈尾巴看着偏上。量了一下：`.hb-whale` 与相邻文字的 `cy` 本来就相等，但美术资源自身底部比顶部空（28px 画布里 ink 是 1→25，下方空 3px），盒子居中就显高。`.hb-whale` 加 `transform: translateY(2px)`，真仪表盘 6 倍裁图确认尾巴现在跟「Ran a command」的 cap 高到基线对齐。
 - 遗留：思考行的鲸鱼只在 `reasoning.delta` 流式期间出现，模型不吐 reasoning 时看不到（工具行不受影响）；鲸鱼尺寸取 `1.15em`，随家具字号缩放，没有单列一个 px 值。
 
 ## 2026-10-19 22:40 · hermes · 验收脚本落地 + 工作区清理 + 上游反馈

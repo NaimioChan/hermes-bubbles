@@ -91,6 +91,11 @@
   height: 1.15em;
   align-items: center;
   justify-content: center;
+  /* Nudged down against the optical baseline of the row's text. The art itself
+   * is bottom-light (its ink stops 3px short of a 28px box), so centring the
+   * box leaves the tail reading high next to lowercase letters; 2px is what
+   * puts the fluke level with them. */
+  transform: translateY(2px);
 }
 
 .hb-whale-anim {

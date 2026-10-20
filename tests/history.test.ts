@@ -40,6 +40,53 @@ describe("projectHistory", () => {
     expect(items).toHaveLength(1);
   });
 
+  it("projects machinery rows as notices instead of user bubbles", () => {
+    // The gateway injects synthetic turns ("a background process finished")
+    // with role: "user". Rendering them by role painted the model-facing
+    // envelope as a human bubble — the "reopened session shows a sending
+    // message" report. They are machinery, so they read as notices.
+    const items = projectHistory([
+      {
+        role: "user",
+        display_kind: "process_complete",
+        text: "[IMPORTANT: Background process proc_1 completed normally (exit code 0).",
+      },
+      { role: "user", display_kind: "async_delegation_complete", text: "[IMPORTANT: 3 background processes completed." },
+      { role: "user", display_kind: "internal_notification", text: "[IMPORTANT: Background process proc_2 exited (exit code 1)." },
+      { role: "user", display_kind: "model_switch", text: "[System: The active model for this chat has changed to glm-4.5-flash" },
+      { role: "user", display_kind: "auto_continue", text: "[System note: Your previous turn was interrupted mid-run" },
+      { role: "user", text: "真正的提问" },
+    ]);
+    expect(items).toHaveLength(6);
+    expect(items.filter((i) => i.kind === "user")).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "notice", noticeKind: "process", text: "" });
+    expect(items[1]).toMatchObject({ kind: "notice", noticeKind: "subagents" });
+    expect(items[2]).toMatchObject({ kind: "notice", noticeKind: "background" });
+    expect(items[3]).toMatchObject({ kind: "notice", noticeKind: "model" });
+    expect(items[4]).toMatchObject({ kind: "notice", noticeKind: "continue" });
+    // The raw row is kept for the hover title, not for the bubble body.
+    expect((items[0] as { detail?: string }).detail).toContain("Background process");
+  });
+
+  it("keeps a steered message's text and drops the protocol envelope", () => {
+    // Mid-turn input is stored wrapped in the marker the model needs. Showing
+    // the wrapper turns one sentence into four lines of protocol text.
+    const items = projectHistory([
+      {
+        role: "user",
+        display_kind: "steer",
+        text: "[OUT-OF-BAND USER MESSAGE — a direct message from the user]\n先暂停，等我叫你\n[/OUT-OF-BAND USER MESSAGE]",
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "user", text: "先暂停，等我叫你" });
+  });
+
+  it("leaves a steered row alone when it carries no envelope", () => {
+    const items = projectHistory([{ role: "user", display_kind: "steer", text: "普通文本" }]);
+    expect(items[0]).toMatchObject({ kind: "user", text: "普通文本" });
+  });
+
   it("projects tool rows with args and result, keyed by tool_call_id", () => {
     const items = projectHistory([
       {

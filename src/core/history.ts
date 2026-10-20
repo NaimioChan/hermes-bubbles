@@ -8,7 +8,7 @@
  * Row semantics: `docs/01-protocol-contract.md` §7.
  */
 
-import type { AssistantItem, Timeline, TimelineItem, ToolItem, Usage } from "./types";
+import type { AssistantItem, NoticeKind, Timeline, TimelineItem, ToolItem, Usage } from "./types";
 import { reduceTodos } from "./reduce";
 
 export interface TranscriptMessage {
@@ -75,6 +75,43 @@ function timestampOf(row: TranscriptMessage, fallback: number): number {
 }
 
 /**
+ * Backend machinery rows that are stored on the transcript with a `display_kind`
+ * but were never spoken by the user.
+ *
+ * They arrive with `role: "user"` because that is how the gateway injects a
+ * synthetic turn ("a background process finished", "3 delegations completed"),
+ * so projecting them by role alone paints them as a human bubble whose body is
+ * `[IMPORTANT: Background process proc_… completed normally (exit code 0).` —
+ * the model-facing envelope, log dump and all. The desktop app renders the same
+ * rows as system notices; so does this projection.
+ *
+ * `internal_notification` is the same idea under a different name: it is the
+ * wake-up turn the gateway injects when a background process or delegation
+ * reports back.
+ */
+const MACHINERY_KINDS: Record<string, NoticeKind> = {
+  process_complete: "process",
+  async_delegation_complete: "subagents",
+  internal_notification: "background",
+  model_switch: "model",
+  auto_continue: "continue",
+  personality_switch: "personality",
+};
+
+/**
+ * The user-typed half of a `steer` row.
+ *
+ * A mid-turn message is persisted wrapped in the envelope the model needs
+ * (`[OUT-OF-BAND USER MESSAGE — …]` … `[/OUT-OF-BAND USER MESSAGE]`). Showing
+ * the envelope in a reopened session turns one sentence the user typed into
+ * four lines of protocol text.
+ */
+function steerText(text: string): string {
+  const match = /\[OUT-OF-BAND USER MESSAGE[^\]]*\]\s*([\s\S]*?)\s*\[\/OUT-OF-BAND USER MESSAGE\]/.exec(text);
+  return (match?.[1] ?? text).trim();
+}
+
+/**
  * Project history rows. `hidden` rows are model-facing scaffolding and are
  * dropped; tool rows are kept with whatever the projection carries.
  */
@@ -88,6 +125,16 @@ export function projectHistory(messages: readonly TranscriptMessage[], now = Dat
 
     const at = timestampOf(row, now);
     const rowId = typeof row.row_id === "number" ? row.row_id : undefined;
+    const rawText = typeof row.text === "string" ? row.text : "";
+
+    // A machinery row reads as a system notice, never as a speaker.
+    const machinery = row.display_kind ? MACHINERY_KINDS[row.display_kind] : undefined;
+    if (machinery) {
+      const detail = rawText.trim();
+      if (!detail) continue;
+      items.push({ kind: "notice", id: historyId("notice"), at, text: "", tone: "info", noticeKind: machinery, detail });
+      continue;
+    }
 
     if (role === "tool") {
       const name = row.name ?? "tool";
@@ -108,10 +155,13 @@ export function projectHistory(messages: readonly TranscriptMessage[], now = Dat
       continue;
     }
 
-    const text = typeof row.text === "string" ? row.text : "";
+    const text = rawText;
     if (role === "user") {
-      if (!text.trim()) continue;
-      items.push({ kind: "user", id: historyId("user"), at, text, rowId });
+      // A `steer` row is a real thing the user typed mid-turn, wrapped in the
+      // envelope the model needs; show the sentence, not the envelope.
+      const spoken = row.display_kind === "steer" ? steerText(text) : text;
+      if (!spoken.trim()) continue;
+      items.push({ kind: "user", id: historyId("user"), at, text: spoken, rowId });
       continue;
     }
 

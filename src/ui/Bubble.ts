@@ -12,6 +12,7 @@
 import type { AssistantItem, NoticeItem, ReasoningItem, SubagentChild, SubagentsItem, TimelineItem, ToolItem, UserItem } from "../core/types";
 import { isSubagentTerminal } from "../core/types";
 import { formatElapsed, messageStamp, messagesFor, type Locale } from "../core/i18n";
+import { noticeText } from "../core/notice";
 import type { HermesPluginSdk } from "./sdk";
 import { Markdown } from "./Markdown";
 import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
@@ -592,10 +593,17 @@ function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: Suba
 function NoticeRow({ sdk, item, locale }: { sdk: HermesPluginSdk; item: NoticeItem; locale: Locale }) {
   const { React } = sdk;
   const t = messagesFor(locale);
+  const label = noticeText(item, locale);
   return React.createElement(
     "div",
     {
+      // Machinery notices are a one-line marker, not a message: keep them on the
+      // same left rhythm as tool rows so a long session does not read as a
+      // sequence of walls of monospace log.
       className: "px-3 py-1.5 text-xs",
+      "data-hb": item.noticeKind ? "machinery-notice" : "notice",
+      "data-notice-kind": item.noticeKind,
+      title: item.detail || undefined,
       style: {
         maxWidth: "min(72ch, 82%)",
         color: item.tone === "error" ? "var(--color-destructive)" : "var(--color-muted-foreground)",
@@ -603,7 +611,7 @@ function NoticeRow({ sdk, item, locale }: { sdk: HermesPluginSdk; item: NoticeIt
     },
     // An error frame can arrive with no message at all; an empty red row would
     // read as a rendering bug, so fall back to a sentence from the catalog.
-    item.text || (item.tone === "error" ? t.genericError : ""),
+    label || (item.tone === "error" ? t.genericError : ""),
   );
 }
 

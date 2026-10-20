@@ -8,6 +8,18 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-20 20:40 · hermes · 审批 chip 挪到工作区同一行 + 代码字体 + 重开会话出现"发送消息"
+
+- 背景：用户三条反馈。① 审批按钮单独占一行，不好看；② 代码行是衬线体；③ 回看老会话会出现像"发送消息"的内容，要求检修。
+- ① 审批 chip 归位：`Composer.ts` 把 `WorkspacePicker` 与 `ApprovalModeChip` 包进新的 `.hb-composer-chips` 行；`.hb-approval-wrap` 加 `margin-left:auto` 顶到输入框右缘，弹层由 `left:0.5rem` 改为 `right:0`（否则右对齐的 chip 会向右弹出屏）。`.hb-workspace-wrap` 去掉 `flex-wrap`（它让 git 徽标在窄屏掉到 chip 下方、把审批顶到另一行），改 `min-width:0; flex:0 1 auto`，`.hb-workspace-chip` 的 `max-width` 改 `min(24rem,100%)`——路径靠 ellipsis 截断，不换行。实测：桌面与 390px 两种宽度下 chip 中心线差 0px、审批右缘与"发送"右缘差 0px、无横向溢出、弹层都在屏内。
+- ② 代码字体：宿主 `--font-mono` 是 `"Courier Prime", monospace`（衬线）。新增自有变量 `--hb-font-mono: "JetBrains Mono", ui-monospace, …`（仪表盘本来就在 `/fonts-terminal/JetBrainsMono-*.woff2` 提供这个字面），`.hb-inline-code` / `.hb-md-pre` / `.hb-tool-pre` / git 徽标 / 工作区路径 / slash 菜单 / 模型列表 / `RequestCards` 全部改指它。实测 `document.fonts.check('12px "JetBrains Mono"')` 为 true，说明真用了 webfont 而非回退。
+- ③ "发送消息"：不是插件自己发的消息，是**后端把机器事件以 `role:user` 存进会话**，`projectHistory` 只按 role 投影，于是 `[IMPORTANT: Background process … completed` / `[System: The active model … changed` 这些给模型看的信封被画成了用户气泡。修法：`core/history.ts` 增加 `MACHINERY_KINDS`（`process_complete` / `async_delegation_complete` / `internal_notification` / `model_switch` / `auto_continue` / `personality_switch`）→ 投影成 `notice`（带 `noticeKind` 与 `detail`，后者只做 hover title）；`steer` 行用 `steerText()` 剥掉 `[OUT-OF-BAND USER MESSAGE …]` 信封，只留用户原话。文案走 `core/notice.ts` + i18n 六个键（中英），子代理条数按体内 `[IMPORTANT:` 信封数推断，退化为文案里的数字，再退化为 1。真库抽样验证：含内部行的老会话投影后 `envelopeLeaks` 全空。
+- 验证：`tsc --noEmit` 干净；`vitest run` **567 passed / 27 文件**（新增 `tests/notice.test.ts` 4 条、`tests/history.test.ts` 3 条、`tests/layout-classes.test.ts` 3 条）；`audit-classes` 200/200 全解析。视觉：**本机 9119 开了 basic-auth 且口令在 `.env`，我没有、也不读**，故未登真页面；改用读取真实构建产物（`dist/style.css` + 宿主 `index-Ckq2QD_K.css` + `fonts-terminal/*.woff2`）的静态 harness，Edge CDP 在 1262 与 390 两个宽度量了几何与字体，并截图核对（状态行确实不是气泡形态）。
+- 补（21:10）手机端按钮比例：用户报「图标太小但占的空间又很大」。上一版触控规则只把盒子撑到 44px、字形还留着桌面 12px，于是四个胖方块中间一个针尖大的符号，composer 单独高 105px。改法把两件事分开处理：视觉盒缩到 32px（动作按钮 28px、tab × 28px、顶栏 32px），字形反向上调一档（+ 17px、图标 16px、标签 13px、× 17px），点击热区用透明 `::after` 补回（竖直 34–38px，只往外扩竖直方向，避免相邻按钮在 4px 间隙里互相偷 hit）。顺带压了 composer 的上下 padding，高度 105→75px。实测（390px）：+ 32×32@17px、模型 128×32@12px、发送 38×32@13px、动作 28×28@16px（热区 34×38）、× 28×28@17px、无横向溢出。踩坑记录：把模型 chip 的 `max-width` 压到 9ch 只会显示成 `eek-v4.1-`，已回退；视觉模型报的像素值不可信（把 17px 的 × 说成 10px），几何一律以 CDP 实测为准。
+- 部署：`npm run install-plugin` 已装到 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`；rescan 因未登录回 401，用户强刷一次即生效。`.cache/harness` 属于 `.cache/`，不入库。
+- 补：AGENTS.md 铁律 15 钩子清单已加 `machinery-notice`（上一轮遗留项，这次补上）。
+- 遗留：本机 9119 有 basic-auth，真页面未点验，三点观感待用户刷新确认。
+
 ## 2026-10-20 17:45 · hermes · 三处反馈：移动端溢出、审批模式按钮、标题变回复（上游 bug）
 
 - 背景：用户手机实测反馈三件事。① 加载对话后中央聊天区过宽、撑到屏幕两边、还不能左右滑动；② 想在输入框下面加个按钮调审批模式；③ 换了提供商后会话标题变成「模型在标题里回复」。

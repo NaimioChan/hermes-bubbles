@@ -53,7 +53,7 @@ function cardShell(sdk: HermesPluginSdk, accent: string, children: ReactNS.React
 
 const CODE_STYLE = {
   padding: "0.5rem",
-  fontFamily: "var(--font-mono)",
+  fontFamily: "var(--hb-font-mono)",
   fontSize: "0.8125rem",
   background: "color-mix(in oklab, var(--color-muted) 70%, transparent)",
   borderRadius: "calc(var(--radius) * 0.6)",

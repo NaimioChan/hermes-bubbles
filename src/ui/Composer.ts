@@ -421,7 +421,7 @@ export function Composer(props: ComposerProps) {
                   onMouseEnter: () => setMenuIndex(index),
                   onClick: () => acceptCommand(entry),
                 },
-                React.createElement("span", { className: "font-mono" }, `/${entry.name}`),
+                React.createElement("span", { className: "hb-mono" }, `/${entry.name}`),
                 entry.kind === "skill"
                   ? React.createElement(
                       "span",
@@ -590,33 +590,38 @@ export function Composer(props: ComposerProps) {
         ),
       ),
 
-      // The workspace chip sits directly under the box: it describes where the
-      // NEXT new chat will start, which is a composer-level affordance, not a
-      // transcript one.
-      React.createElement(WorkspacePicker, {
-        sdk,
-        locale: props.locale,
-        value: props.workspace,
-        current: props.workspaceCurrent,
-        options: props.workspaceOptions,
-        home: props.workspaceHome,
-        loading: props.workspaceLoading,
-        failed: props.workspaceFailed,
-        git: props.git,
-        gitLoading: props.gitLoading,
-        onRefreshGit: props.onRefreshGit,
-        onPick: props.onPickWorkspace,
-        onRescan: props.onRescanWorkspaces,
-      }),
+      // One control strip under the box. Both chips describe "how the next
+      // message / command behaves", not transcript content: the workspace chip
+      // names where a NEW chat starts, the approval chip how guarded commands
+      // are handled. They share a line — workspace left, approval pinned to the
+      // right edge of the composer column, so the strip reads as one row of
+      // composer furniture instead of two stacked half-rows.
+      React.createElement(
+        "div",
+        { className: "hb-composer-chips" },
+        React.createElement(WorkspacePicker, {
+          sdk,
+          locale: props.locale,
+          value: props.workspace,
+          current: props.workspaceCurrent,
+          options: props.workspaceOptions,
+          home: props.workspaceHome,
+          loading: props.workspaceLoading,
+          failed: props.workspaceFailed,
+          git: props.git,
+          gitLoading: props.gitLoading,
+          onRefreshGit: props.onRefreshGit,
+          onPick: props.onPickWorkspace,
+          onRescan: props.onRescanWorkspaces,
+        }),
 
-      // Approval mode sits next to the workspace chip: both are "how the next
-      // command behaves", not transcript content.
-      React.createElement(ApprovalModeChip, {
-        sdk,
-        locale: props.locale,
-        value: props.approvalMode,
-        onChange: props.onApprovalModeChange,
-      }),
+        React.createElement(ApprovalModeChip, {
+          sdk,
+          locale: props.locale,
+          value: props.approvalMode,
+          onChange: props.onApprovalModeChange,
+        }),
+      ),
 
       // ── status + metrics ─────────────────────────────────────────────────
       React.createElement(

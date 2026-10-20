@@ -215,6 +215,12 @@ var HermesBubbles = (() => {
     queued: "Queued \u2014 sends when the current turn ends",
     fileReadFailed: "Could not read the file",
     sessionNotReady: "Session is not ready yet",
+    noticeProcess: "Background process finished",
+    noticeSubagents: (count) => `${count} background agent${count === 1 ? "" : "s"} finished`,
+    noticeBackground: "Background work reported back",
+    noticeModel: "Model changed",
+    noticeContinue: "Resumed an interrupted turn",
+    noticePersonality: "Personality changed",
     todos: "Tasks",
     todoProgress: (done, total) => `${done}/${total} done`,
     todoEmpty: "No tasks yet",
@@ -389,6 +395,12 @@ var HermesBubbles = (() => {
     queued: "\u5DF2\u6392\u961F\uFF0C\u5F53\u524D\u4EFB\u52A1\u7ED3\u675F\u540E\u53D1\u9001",
     fileReadFailed: "\u8BFB\u53D6\u6587\u4EF6\u5931\u8D25",
     sessionNotReady: "\u4F1A\u8BDD\u5C1A\u672A\u5EFA\u7ACB",
+    noticeProcess: "\u540E\u53F0\u8FDB\u7A0B\u5DF2\u7ED3\u675F",
+    noticeSubagents: (count) => `${count} \u4E2A\u540E\u53F0\u5B50\u4EE3\u7406\u5DF2\u5B8C\u6210`,
+    noticeBackground: "\u540E\u53F0\u4EFB\u52A1\u5DF2\u56DE\u62A5",
+    noticeModel: "\u6A21\u578B\u5DF2\u5207\u6362",
+    noticeContinue: "\u7EE7\u7EED\u4E86\u88AB\u4E2D\u65AD\u7684\u4E00\u8F6E",
+    noticePersonality: "\u4EBA\u683C\u5DF2\u5207\u6362",
     todos: "\u4EFB\u52A1\u6E05\u5355",
     todoProgress: (done, total) => `\u5B8C\u6210 ${done}/${total}`,
     todoEmpty: "\u6682\u65E0\u4EFB\u52A1",
@@ -1411,6 +1423,18 @@ ${body}`;
     if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return fallback;
     return ts > 1e11 ? ts : ts * 1e3;
   }
+  var MACHINERY_KINDS = {
+    process_complete: "process",
+    async_delegation_complete: "subagents",
+    internal_notification: "background",
+    model_switch: "model",
+    auto_continue: "continue",
+    personality_switch: "personality"
+  };
+  function steerText(text) {
+    const match = /\[OUT-OF-BAND USER MESSAGE[^\]]*\]\s*([\s\S]*?)\s*\[\/OUT-OF-BAND USER MESSAGE\]/.exec(text);
+    return (match?.[1] ?? text).trim();
+  }
   function projectHistory(messages, now = Date.now()) {
     const items = [];
     for (const row of messages) {
@@ -1419,6 +1443,14 @@ ${body}`;
       if (row.display_kind === "hidden") continue;
       const at = timestampOf(row, now);
       const rowId = typeof row.row_id === "number" ? row.row_id : void 0;
+      const rawText = typeof row.text === "string" ? row.text : "";
+      const machinery = row.display_kind ? MACHINERY_KINDS[row.display_kind] : void 0;
+      if (machinery) {
+        const detail = rawText.trim();
+        if (!detail) continue;
+        items.push({ kind: "notice", id: historyId("notice"), at, text: "", tone: "info", noticeKind: machinery, detail });
+        continue;
+      }
       if (role === "tool") {
         const name = row.name ?? "tool";
         const item = {
@@ -1437,10 +1469,11 @@ ${body}`;
         items.push(item);
         continue;
       }
-      const text = typeof row.text === "string" ? row.text : "";
+      const text = rawText;
       if (role === "user") {
-        if (!text.trim()) continue;
-        items.push({ kind: "user", id: historyId("user"), at, text, rowId });
+        const spoken = row.display_kind === "steer" ? steerText(text) : text;
+        if (!spoken.trim()) continue;
+        items.push({ kind: "user", id: historyId("user"), at, text: spoken, rowId });
         continue;
       }
       if (role === "assistant") {
@@ -3036,6 +3069,33 @@ ${body}`;
     };
   }
 
+  // src/core/notice.ts
+  function subagentCount(detail) {
+    const envelopes = detail.match(/\[IMPORTANT:/g)?.length ?? 0;
+    if (envelopes > 0) return envelopes;
+    const prose = /(\d+)\s+(?:background\s+)?(?:process|agent|delegat|subagent|task)/i.exec(detail);
+    return prose ? Math.max(1, Number(prose[1])) : 1;
+  }
+  function noticeText(item, locale) {
+    const t = messagesFor(locale);
+    switch (item.noticeKind) {
+      case "process":
+        return t.noticeProcess;
+      case "subagents":
+        return t.noticeSubagents(subagentCount(item.detail ?? item.text));
+      case "background":
+        return t.noticeBackground;
+      case "model":
+        return t.noticeModel;
+      case "continue":
+        return t.noticeContinue;
+      case "personality":
+        return t.noticePersonality;
+      default:
+        return item.text;
+    }
+  }
+
   // src/core/markdown.ts
   var ESCAPABLE = new Set("\\`*_{}[]()#+-.!>~|".split(""));
   function parseMarkdown(source) {
@@ -4283,10 +4343,17 @@ ${body}`;
   function NoticeRow({ sdk, item, locale }) {
     const { React } = sdk;
     const t = messagesFor(locale);
+    const label = noticeText(item, locale);
     return React.createElement(
       "div",
       {
+        // Machinery notices are a one-line marker, not a message: keep them on the
+        // same left rhythm as tool rows so a long session does not read as a
+        // sequence of walls of monospace log.
         className: "px-3 py-1.5 text-xs",
+        "data-hb": item.noticeKind ? "machinery-notice" : "notice",
+        "data-notice-kind": item.noticeKind,
+        title: item.detail || void 0,
         style: {
           maxWidth: "min(72ch, 82%)",
           color: item.tone === "error" ? "var(--color-destructive)" : "var(--color-muted-foreground)"
@@ -4294,7 +4361,7 @@ ${body}`;
       },
       // An error frame can arrive with no message at all; an empty red row would
       // read as a rendering bug, so fall back to a sentence from the catalog.
-      item.text || (item.tone === "error" ? t.genericError : "")
+      label || (item.tone === "error" ? t.genericError : "")
     );
   }
   function Bubble(props) {
@@ -4937,7 +5004,7 @@ ${body}`;
                 onMouseEnter: () => setMenuIndex(index),
                 onClick: () => acceptCommand(entry)
               },
-              React.createElement("span", { className: "font-mono" }, `/${entry.name}`),
+              React.createElement("span", { className: "hb-mono" }, `/${entry.name}`),
               entry.kind === "skill" ? React.createElement(
                 "span",
                 {
@@ -5092,32 +5159,37 @@ ${body}`;
             )
           )
         ),
-        // The workspace chip sits directly under the box: it describes where the
-        // NEXT new chat will start, which is a composer-level affordance, not a
-        // transcript one.
-        React.createElement(WorkspacePicker, {
-          sdk,
-          locale: props.locale,
-          value: props.workspace,
-          current: props.workspaceCurrent,
-          options: props.workspaceOptions,
-          home: props.workspaceHome,
-          loading: props.workspaceLoading,
-          failed: props.workspaceFailed,
-          git: props.git,
-          gitLoading: props.gitLoading,
-          onRefreshGit: props.onRefreshGit,
-          onPick: props.onPickWorkspace,
-          onRescan: props.onRescanWorkspaces
-        }),
-        // Approval mode sits next to the workspace chip: both are "how the next
-        // command behaves", not transcript content.
-        React.createElement(ApprovalModeChip, {
-          sdk,
-          locale: props.locale,
-          value: props.approvalMode,
-          onChange: props.onApprovalModeChange
-        }),
+        // One control strip under the box. Both chips describe "how the next
+        // message / command behaves", not transcript content: the workspace chip
+        // names where a NEW chat starts, the approval chip how guarded commands
+        // are handled. They share a line — workspace left, approval pinned to the
+        // right edge of the composer column, so the strip reads as one row of
+        // composer furniture instead of two stacked half-rows.
+        React.createElement(
+          "div",
+          { className: "hb-composer-chips" },
+          React.createElement(WorkspacePicker, {
+            sdk,
+            locale: props.locale,
+            value: props.workspace,
+            current: props.workspaceCurrent,
+            options: props.workspaceOptions,
+            home: props.workspaceHome,
+            loading: props.workspaceLoading,
+            failed: props.workspaceFailed,
+            git: props.git,
+            gitLoading: props.gitLoading,
+            onRefreshGit: props.onRefreshGit,
+            onPick: props.onPickWorkspace,
+            onRescan: props.onRescanWorkspaces
+          }),
+          React.createElement(ApprovalModeChip, {
+            sdk,
+            locale: props.locale,
+            value: props.approvalMode,
+            onChange: props.onApprovalModeChange
+          })
+        ),
         // ── status + metrics ─────────────────────────────────────────────────
         React.createElement(
           "div",
@@ -5939,7 +6011,7 @@ ${body}`;
                     },
                     onClick: () => props.onPick(model, group.provider.slug)
                   },
-                  React.createElement("span", { className: "min-w-0 flex-1 truncate font-mono" }, model),
+                  React.createElement("span", { className: "hb-mono min-w-0 flex-1 truncate" }, model),
                   isCurrent ? React.createElement("span", { style: { color: "var(--color-primary)" } }, "\u2713") : null
                 );
               })
@@ -6035,7 +6107,7 @@ ${body}`;
   }
   var CODE_STYLE = {
     padding: "0.5rem",
-    fontFamily: "var(--font-mono)",
+    fontFamily: "var(--hb-font-mono)",
     fontSize: "0.8125rem",
     background: "color-mix(in oklab, var(--color-muted) 70%, transparent)",
     borderRadius: "calc(var(--radius) * 0.6)"

@@ -212,6 +212,17 @@ export interface Messages {
   queued: string;
   fileReadFailed: string;
   sessionNotReady: string;
+  /**
+   * The transcript's machinery rows (a background process or delegation
+   * finishing, a model switch). The backend stores them as model-facing turns;
+   * these are what a reopened session says instead.
+   */
+  noticeProcess: string;
+  noticeSubagents: (count: number) => string;
+  noticeBackground: string;
+  noticeModel: string;
+  noticeContinue: string;
+  noticePersonality: string;
   /** The task-list panel (`todo.updated`). */
   todos: string;
   todoProgress: (done: number, total: number) => string;
@@ -386,6 +397,12 @@ const EN: Messages = {
   queued: "Queued — sends when the current turn ends",
   fileReadFailed: "Could not read the file",
   sessionNotReady: "Session is not ready yet",
+  noticeProcess: "Background process finished",
+  noticeSubagents: (count) => `${count} background agent${count === 1 ? "" : "s"} finished`,
+  noticeBackground: "Background work reported back",
+  noticeModel: "Model changed",
+  noticeContinue: "Resumed an interrupted turn",
+  noticePersonality: "Personality changed",
   todos: "Tasks",
   todoProgress: (done, total) => `${done}/${total} done`,
   todoEmpty: "No tasks yet",
@@ -565,6 +582,12 @@ const ZH: Messages = {
   queued: "已排队，当前任务结束后发送",
   fileReadFailed: "读取文件失败",
   sessionNotReady: "会话尚未建立",
+  noticeProcess: "后台进程已结束",
+  noticeSubagents: (count) => `${count} 个后台子代理已完成`,
+  noticeBackground: "后台任务已回报",
+  noticeModel: "模型已切换",
+  noticeContinue: "继续了被中断的一轮",
+  noticePersonality: "人格已切换",
   todos: "任务清单",
   todoProgress: (done, total) => `完成 ${done}/${total}`,
   todoEmpty: "暂无任务",

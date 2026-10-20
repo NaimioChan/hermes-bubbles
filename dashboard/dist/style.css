@@ -65,6 +65,25 @@
   flex: 1 1 auto;
 }
 
+/* ── type the plugin owns ─────────────────────────────────────────────────── */
+
+/*
+ * Code faces. The host's `--font-mono` resolves to `"Courier Prime", monospace`
+ * — a SERIF monospace chosen for its terminal look, which reads as a book face
+ * inside a chat bubble. The dashboard already ships JetBrains Mono as its
+ * terminal face (`@font-face` at `/fonts-terminal/JetBrainsMono-*.woff2`, served
+ * from the same origin), so name it directly; the stack after it covers a host
+ * build that stopped shipping the webfont.
+ */
+:root {
+  --hb-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+}
+
+.hb-mono {
+  font-family: var(--hb-font-mono);
+}
+
 /* ── the running whale tail ───────────────────────────────────────────────── */
 
 /*
@@ -278,7 +297,7 @@
 
 .hb-inline-code {
   padding: 0.1em 0.35em;
-  font-family: var(--font-mono);
+  font-family: var(--hb-font-mono);
   font-size: 0.9em;
   /* Explicit foreground, not inherited-by-luck: the host has a global
    * `code { color: var(--background) }` rule keyed on the TAG, so a bare
@@ -347,7 +366,7 @@
 
 .hb-md-pre {
   padding: 0.6rem 0.7rem;
-  font-family: var(--font-mono);
+  font-family: var(--hb-font-mono);
   font-size: 0.8125rem;
   line-height: 1.5;
   background: var(--color-background, color-mix(in oklab, var(--color-muted) 70%, transparent));
@@ -642,7 +661,7 @@
   max-height: 18rem;
   overflow: auto;
   padding: 0.35rem 0.5rem;
-  font-family: var(--font-mono);
+  font-family: var(--hb-font-mono);
   font-size: 0.75rem;
   background: color-mix(in oklab, var(--color-muted) 55%, transparent);
   border-radius: calc(var(--radius) * 0.5);
@@ -1093,22 +1112,39 @@ div:hover > .hb-row-tools,
 
 /* ── workspace chip + panel ──────────────────────────────────────────────── */
 
+/* The strip under the composer: workspace chip on the left, approval chip pinned
+ * to the right edge. Both are composer furniture, so they share one line rather
+ * than stacking as two half-filled rows. */
+.hb-composer-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem 0;
+}
+
 .hb-workspace-wrap {
   position: relative;
   display: flex;
   align-items: center;
-  /* Let the chip and the git badge wrap on a narrow screen instead of pushing
-   * the row wider than the viewport (they sum to ~40rem, only a phone wraps). */
-  flex-wrap: wrap;
+  /* No `flex-wrap`: the chip truncates (its label is `text-overflow: ellipsis`
+   * at `max-width: 24rem`), so the row never needs a second line. Wrapping here
+   * made the git badge drop BELOW the strip on a phone and pushed the approval
+   * chip off its own line. */
   gap: 0.25rem;
-  padding: 0.15rem 0.5rem 0;
+  /* `min-width:0` + `flex-shrink` so a long path shrinks instead of shoving the
+   * approval chip past the right edge. */
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .hb-workspace-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  max-width: 24rem;
+  /* 24rem on a desktop, but never more than the strip allows: `min()` is what
+   * keeps the label from elbowing the approval chip aside at 390px. */
+  max-width: min(24rem, 100%);
+  min-width: 0;
   padding: 0.1rem 0.4rem;
   border: 0;
   background: transparent;
@@ -1131,6 +1167,7 @@ div:hover > .hb-row-tools,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 /* ── git badge (right of the workspace chip) ─────────────────────────────── */
@@ -1146,7 +1183,7 @@ div:hover > .hb-row-tools,
   border-radius: calc(var(--radius) * 0.5);
   font-size: 0.6875rem;
   line-height: 1.4;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--hb-font-mono);
   cursor: pointer;
 }
 
@@ -1257,7 +1294,7 @@ div:hover > .hb-row-tools,
   white-space: nowrap;
   color: var(--color-muted-foreground);
   font-size: 0.625rem;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--hb-font-mono);
   direction: rtl;
   text-align: right;
 }
@@ -1317,7 +1354,10 @@ div:hover > .hb-row-tools,
   position: relative;
   display: inline-flex;
   align-items: center;
-  padding: 0.1rem 0.5rem 0;
+  /* `margin-left:auto` is what right-aligns it to the composer's edge; without
+   * it the chip sits wherever the workspace chip's text happens to end. */
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .hb-approval-chip {
@@ -1362,7 +1402,9 @@ div:hover > .hb-row-tools,
 .hb-approval-panel {
   position: absolute;
   bottom: calc(100% + 0.25rem);
-  left: 0.5rem;
+  /* Right-anchored: the chip lives at the composer's right edge, so a menu that
+   * grew rightwards from `left` would hang off screen. */
+  right: 0;
   z-index: 31;
   display: flex;
   flex-direction: column;
@@ -1650,21 +1692,90 @@ div:hover > .hb-row-tools,
     max-width: 100% !important;
   }
 
-  /* 32px is a mouse target; 44px is the platform minimum for touch. */
-  .hb-composer-btn,
-  .hb-action-btn {
-    min-width: 44px;
-    height: 44px;
+  /* Touch targets.
+   *
+   * The first version of this block only grew the BOX to 44px and left the glyph
+   * at its 12px desktop size: a phone then showed four fat squares with a tiny
+   * mark floating in the middle of each, and the composer alone stood 105px
+   * tall. Two things are wrong in that trade — the box is heavy and the mark is
+   * small — so they are fixed separately: the visual box goes down to 36px and
+   * the glyph goes UP a step, while the tap target is restored by a transparent
+   * overlay (vertical only, so neighbouring buttons cannot steal each other's
+   * taps in a 4px gap).
+   */
+  .hb-composer-btn {
+    position: relative;
+    height: 32px;
+    min-width: 32px;
+    padding: 0 0.4rem;
+  }
+  .hb-composer-btn::after {
+    content: "";
+    position: absolute;
+    inset: -4px -2px;
+  }
+  /* A 32px hole needs a 17-18px mark to look like a button. */
+  .hb-composer-attach {
+    width: 32px;
+    font-size: 1.125rem;
   }
   .hb-action-btn {
-    width: 44px;
+    position: relative;
+    width: 28px;
+    height: 28px;
+    font-size: 1.0625rem;
+  }
+  .hb-action-btn::after {
+    content: "";
+    position: absolute;
+    inset: -5px -3px;
+  }
+  /* The glyph row's 4px gap would sit inside two overlapping overlays; widen the
+     row so the 30px visual boxes still read as separate buttons. */
+  .hb-actions-tools {
+    gap: 0.4rem;
+  }
+  .hb-action-btn-text {
+    min-height: 34px;
+    font-size: 0.8125rem;
+  }
+  /* Word buttons. Their box was already down to 36px, so the only thing that can
+   * bring the glyph-to-box ratio into range is the type: 11px labels inside a
+   * 36px pill read as small print in a big box, and these buttons are mostly
+   * text. 13-14px against 34px is what a normal touch button looks like. */
+  .hb-composer-tools .hb-text-micro {
+    font-size: 0.8125rem;
+  }
+  /* The model chip already truncates by `hb-max-w-18ch` (~129px). Capping it
+     tighter to "save space" only produced "eek-v4.1-" — an unreadable stub in a
+     row that has the second line to itself. Leave the desktop cap alone. */
+  .hb-composer-send {
+    font-size: 0.875rem;
   }
   [data-hb="notify-toggle"],
   [data-hb="tab-new"],
   [data-hb="history-toggle"],
   [data-hb="tab"] {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+  [data-hb="notify-toggle"],
+  [data-hb="tab-new"] {
+    font-size: 1.0625rem;
+  }
+  [data-hb="history-toggle"] {
+    /* A word, not a glyph: 17px type in a 34px pill shouts. */
+    font-size: 0.875rem;
+  }
+  /* The tab's × was 12×15 — under a fingertip it is a coin toss, and it sits
+     INSIDE the tab button, so it needs its own target rather than a bigger box. */
+  .hb-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    font-size: 1.125rem;
   }
 
   /* Touch has no hover: reveal the action rows permanently, or copy / branch /
@@ -1680,7 +1791,9 @@ div:hover > .hb-row-tools,
      list options 铁律 20 is about. */
   .hb-composer-row {
     flex-wrap: wrap;
-    row-gap: 0.375rem;
+    row-gap: 0.25rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
   }
   .hb-composer-row .hb-composer-input {
     flex: 1 1 auto;

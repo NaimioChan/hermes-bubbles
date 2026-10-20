@@ -146,6 +146,46 @@ describe("layout classes", () => {
     expect(ownCss).toMatch(/\.hb-approval-chip\s*\{/);
   });
 
+  it("puts the approval chip on the workspace row, aligned to the right edge", () => {
+    // Two stacked half-rows of chips read as unfinished layout. Both chips are
+    // composer furniture, so they share one line: workspace left, approval
+    // pinned right by `margin-left:auto`.
+    const composer = readFileSync(join(UI_DIR, "Composer.ts"), "utf8");
+    expect(composer).toContain("hb-composer-chips");
+    expect(ownCss).toMatch(/\.hb-composer-chips\s*\{[^}]*display:\s*flex/);
+    expect(ownCss).toMatch(/\.hb-approval-wrap\s*\{[^}]*margin-left:\s*auto/);
+    // The menu hangs off a right-aligned chip, so it must grow leftwards or it
+    // leaves the viewport.
+    expect(ownCss).toMatch(/\.hb-approval-panel\s*\{[^}]*right:\s*0/);
+  });
+
+  it("types code with the terminal face, not the host's serif mono", () => {
+    // `--font-mono` resolves to "Courier Prime" — a serif monospace that reads
+    // as a book face inside a bubble. The plugin names JetBrains Mono (which the
+    // dashboard already serves at /fonts-terminal/) itself.
+    expect(ownCss).toMatch(/--hb-font-mono:\s*"JetBrains Mono"/);
+    expect(ownCss).toMatch(/\.hb-md-pre\s*\{[^}]*font-family:\s*var\(--hb-font-mono\)/);
+    expect(ownCss).toMatch(/\.hb-inline-code\s*\{[^}]*font-family:\s*var\(--hb-font-mono\)/);
+    // No source may still point at the host's serif mono.
+    for (const file of ["style.css", "RequestCards.ts"]) {
+      expect(readFileSync(join(UI_DIR, file), "utf8")).not.toContain("var(--font-mono");
+    }
+  });
+
+  it("scales phone controls to their glyphs instead of inflating empty boxes", () => {
+    // First pass at touch targets only grew the BOX to 44px and left the glyph at
+    // its 12px desktop size: four fat squares with a speck in the middle, and the
+    // composer alone stood 105px tall. The visual box has to come down and the
+    // mark has to go up, with the tap target restored on a transparent overlay.
+    expect(ownCss).toMatch(/\.hb-composer-btn\s*\{[^}]*height:\s*32px/);
+    expect(ownCss).toMatch(/\.hb-action-btn\s*\{[^}]*width:\s*28px/);
+    expect(ownCss).toMatch(/\.hb-action-btn::after\s*\{[^}]*inset:\s*-5px/);
+    expect(ownCss).toMatch(/\.hb-tab-close\s*\{[^}]*width:\s*28px/);
+    // No mobile rule may still widen a control to 44px: that is the regression.
+    const mobile = /@media\s*\(max-width:\s*768px\)([\s\S]*)$/.exec(ownCss)?.[1] ?? "";
+    expect(mobile).not.toMatch(/(?:min-)?(?:width|height):\s*44px/);
+  });
+
   it("keeps thinking blocks and tool rows out of the bubble treatment", () => {
     // Both were bubbles once: reasoning rode on the assistant row (an empty card
     // per think-only segment) and every tool call was a padded card. Their

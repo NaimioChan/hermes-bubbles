@@ -139,7 +139,26 @@ export interface NoticeItem {
   at: Millis;
   text: string;
   tone: "info" | "error";
+  /**
+   * Set when this notice stands in for a backend machinery row (a background
+   * process or delegation finishing, a model switch) rather than a sentence the
+   * agent emitted. The renderer localises these instead of printing the raw
+   * model-facing text, which is written for the model and reads like a log dump
+   * inside a chat bubble.
+   */
+  noticeKind?: NoticeKind;
+  /** Raw backend text, kept for the hover title only. */
+  detail?: string;
 }
+
+/** Machinery rows the backend stores on the transcript, per `display_kind`. */
+export type NoticeKind =
+  | "process"
+  | "subagents"
+  | "background"
+  | "model"
+  | "continue"
+  | "personality";
 
 /**
  * One item of the agent's task list (`todo.updated`).

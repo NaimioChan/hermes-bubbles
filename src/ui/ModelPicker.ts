@@ -167,7 +167,7 @@ export function ModelPicker(props: ModelPickerProps) {
                         },
                         onClick: () => props.onPick(model, group.provider.slug),
                       },
-                      React.createElement("span", { className: "min-w-0 flex-1 truncate font-mono" }, model),
+                      React.createElement("span", { className: "hb-mono min-w-0 flex-1 truncate" }, model),
                       isCurrent ? React.createElement("span", { style: { color: "var(--color-primary)" } }, "✓") : null,
                     );
                   }),

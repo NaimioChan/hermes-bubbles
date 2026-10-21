@@ -15,6 +15,7 @@ import { addAttachment, removeAttachment, updateAttachment, type Attachment } fr
 import { parseSessionDrop } from "../core/context";
 import { messagesFor, type Locale } from "../core/i18n";
 import { gitTargetDir, type GitInfo } from "../core/gitinfo";
+import { followAfterChange, pinnedState, pinAfterScroll, type PinState } from "../core/pin";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
 import type { TimelineItem } from "../core/types";
@@ -178,8 +179,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // Preference AND permission: the switch must not read "on" in a browser that
   // has never granted permission, which is the state where nothing can fire.
   const notifyState = notifySwitch(notifyOn, notifyPermission);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Whether the transcript is following new output. A ref, not state: it is
+  // written from a scroll handler and read from a layout effect, and neither
+  // should cost a render (see `core/pin.ts`).
+  const pinRef = useRef<PinState>(pinnedState);
+
   // The boot effect must not re-run when the language changes, but the notice
   // sink needs the current language: keep it in a ref it reads at call time.
   const localeRef = useRef<Locale>(locale);
@@ -450,9 +455,41 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   );
 
   // ── transcript scroll ───────────────────────────────────────────────────
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [timeline.items.length, timeline.items.at(-1)]);
+  // Follow the bottom only while the reader is at the bottom. The pin tracks
+  // the reader's own `scrollTop` (see `core/pin.ts`): a streaming turn appends
+  // many times a second, and an unconditional `scrollIntoView` on each one made
+  // it impossible to scroll up and read earlier output — every delta dragged
+  // the view back down.
+
+  /** Put the newest content in view and re-arm the follow. */
+  const stickToBottom = useCallback(() => {
+    const el = scrollerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    // The position, not `bottomRef.scrollIntoView`: the latter also scrolls
+    // scrollable ancestors and drags the whole dashboard with it.
+    pinRef.current = { lastTop: el?.scrollTop ?? 0, released: false };
+  }, []);
+
+  // A different session is a different transcript: open it at its newest output.
+  React.useLayoutEffect(() => {
+    stickToBottom();
+  }, [state.activeKey, stickToBottom]);
+
+  React.useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const next = followAfterChange(
+      { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight },
+      pinRef.current,
+    );
+    pinRef.current = next.state;
+    if (next.decision === "follow") el.scrollTop = el.scrollHeight;
+    // Keyed on the tail of the transcript, not on the whole items array: a
+    // streaming delta replaces the last item, so growth at the end is caught,
+    // while a status change on an older card must not drag the view (the reader
+    // may be reading that card, or one the click just expanded). A duplicate
+    // dropped by dedupe never reaches here at all.
+  }, [timeline.items.length, timeline.items.at(-1), cards.length]);
 
   // ── actions ─────────────────────────────────────────────────────────────
 
@@ -476,12 +513,15 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       }
       const target = editing;
       setEditing(null);
+      // Sending is a deliberate "show me the answer": re-arm the follow even if
+      // the reader had scrolled up into the history first.
+      stickToBottom();
       const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
       run
         .then(() => setAttachments([]))
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
         },
-        [controller, editing, notifyState],
+        [controller, editing, notifyState, stickToBottom],
         );
 
   /**
@@ -783,6 +823,15 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           {
             className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll",
             ref: scrollerRef,
+            // The reader's own scrolling is the only signal for "stop following
+            // the stream" — see `core/pin.ts` for why position alone is not.
+            onScroll: (event: { currentTarget: HTMLDivElement }) => {
+              const el = event.currentTarget;
+              pinRef.current = pinAfterScroll(
+                { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight },
+                pinRef.current,
+              );
+            },
             "data-hb": "transcript",
           },
           React.createElement(
@@ -849,7 +898,6 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                   error,
                 )
               : null,
-            React.createElement("div", { ref: bottomRef }),
           ),
         ),
         React.createElement(LocatorRail, {

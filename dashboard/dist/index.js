@@ -667,6 +667,39 @@ ${body}`;
     return (home ?? "").trim();
   }
 
+  // src/core/pin.ts
+  var STICK_SLACK_PX = 24;
+  var RELEASE_INTENT_PX = 8;
+  var pinnedState = { lastTop: 0, released: false };
+  function distanceFromBottom(metrics) {
+    const overflow = metrics.scrollHeight - metrics.clientHeight;
+    if (!Number.isFinite(overflow) || overflow <= 0) return 0;
+    const scrolled = Math.max(0, Math.min(overflow, metrics.scrollTop));
+    return overflow - scrolled;
+  }
+  function atBottom(metrics) {
+    return distanceFromBottom(metrics) <= STICK_SLACK_PX;
+  }
+  function pinAfterScroll(metrics, state) {
+    if (atBottom(metrics)) return { lastTop: metrics.scrollTop, released: false };
+    const movedUp = state.lastTop - metrics.scrollTop;
+    return {
+      lastTop: metrics.scrollTop,
+      released: state.released || movedUp > RELEASE_INTENT_PX
+    };
+  }
+  function followAfterChange(metrics, state) {
+    if (atBottom(metrics)) {
+      return { decision: "follow", state: { lastTop: metrics.scrollTop, released: false } };
+    }
+    const movedUp = state.lastTop - metrics.scrollTop;
+    const released = state.released || movedUp > RELEASE_INTENT_PX;
+    return {
+      decision: released ? "hold" : "follow",
+      state: { lastTop: metrics.scrollTop, released }
+    };
+  }
+
   // src/core/slash.ts
   function findSlashToken(text, caret) {
     const pos = Math.max(0, Math.min(caret, text.length));
@@ -6790,8 +6823,8 @@ ${body}`;
       () => notificationPermission()
     );
     const notifyState = notifySwitch(notifyOn, notifyPermission);
-    const bottomRef = useRef(null);
     const scrollerRef = useRef(null);
+    const pinRef = useRef(pinnedState);
     const localeRef = useRef(locale);
     const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
     const timeline = activeTimeline(state);
@@ -6941,9 +6974,24 @@ ${body}`;
       },
       [controller]
     );
-    useEffect(() => {
-      bottomRef.current?.scrollIntoView({ block: "end" });
-    }, [timeline.items.length, timeline.items.at(-1)]);
+    const stickToBottom = useCallback(() => {
+      const el = scrollerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      pinRef.current = { lastTop: el?.scrollTop ?? 0, released: false };
+    }, []);
+    React.useLayoutEffect(() => {
+      stickToBottom();
+    }, [state.activeKey, stickToBottom]);
+    React.useLayoutEffect(() => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const next = followAfterChange(
+        { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight },
+        pinRef.current
+      );
+      pinRef.current = next.state;
+      if (next.decision === "follow") el.scrollTop = el.scrollHeight;
+    }, [timeline.items.length, timeline.items.at(-1), cards.length]);
     const retire = useCallback((id) => {
       setCards((prev) => prev.filter((card) => card.id !== id));
     }, []);
@@ -6958,10 +7006,11 @@ ${body}`;
         }
         const target = editing;
         setEditing(null);
+        stickToBottom();
         const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
         run.then(() => setAttachments([])).catch((err) => setError(err instanceof Error ? err.message : String(err)));
       },
-      [controller, editing, notifyState]
+      [controller, editing, notifyState, stickToBottom]
     );
     const onToggleNotify = useCallback(() => {
       if (notifyState === "on" || notifyState === "blocked") {
@@ -7166,6 +7215,15 @@ ${body}`;
               {
                 className: "min-h-0 flex-1 overflow-y-auto px-4 py-4 hb-scroll",
                 ref: scrollerRef,
+                // The reader's own scrolling is the only signal for "stop following
+                // the stream" — see `core/pin.ts` for why position alone is not.
+                onScroll: (event) => {
+                  const el = event.currentTarget;
+                  pinRef.current = pinAfterScroll(
+                    { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight },
+                    pinRef.current
+                  );
+                },
                 "data-hb": "transcript"
               },
               React.createElement(
@@ -7225,8 +7283,7 @@ ${body}`;
                   "div",
                   { className: "text-xs", style: { color: "var(--color-destructive)" } },
                   error
-                ) : null,
-                React.createElement("div", { ref: bottomRef })
+                ) : null
               )
             ),
             React.createElement(LocatorRail, {

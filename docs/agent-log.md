@@ -8,6 +8,17 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-21 14:15 · hermes · 流式输出时不再强制滚到底
+
+- 问题：用户报「正在打印气泡（回复、思考、工具输出全部）时页面被强制滚到最下面，无法滚动页面」。根因在 `ui/ChatPage.ts` 的 `useEffect(() => bottomRef.scrollIntoView())`，依赖是 `[items.length, items.at(-1)]`——每个 delta 都换掉最后一个 item，于是每个 delta 都无条件滚底，读者轮滑上去后下一次 delta 立刻拽回来。
+- 改：新增 `src/core/pin.ts`（纯函数，无 DOM）判定「跟随 / 停在原地」。判据不是单纯的距离，而是**读者自己的 `scrollTop` 有没有减小**（内容变高不会动 `scrollTop`，我们的跟随只会增大它，只有读者的滚动才让它减小），所以长回复长到超出一屏时仍然自动跟随，而读者往上滑一下就停住，滑回底部自动恢复。`ChatPage` 用 `onScroll` 喂面板 + `useLayoutEffect`（依赖 `[items.length, items.at(-1), cards.length]`）读判据，位置直接 `el.scrollTop = el.scrollHeight`，不再用 `scrollIntoView`（它会连带滚动祖先，把仪表盘一起拽）。切页签 / 发送消息时重新贴底（发送是「我要看结果」的手势）。
+- 踩坑：`scrollIntoView` 那条也是唯一让「轮滑 → 下一个 delta」这个竞态的窗口期存在的地方——`scroll` 事件是异步派发的，delta 渲染可能先到，第一版只靠 `onScroll` 判意图，实测仍然被拽回。现在 `followAfterChange` 里把「`scrollTop` 减小」也当意图（内容增长永远不会让它减小），这个竞态就消失了。
+- 验证：`tsc --noEmit` 干净；`vitest run` **584 passed / 28 文件**（新增 `tests/pin.test.ts` 13 条：几何、clamp 弹性回弹、跟随长回复、轮滑上滑即停、抖动不误判、内容增长不误读为滚动、回底恢复、一直保持停住、delta 抢在 scroll 事件前的减小、lastTop 必须是真实位置）；`audit-classes` 200/200。真页面：临时 HERMES_HOME + 回环实例 9121（**用户自己的 9119 未动、未启停**），临时装插件后 CDP 驱动真模型真往返，量到 7/7：贴底时 height 842→1477 且 gap 恒 0；滑到 150 后文本继续从 1548 长到 1809，`scrollTop` 恒 150；回底后 gap 回到 0；`window.scrollY` 恒 0；无异常。截图确认停在正文中段而非最新行。临时实例、临时 HERMES_HOME、探针脚本已全部删除。
+- 部署：`npm run install-plugin` 已装到 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`；rescan 因 9119 有 basic-auth 回 401，用户刷新一次 `/chat` 生效。
+- 遗留：本机 9119 有 basic-auth，口令我没有也不读，故未在用户自己的实例上点验。git 未提交（等确认）。
+
+---
+
 ## 2026-10-20 21:25 · hermes · 生成标题后页签自动刷新
 
 - 改：`src/core/sessions.ts`（新增 `withTitleFromTimeline`，`routeEvent` 两条分支在写入 timeline 后同步 `tab.title`）、`tests/sessions.test.ts`（3 条）、`tests/controller.test.ts`（1 条）。

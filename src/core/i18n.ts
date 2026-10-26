@@ -113,6 +113,8 @@ export interface Messages {
   /** Approval / clarify cards. */
   approvalTitle: string;
   clarifyTitle: string;
+  /** The free-text row every choice list ends with (the desktop app's "Other"). */
+  clarifyOther: string;
   approvalOnce: string;
   approvalSession: string;
   approvalAlways: string;
@@ -155,6 +157,16 @@ export interface Messages {
   projectsFailed: string;
   projectSessionCount: (n: number) => string;
   showAllSessions: string;
+  /** The per-project kebab menu: rename / remove, and what "remove" means per tier. */
+  projectMenu: string;
+  projectHide: string;
+  projectHideHint: string;
+  projectHideConfirm: string;
+  projectDeleteHint: string;
+  projectDeleteConfirm: string;
+  projectRestoreHidden: (n: number) => string;
+  projectRenameFailed: string;
+  projectRemoveFailed: string;
   reasoning: string;
   reasoningLow: string;
   reasoningMedium: string;
@@ -303,6 +315,7 @@ const EN: Messages = {
   connectChatDisabled: "Chat is not enabled on this dashboard",
   approvalTitle: "Needs your confirmation",
   clarifyTitle: "Question",
+  clarifyOther: "Type your own answer",
   approvalOnce: "Allow once",
   approvalSession: "Allow this session",
   approvalAlways: "Always allow",
@@ -340,6 +353,15 @@ const EN: Messages = {
   projectsFailed: "Could not load projects",
   projectSessionCount: (n) => `${n} ${n === 1 ? "session" : "sessions"}`,
   showAllSessions: "Show all",
+  projectMenu: "Project actions",
+  projectHide: "Remove from list",
+  projectHideHint: "Hides this repository here; nothing on disk or in the backend changes",
+  projectHideConfirm: "Remove this repository from the project list? Your sessions and files stay.",
+  projectDeleteHint: "Deletes the project entry; its folders and sessions stay",
+  projectDeleteConfirm: "Delete this project? The folder and its sessions are not deleted, but the project entry cannot be restored from here.",
+  projectRestoreHidden: (n) => `Show ${n} hidden`,
+  projectRenameFailed: "Could not rename the project",
+  projectRemoveFailed: "Could not remove the project",
   reasoning: "Reasoning",
   reasoningLow: "Low",
   reasoningMedium: "Medium",
@@ -488,6 +510,7 @@ const ZH: Messages = {
   connectChatDisabled: "聊天功能未启用",
   approvalTitle: "需要你确认",
   clarifyTitle: "请选择",
+  clarifyOther: "自己输入答案",
   approvalOnce: "允许一次",
   approvalSession: "本次会话允许",
   approvalAlways: "总是允许",
@@ -525,6 +548,15 @@ const ZH: Messages = {
   projectsFailed: "加载项目失败",
   projectSessionCount: (n) => `${n} 个会话`,
   showAllSessions: "展开全部",
+  projectMenu: "项目操作",
+  projectHide: "从列表移除",
+  projectHideHint: "只在这个页面隐藏该仓库，磁盘和后端都不动",
+  projectHideConfirm: "从项目列表移除这个仓库？会话和文件都还在。",
+  projectDeleteHint: "删除项目条目；文件夹与会话都不删",
+  projectDeleteConfirm: "删除这个项目？文件夹和会话不会被删除，但项目条目无法在这里恢复。",
+  projectRestoreHidden: (n) => `显示 ${n} 个已隐藏`,
+  projectRenameFailed: "项目重命名失败",
+  projectRemoveFailed: "移除项目失败",
   reasoning: "思考",
   reasoningLow: "低",
   reasoningMedium: "中",

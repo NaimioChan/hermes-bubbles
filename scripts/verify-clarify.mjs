@@ -73,6 +73,17 @@ try {
         hasSubmit: Boolean(el.querySelector('[data-hb="clarify-submit"]')),
         submitDisabled: el.querySelector('[data-hb="clarify-submit"]')?.disabled ?? null,
         inputs: el.querySelectorAll('[data-hb-input]').length,
+        // The free-text row must be the LAST child of the choice column, so it
+        // reads as one more option rather than a form below the list.
+        lastRowTag: (() => {
+          const col = el.querySelector('.hb-choice-col');
+          const last = col ? col.lastElementChild : null;
+          return last ? last.tagName : null;
+        })(),
+        other: (() => {
+          const input = el.querySelector('[data-hb="clarify-other"]');
+          return input ? { placeholder: input.placeholder, tag: input.tagName } : null;
+        })(),
       };
     })()`);
   }
@@ -86,9 +97,34 @@ try {
   } else {
     console.log("=== ITEM 4: clarify card rendered ===");
     console.log(JSON.stringify(card, null, 1));
+    console.log(
+      "\\n=== the free-text row: last in the list, and it can be answered ===",
+    );
+    // Typing a custom answer must un-pick a single-select choice and enable
+    // Submit on its own — that is the whole point of the extra row.
+    console.log(await ev(`(() => {
+      const el = document.querySelector('[data-hb="request-card"]');
+      const input = el.querySelector('[data-hb="clarify-other"]');
+      if (!input) return "no free-text row";
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, 'verify: 我自己写的答案');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'typed';
+    })()`));
+    await sleep(600);
+    console.log(await ev(`(() => {
+      const el = document.querySelector('[data-hb="request-card"]');
+      if (!el) return 'card gone';
+      return JSON.stringify({
+        value: el.querySelector('[data-hb="clarify-other"]')?.value ?? null,
+        selected: [...el.querySelectorAll('[data-hb-choice]')].map(b => b.getAttribute('data-hb-selected')),
+        submitDisabled: el.querySelector('[data-hb="clarify-submit"]')?.disabled ?? null,
+      });
+    })()`));
 
-    // Pick a choice: the submit button must become enabled.
-    console.log("\\n=== choosing an option enables Submit ===");
+    // Pick a choice: the submit button must become enabled, and the typed text
+    // must give way (single-select is mutually exclusive with free text).
+    console.log("\\n=== choosing an option enables Submit and clears the typed answer ===");
     await ev(`(() => {
       const el = document.querySelector('[data-hb="request-card"]');
       const first = el.querySelector('[data-hb-choice]');

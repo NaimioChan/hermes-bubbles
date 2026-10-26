@@ -23,9 +23,10 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Composer auto-grow | Done | The input box follows the draft's height (32–192px) and then scrolls, instead of staying one row and hiding everything after the first line |
 | Session history | Done | `session.history` projects into the same bubble structure, so a reload keeps the conversation |
 | Session management | Done | Rename and delete from the history panel, which also shows a status lamp: lit = open in a tab, pulsing = running |
+| Project management | Done | Each project row has a `⋯` menu. An explicit project can be renamed inline (`projects.update`) or deleted for real (`projects.delete`, which drops the entry and its folders but never the sessions or the directory); an auto-discovered repo has no backend row, so it is hidden client-side the way the desktop sidebar does it, with "Show N hidden" to bring it back. The ungrouped bucket gets neither |
 | Session as context | Done | Every history row has a ⇩ button, and the row itself can be dragged into the composer: the plugin reads that session's transcript (REST `/api/sessions/{id}/messages`, read-only — it never becomes the active session), folds it into a bounded plain-text block (newest messages first, per-message cap, tool and hidden rows skipped) and puts it in the draft, ready for your own question above/below it |
 | Tabs survive navigation | Done | Switch to Config and back — open tabs and in-flight replies are still there |
-| Approval & clarify cards | Done | Both render from the server's own `choices`; `multi_select` is joined into the string the wire expects; one option per line |
+| Approval & clarify cards | Done | Both render from the server's own `choices`; `multi_select` is joined into the string the wire expects; one option per line. Every clarify question ends with a free-text row (the desktop app's "Other"), mutually exclusive with a single-select pick and additive on multi-select |
 | Message actions | Done | Timestamp, branch in new chat, copy, regenerate — matching the desktop app |
 | Edit a sent message | Done | Edit a user bubble and sending rewrites the turn from there, truncating what followed |
 | Mid-turn input | Done | Send while a turn runs; the backend queues, steers or redirects, and the result is reported inline |

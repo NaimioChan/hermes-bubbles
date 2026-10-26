@@ -73,7 +73,12 @@ function classNamesIn(source: string): string[] {
 }
 
 describe("layout classes", () => {
-  const files = readdirSync(UI_DIR).filter((n) => n.endsWith(".ts") && n !== "sdk.ts" && n !== "format.ts");
+  // `.tsx` included: ProjectList and WorkspacePicker are TSX, and while this
+  // list held only `.ts` files their classes were invisible to both guards
+  // below — the failure mode they exist to catch, applied to the guard itself.
+  const files = readdirSync(UI_DIR).filter(
+    (n) => /\.tsx?$/.test(n) && n !== "sdk.ts" && n !== "format.ts",
+  );
   const ownCss = readFileSync(join(UI_DIR, "style.css"), "utf8");
   const ownClasses = new Set([...ownCss.matchAll(/\.(hb-[a-z0-9-]+)/g)].map((m) => m[1]));
   const host = hostClasses();

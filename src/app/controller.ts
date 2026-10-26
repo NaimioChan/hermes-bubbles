@@ -343,6 +343,28 @@ export class ChatController {
   }
 
   /**
+   * Rename a project (`projects.update {id, name}`).
+   *
+   * Only an explicit project has a `projects.db` row to patch — an auto node's
+   * id is a repo path and the backend answers `5062`. The reply is the refreshed
+   * `ProjectInfo`, not the tree, so the caller re-reads the tree to pick up the
+   * new label.
+   */
+  async renameProject(projectId: string, name: string): Promise<void> {
+    await this.rpc("projects.update", { id: projectId, name });
+  }
+
+  /**
+   * Delete an explicit project (`projects.delete {id}`).
+   *
+   * Deletes the `projects` row and its folders (cascade); the sessions and the
+   * directory itself stay on disk. Answers the whole project list, not the tree.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    await this.rpc("projects.delete", { id: projectId });
+  }
+
+  /**
    * Attach to a stored session.
    *
    * `session.resume` reuses the live session when there is one, so reopening a

@@ -12,7 +12,14 @@
 
 import { messagesFor, type Locale } from "../core/i18n";
 import { SESSION_CONTEXT_MIME, sessionDragPayload } from "../core/context";
-import { lastActiveOf, type ProjectRow, type ProjectSessionRow } from "../core/projects";
+import {
+  canRenameProject,
+  lastActiveOf,
+  projectRemoval,
+  type ProjectNode,
+  type ProjectRow,
+  type ProjectSessionRow,
+} from "../core/projects";
 import type { HermesPluginSdk } from "./sdk";
 import { relativeTime } from "./HistoryPanel";
 
@@ -29,9 +36,19 @@ export interface ProjectListProps {
   sessionCache: Record<string, ProjectSessionRow[] | undefined>;
   /** Project whose drill-in is in flight, for the per-row spinner. */
   loadingProjectId: string | null;
+  /** Auto projects hidden client-side that still match a row ("restore" count). */
+  hiddenCount: number;
   onExpand: (projectId: string) => void;
   onOpen: (id: string) => void;
   onNewChat: (workspace: string) => void;
+  /** Rename a project: writes the `projects.db` row, so explicit projects only. */
+  onRename: (projectId: string, name: string) => void;
+  /**
+   * Remove a row: the caller decides between a real `projects.delete` and a
+   * client-side hide, from the same `projectRemoval` this component reads.
+   */
+  onRemove: (project: ProjectNode) => void;
+  onRestoreHidden: () => void;
 }
 
 export function ProjectList(props: ProjectListProps) {
@@ -40,6 +57,12 @@ export function ProjectList(props: ProjectListProps) {
   const { useState } = sdk.hooks;
   const t = messagesFor(props.locale);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Which project is being renamed, and the draft. Project rows carry two more
+  // actions than session rows, so they get a kebab menu instead of a third and
+  // fourth icon in the header; the menu holds nothing but those actions.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [menuId, setMenuId] = useState<string | null>(null);
 
   const toggle = (row: ProjectRow) => {
     const id = row.project.id;
@@ -47,6 +70,21 @@ export function ProjectList(props: ProjectListProps) {
     setExpanded((prev) => ({ ...prev, [id]: next }));
     // Fetch once per project; the cache is keyed by id and survives collapse.
     if (next && !props.sessionCache[id]) props.onExpand(id);
+  };
+
+  const startRename = (project: ProjectNode) => {
+    setMenuId(null);
+    setDraft(project.label);
+    setRenamingId(project.id);
+  };
+
+  const commitRename = (project: ProjectNode, value: string) => {
+    const next = value.trim();
+    setRenamingId(null);
+    // An unchanged or empty name is a cancel, not a write: `projects.update`
+    // with an empty string would rename the project to nothing.
+    if (!next || next === project.label) return;
+    props.onRename(project.id, next);
   };
 
   const sessionRow = (row: ProjectSessionRow) => {
@@ -133,6 +171,24 @@ export function ProjectList(props: ProjectListProps) {
     "div",
     { "data-hb": "project-list", className: "hb-proj-list" },
 
+    props.hiddenCount > 0
+      ? // A hide has to be reversible from somewhere, or a mistaken click is
+        // permanent for this page. The desktop app puts Undo on an 8s toast; a
+        // toast in a plugin panel has no host surface (and no notification
+        // area), so the restore lives on the list itself and stays.
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "project-restore-hidden",
+            className: "hb-proj-more",
+            style: { marginLeft: 0 },
+            onClick: props.onRestoreHidden,
+          },
+          t.projectRestoreHidden(props.hiddenCount),
+        )
+      : null,
+
     props.rows.map((row) => {
       const id = row.project.id;
       const isOpen = Boolean(expanded[id]);
@@ -141,37 +197,71 @@ export function ProjectList(props: ProjectListProps) {
       const count = row.project.sessionCount ?? row.project.sessionIds?.length ?? sessions.length;
       const more = count > sessions.length;
       const label = row.project.isNoProject ? t.ungrouped : row.project.label;
+      const removal = projectRemoval(row.project);
+      const renamable = canRenameProject(row.project);
+      const isRenaming = renamingId === id;
 
       return React.createElement(
         "div",
-        { key: id, className: "hb-proj" },
+        { key: id, className: "hb-proj", "data-hb": "project-row" },
 
         React.createElement(
           "div",
           { className: "hb-proj-head" },
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-hb": "project-toggle",
-              "data-open": isOpen ? "true" : "false",
-              className: "hb-proj-toggle",
-              title: label,
-              onClick: () => toggle(row),
-            },
-            React.createElement("span", { className: "hb-proj-caret" }, isOpen ? "▾" : "▸"),
-            React.createElement(
-              "span",
-              {
-                className: "hb-proj-name",
-                style: {
-                  color: row.project.isNoProject ? "var(--color-muted-foreground)" : "var(--color-card-foreground)",
+          isRenaming
+            ? // The name becomes an input in place: a dialog for a one-field edit
+              // costs a second surface to keep in step with this panel.
+              React.createElement("input", {
+                autoFocus: true,
+                value: draft,
+                "data-hb": "project-rename-input",
+                className: "hb-input hb-flex-fill",
+                style: { fontSize: "0.75rem", padding: "0.1rem 0.3rem" },
+                onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+                // Read the value off the element: React commits state on its own
+                // schedule, so a fast type-then-Enter would otherwise commit the
+                // previous value (the same trap the session rename row hit).
+                onKeyDown: (event: {
+                  key: string;
+                  currentTarget: { value: string };
+                  preventDefault: () => void;
+                  stopPropagation: () => void;
+                }) => {
+                  event.stopPropagation();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitRename(row.project, event.currentTarget.value);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    setRenamingId(null);
+                  }
                 },
-              },
-              label,
-            ),
-            React.createElement("span", { className: "hb-proj-count" }, String(count)),
-          ),
+                onBlur: (event: { currentTarget: { value: string } }) =>
+                  commitRename(row.project, event.currentTarget.value),
+              })
+            : React.createElement(
+                "button",
+                {
+                  type: "button",
+                  "data-hb": "project-toggle",
+                  "data-open": isOpen ? "true" : "false",
+                  className: "hb-proj-toggle",
+                  title: label,
+                  onClick: () => toggle(row),
+                },
+                React.createElement("span", { className: "hb-proj-caret" }, isOpen ? "▾" : "▸"),
+                React.createElement(
+                  "span",
+                  {
+                    className: "hb-proj-name",
+                    style: {
+                      color: row.project.isNoProject ? "var(--color-muted-foreground)" : "var(--color-card-foreground)",
+                    },
+                  },
+                  label,
+                ),
+                React.createElement("span", { className: "hb-proj-count" }, String(count)),
+              ),
 
           // "New chat here" is the reason this view exists beyond being a list:
           // it aims the next session at the project's folder.
@@ -190,7 +280,68 @@ export function ProjectList(props: ProjectListProps) {
                 "＋",
               )
             : null,
+
+          removal === "none"
+            ? null
+            : React.createElement(
+                "button",
+                {
+                  type: "button",
+                  "data-hb": "project-menu",
+                  "data-hb-project": id,
+                  "data-open": menuId === id ? "true" : "false",
+                  className: "hb-proj-new",
+                  title: t.projectMenu,
+                  "aria-label": t.projectMenu,
+                  "aria-expanded": menuId === id,
+                  onClick: () => setMenuId((current) => (current === id ? null : id)),
+                },
+                "⋯",
+              ),
         ),
+
+        // The panel is IN FLOW, not absolutely positioned: `.hb-proj-list` is a
+        // scrolling column, and an absolute popover inside it is clipped by the
+        // scroll box (and can land off-screen on a phone). Expanding the row
+        // costs a little height and cannot go wrong.
+        menuId === id
+          ? React.createElement(
+              "div",
+              { className: "hb-proj-menu", "data-hb": "project-menu-panel", role: "menu" },
+              renamable
+                ? React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      "data-hb": "project-rename",
+                      className: "hb-proj-menu-item",
+                      role: "menuitem",
+                      onClick: () => startRename(row.project),
+                    },
+                    t.rename,
+                  )
+                : null,
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  "data-hb": "project-remove",
+                  className: "hb-proj-menu-item",
+                  role: "menuitem",
+                  title: removal === "delete" ? t.projectDeleteHint : t.projectHideHint,
+                  onClick: () => {
+                    setMenuId(null);
+                    // Destructive either way, and the user cannot undo a delete
+                    // from this panel, so confirm first — the same rule the
+                    // history rows follow.
+                    const message = removal === "delete" ? t.projectDeleteConfirm : t.projectHideConfirm;
+                    if (window.confirm(message)) props.onRemove(row.project);
+                  },
+                },
+                removal === "delete" ? t.delete : t.projectHide,
+              ),
+            )
+          : null,
 
         props.loadingProjectId === id && isOpen && !hydrated
           ? React.createElement(

@@ -60,7 +60,9 @@ function varRefs(source: string): { name: string; hasFallback: boolean }[] {
 
 describe("theme variables", () => {
   const files = [
-    ...readdirSync(UI_DIR).filter((n) => n.endsWith(".ts")).map((n) => join(UI_DIR, n)),
+    // `.tsx` included: a `var(--undefined)` in a TSX component is just as
+    // silently dropped as one in a .ts file.
+    ...readdirSync(UI_DIR).filter((n) => /\.tsx?$/.test(n)).map((n) => join(UI_DIR, n)),
     join(UI_DIR, "style.css"),
   ];
   const host = hostVars();

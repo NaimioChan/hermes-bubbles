@@ -124,6 +124,7 @@ var HermesBubbles = (() => {
     connectChatDisabled: "Chat is not enabled on this dashboard",
     approvalTitle: "Needs your confirmation",
     clarifyTitle: "Question",
+    clarifyOther: "Type your own answer",
     approvalOnce: "Allow once",
     approvalSession: "Allow this session",
     approvalAlways: "Always allow",
@@ -161,6 +162,15 @@ var HermesBubbles = (() => {
     projectsFailed: "Could not load projects",
     projectSessionCount: (n) => `${n} ${n === 1 ? "session" : "sessions"}`,
     showAllSessions: "Show all",
+    projectMenu: "Project actions",
+    projectHide: "Remove from list",
+    projectHideHint: "Hides this repository here; nothing on disk or in the backend changes",
+    projectHideConfirm: "Remove this repository from the project list? Your sessions and files stay.",
+    projectDeleteHint: "Deletes the project entry; its folders and sessions stay",
+    projectDeleteConfirm: "Delete this project? The folder and its sessions are not deleted, but the project entry cannot be restored from here.",
+    projectRestoreHidden: (n) => `Show ${n} hidden`,
+    projectRenameFailed: "Could not rename the project",
+    projectRemoveFailed: "Could not remove the project",
     reasoning: "Reasoning",
     reasoningLow: "Low",
     reasoningMedium: "Medium",
@@ -304,6 +314,7 @@ var HermesBubbles = (() => {
     connectChatDisabled: "\u804A\u5929\u529F\u80FD\u672A\u542F\u7528",
     approvalTitle: "\u9700\u8981\u4F60\u786E\u8BA4",
     clarifyTitle: "\u8BF7\u9009\u62E9",
+    clarifyOther: "\u81EA\u5DF1\u8F93\u5165\u7B54\u6848",
     approvalOnce: "\u5141\u8BB8\u4E00\u6B21",
     approvalSession: "\u672C\u6B21\u4F1A\u8BDD\u5141\u8BB8",
     approvalAlways: "\u603B\u662F\u5141\u8BB8",
@@ -341,6 +352,15 @@ var HermesBubbles = (() => {
     projectsFailed: "\u52A0\u8F7D\u9879\u76EE\u5931\u8D25",
     projectSessionCount: (n) => `${n} \u4E2A\u4F1A\u8BDD`,
     showAllSessions: "\u5C55\u5F00\u5168\u90E8",
+    projectMenu: "\u9879\u76EE\u64CD\u4F5C",
+    projectHide: "\u4ECE\u5217\u8868\u79FB\u9664",
+    projectHideHint: "\u53EA\u5728\u8FD9\u4E2A\u9875\u9762\u9690\u85CF\u8BE5\u4ED3\u5E93\uFF0C\u78C1\u76D8\u548C\u540E\u7AEF\u90FD\u4E0D\u52A8",
+    projectHideConfirm: "\u4ECE\u9879\u76EE\u5217\u8868\u79FB\u9664\u8FD9\u4E2A\u4ED3\u5E93\uFF1F\u4F1A\u8BDD\u548C\u6587\u4EF6\u90FD\u8FD8\u5728\u3002",
+    projectDeleteHint: "\u5220\u9664\u9879\u76EE\u6761\u76EE\uFF1B\u6587\u4EF6\u5939\u4E0E\u4F1A\u8BDD\u90FD\u4E0D\u5220",
+    projectDeleteConfirm: "\u5220\u9664\u8FD9\u4E2A\u9879\u76EE\uFF1F\u6587\u4EF6\u5939\u548C\u4F1A\u8BDD\u4E0D\u4F1A\u88AB\u5220\u9664\uFF0C\u4F46\u9879\u76EE\u6761\u76EE\u65E0\u6CD5\u5728\u8FD9\u91CC\u6062\u590D\u3002",
+    projectRestoreHidden: (n) => `\u663E\u793A ${n} \u4E2A\u5DF2\u9690\u85CF`,
+    projectRenameFailed: "\u9879\u76EE\u91CD\u547D\u540D\u5931\u8D25",
+    projectRemoveFailed: "\u79FB\u9664\u9879\u76EE\u5931\u8D25",
     reasoning: "\u601D\u8003",
     reasoningLow: "\u4F4E",
     reasoningMedium: "\u4E2D",
@@ -1859,6 +1879,49 @@ ${body}`;
     const value = row.last_active ?? row.started_at ?? 0;
     return Number.isFinite(value) ? Number(value) : 0;
   }
+  function projectRemoval(project) {
+    if (project.isNoProject) return "none";
+    return project.isAuto ? "hide" : "delete";
+  }
+  function canRenameProject(project) {
+    return !project.isNoProject && !project.isAuto;
+  }
+  var HIDDEN_PROJECTS_STORAGE_PREFIX = "hermes-bubbles-hidden-projects:";
+  function hiddenProjectsKey(profile) {
+    return `${HIDDEN_PROJECTS_STORAGE_PREFIX}${profile ?? ""}`;
+  }
+  function readHiddenProjects(storage, profile) {
+    if (!storage) return [];
+    try {
+      const raw = storage.getItem(hiddenProjectsKey(profile));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((id) => typeof id === "string" && id.length > 0);
+    } catch {
+      return [];
+    }
+  }
+  function writeHiddenProjects(storage, profile, ids) {
+    if (!storage) return;
+    try {
+      const key = hiddenProjectsKey(profile);
+      const unique = [...new Set(ids.filter((id) => id.length > 0))];
+      if (unique.length) storage.setItem(key, JSON.stringify(unique));
+      else storage.removeItem(key);
+    } catch {
+    }
+  }
+  function visibleProjectRows(rows, hidden) {
+    if (!hidden.length) return [...rows];
+    const hiddenSet = new Set(hidden);
+    return rows.filter((row) => !(row.project.isAuto === true && hiddenSet.has(row.project.id)));
+  }
+  function hiddenProjectCount(rows, hidden) {
+    if (!hidden.length) return 0;
+    const hiddenSet = new Set(hidden);
+    return rows.filter((row) => row.project.isAuto === true && hiddenSet.has(row.project.id)).length;
+  }
 
   // src/gateway/channel.ts
   var DEFAULT_REQUEST_TIMEOUT_MS = 12e4;
@@ -2486,6 +2549,26 @@ ${body}`;
         session_limit: sessionLimit
       });
       return result?.project ?? null;
+    }
+    /**
+     * Rename a project (`projects.update {id, name}`).
+     *
+     * Only an explicit project has a `projects.db` row to patch — an auto node's
+     * id is a repo path and the backend answers `5062`. The reply is the refreshed
+     * `ProjectInfo`, not the tree, so the caller re-reads the tree to pick up the
+     * new label.
+     */
+    async renameProject(projectId, name) {
+      await this.rpc("projects.update", { id: projectId, name });
+    }
+    /**
+     * Delete an explicit project (`projects.delete {id}`).
+     *
+     * Deletes the `projects` row and its folders (cascade); the sessions and the
+     * directory itself stay on disk. Answers the whole project list, not the tree.
+     */
+    async deleteProject(projectId) {
+      await this.rpc("projects.delete", { id: projectId });
     }
     /**
      * Attach to a stored session.
@@ -5373,11 +5456,25 @@ ${body}`;
     const { useState } = sdk.hooks;
     const t = messagesFor(props.locale);
     const [expanded, setExpanded] = useState({});
+    const [renamingId, setRenamingId] = useState(null);
+    const [draft, setDraft] = useState("");
+    const [menuId, setMenuId] = useState(null);
     const toggle = (row) => {
       const id = row.project.id;
       const next = !expanded[id];
       setExpanded((prev) => ({ ...prev, [id]: next }));
       if (next && !props.sessionCache[id]) props.onExpand(id);
+    };
+    const startRename = (project) => {
+      setMenuId(null);
+      setDraft(project.label);
+      setRenamingId(project.id);
+    };
+    const commitRename = (project, value) => {
+      const next = value.trim();
+      setRenamingId(null);
+      if (!next || next === project.label) return;
+      props.onRename(project.id, next);
     };
     const sessionRow = (row) => {
       const isOpen = props.openStoredIds.includes(row.id);
@@ -5456,6 +5553,23 @@ ${body}`;
     return React.createElement(
       "div",
       { "data-hb": "project-list", className: "hb-proj-list" },
+      props.hiddenCount > 0 ? (
+        // A hide has to be reversible from somewhere, or a mistaken click is
+        // permanent for this page. The desktop app puts Undo on an 8s toast; a
+        // toast in a plugin panel has no host surface (and no notification
+        // area), so the restore lives on the list itself and stays.
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "project-restore-hidden",
+            className: "hb-proj-more",
+            style: { marginLeft: 0 },
+            onClick: props.onRestoreHidden
+          },
+          t.projectRestoreHidden(props.hiddenCount)
+        )
+      ) : null,
       props.rows.map((row) => {
         const id = row.project.id;
         const isOpen = Boolean(expanded[id]);
@@ -5464,13 +5578,41 @@ ${body}`;
         const count = row.project.sessionCount ?? row.project.sessionIds?.length ?? sessions.length;
         const more = count > sessions.length;
         const label = row.project.isNoProject ? t.ungrouped : row.project.label;
+        const removal = projectRemoval(row.project);
+        const renamable = canRenameProject(row.project);
+        const isRenaming = renamingId === id;
         return React.createElement(
           "div",
-          { key: id, className: "hb-proj" },
+          { key: id, className: "hb-proj", "data-hb": "project-row" },
           React.createElement(
             "div",
             { className: "hb-proj-head" },
-            React.createElement(
+            isRenaming ? (
+              // The name becomes an input in place: a dialog for a one-field edit
+              // costs a second surface to keep in step with this panel.
+              React.createElement("input", {
+                autoFocus: true,
+                value: draft,
+                "data-hb": "project-rename-input",
+                className: "hb-input hb-flex-fill",
+                style: { fontSize: "0.75rem", padding: "0.1rem 0.3rem" },
+                onChange: (event) => setDraft(event.target.value),
+                // Read the value off the element: React commits state on its own
+                // schedule, so a fast type-then-Enter would otherwise commit the
+                // previous value (the same trap the session rename row hit).
+                onKeyDown: (event) => {
+                  event.stopPropagation();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitRename(row.project, event.currentTarget.value);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    setRenamingId(null);
+                  }
+                },
+                onBlur: (event) => commitRename(row.project, event.currentTarget.value)
+              })
+            ) : React.createElement(
               "button",
               {
                 type: "button",
@@ -5507,8 +5649,58 @@ ${body}`;
                 onClick: () => props.onNewChat(row.workspace)
               },
               "\uFF0B"
-            ) : null
+            ) : null,
+            removal === "none" ? null : React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "project-menu",
+                "data-hb-project": id,
+                "data-open": menuId === id ? "true" : "false",
+                className: "hb-proj-new",
+                title: t.projectMenu,
+                "aria-label": t.projectMenu,
+                "aria-expanded": menuId === id,
+                onClick: () => setMenuId((current) => current === id ? null : id)
+              },
+              "\u22EF"
+            )
           ),
+          // The panel is IN FLOW, not absolutely positioned: `.hb-proj-list` is a
+          // scrolling column, and an absolute popover inside it is clipped by the
+          // scroll box (and can land off-screen on a phone). Expanding the row
+          // costs a little height and cannot go wrong.
+          menuId === id ? React.createElement(
+            "div",
+            { className: "hb-proj-menu", "data-hb": "project-menu-panel", role: "menu" },
+            renamable ? React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "project-rename",
+                className: "hb-proj-menu-item",
+                role: "menuitem",
+                onClick: () => startRename(row.project)
+              },
+              t.rename
+            ) : null,
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "project-remove",
+                className: "hb-proj-menu-item",
+                role: "menuitem",
+                title: removal === "delete" ? t.projectDeleteHint : t.projectHideHint,
+                onClick: () => {
+                  setMenuId(null);
+                  const message = removal === "delete" ? t.projectDeleteConfirm : t.projectHideConfirm;
+                  if (window.confirm(message)) props.onRemove(row.project);
+                }
+              },
+              removal === "delete" ? t.delete : t.projectHide
+            )
+          ) : null,
           props.loadingProjectId === id && isOpen && !hydrated ? React.createElement(
             "div",
             { className: "hb-text-micro hb-proj-note", style: { color: "var(--color-muted-foreground)" } },
@@ -6128,6 +6320,25 @@ ${body}`;
   function clarifyReady(questions, answers) {
     return questions.every((q) => clarifyAnswer(answers[q.qid] ?? []) !== null);
   }
+  function stagedAnswerParts(question, values) {
+    const offered = new Set(question.choices);
+    const picked = values.filter((value) => offered.has(value));
+    const text = values.find((value) => !offered.has(value)) ?? "";
+    return { picked, text };
+  }
+  function stageChoice(question, values, choice) {
+    const { picked, text } = stagedAnswerParts(question, values);
+    if (question.multiSelect) {
+      const next = picked.includes(choice) ? picked.filter((value) => value !== choice) : [...picked, choice];
+      return text ? [...next, text] : next;
+    }
+    return picked[0] === choice ? [] : [choice];
+  }
+  function stageFreeText(question, values, text) {
+    const { picked } = stagedAnswerParts(question, values);
+    if (!text.trim()) return question.multiSelect ? picked : [];
+    return question.multiSelect ? [...picked, text] : [text];
+  }
 
   // src/ui/RequestCards.ts
   function cardShell(sdk, accent, children) {
@@ -6221,18 +6432,8 @@ ${body}`;
     const t = messagesFor(locale);
     const questions = parseClarifyQuestions(card.params);
     const [picked, setPicked] = useState({});
-    const toggle = (qid, value, multi) => {
-      setPicked((prev) => {
-        const current = prev[qid] ?? [];
-        if (!multi) return { ...prev, [qid]: current[0] === value ? [] : [value] };
-        return {
-          ...prev,
-          [qid]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
-        };
-      });
-    };
-    const setFreeText = (qid, value) => {
-      setPicked((prev) => ({ ...prev, [qid]: value ? [value] : [] }));
+    const stage = (qid, values) => {
+      setPicked((prev) => ({ ...prev, [qid]: values }));
     };
     const ready = clarifyReady(questions, picked);
     return cardShell(
@@ -6244,11 +6445,29 @@ ${body}`;
         React.createElement("div", { className: "font-medium" }, t.clarifyTitle),
         questions.map((q) => {
           const on = picked[q.qid] ?? [];
+          const { text } = stagedAnswerParts(q, on);
+          const freeText = React.createElement(
+            "input",
+            {
+              key: `${q.qid}-free`,
+              type: "text",
+              className: q.choices.length ? "hb-choice-row hb-input hb-choice-input" : "hb-mt-sm hb-input",
+              "data-hb-input": q.qid,
+              "data-hb": "clarify-other",
+              "aria-label": q.choices.length ? t.clarifyOther : q.question,
+              placeholder: q.choices.length ? t.clarifyOther : void 0,
+              value: text,
+              onChange: (event) => stage(q.qid, stageFreeText(q, on, event.target.value))
+            }
+          );
+          if (!q.choices.length) {
+            return React.createElement("div", { key: q.qid }, React.createElement("div", null, q.question), freeText);
+          }
           return React.createElement(
             "div",
             { key: q.qid },
             React.createElement("div", null, q.question),
-            q.choices.length ? React.createElement(
+            React.createElement(
               "div",
               { className: "hb-mt-sm hb-choice-col" },
               q.choices.map(
@@ -6265,18 +6484,16 @@ ${body}`;
                       color: on.includes(choice) ? "var(--color-primary-foreground)" : "var(--color-card-foreground)",
                       borderRadius: "calc(var(--radius) * 0.6)"
                     },
-                    onClick: () => toggle(q.qid, choice, q.multiSelect)
+                    onClick: () => stage(q.qid, stageChoice(q, on, choice))
                   },
                   choice
                 )
-              )
-            ) : React.createElement("input", {
-              type: "text",
-              className: "hb-mt-sm hb-input",
-              "data-hb-input": q.qid,
-              "aria-label": q.question,
-              onChange: (event) => setFreeText(q.qid, event.target.value)
-            })
+              ),
+              // Last row, styled as a member of the same list rather than as a
+              // form field: the point is "these are the options; this one is
+              // yours", so it must not read as a separate thing below the list.
+              freeText
+            )
           );
         }),
         React.createElement(
@@ -6811,6 +7028,9 @@ ${body}`;
     const [approvalMode, setApprovalModeValue] = useState("");
     const [historyMode, setHistoryMode] = useState("recent");
     const [projectTree, setProjectTree] = useState(null);
+    const [hiddenProjects, setHiddenProjects] = useState(
+      () => readHiddenProjects(storageOrNull(), currentProfile())
+    );
     const [projectsLoading, setProjectsLoading] = useState(false);
     const [projectsFailed, setProjectsFailed] = useState(false);
     const [projectSessionCache, setProjectSessionCache] = useState({});
@@ -6966,7 +7186,46 @@ ${body}`;
       },
       [controller]
     );
-    const projectViewRows = useMemo(() => projectRows(projectTree), [projectTree]);
+    const projectRowsAll = useMemo(() => projectRows(projectTree), [projectTree]);
+    const projectViewRows = useMemo(
+      () => visibleProjectRows(projectRowsAll, hiddenProjects),
+      [projectRowsAll, hiddenProjects]
+    );
+    const hiddenProjectTotal = useMemo(
+      () => hiddenProjectCount(projectRowsAll, hiddenProjects),
+      [projectRowsAll, hiddenProjects]
+    );
+    const updateHiddenProjects = useCallback(
+      (next) => {
+        setHiddenProjects(next);
+        writeHiddenProjects(storageOrNull(), currentProfile(), next);
+      },
+      []
+    );
+    const onRenameProject = useCallback(
+      (projectId, name) => {
+        controller.renameProject(projectId, name).then(() => loadProjects()).catch((err) => {
+          setError(`${t.projectRenameFailed}: ${err instanceof Error ? err.message : String(err)}`);
+          void loadProjects();
+        });
+      },
+      [controller, loadProjects, t]
+    );
+    const onRemoveProject = useCallback(
+      (project) => {
+        const kind = projectRemoval(project);
+        if (kind === "none") return;
+        if (kind === "hide") {
+          updateHiddenProjects([...hiddenProjects, project.id]);
+          return;
+        }
+        controller.deleteProject(project.id).then(() => loadProjects()).catch(
+          (err) => setError(`${t.projectRemoveFailed}: ${err instanceof Error ? err.message : String(err)}`)
+        );
+      },
+      [controller, hiddenProjects, loadProjects, t, updateHiddenProjects]
+    );
+    const onRestoreHiddenProjects = useCallback(() => updateHiddenProjects([]), [updateHiddenProjects]);
     const onNewChatInProject = useCallback(
       (workspace) => {
         controller.setWorkspace(workspace);
@@ -7360,9 +7619,13 @@ ${body}`;
             busyStoredIds: tabs.filter((tab) => running.includes(tab.key)).map((tab) => tab.storedId).filter((id) => Boolean(id)),
             sessionCache: projectSessionCache,
             loadingProjectId,
+            hiddenCount: hiddenProjectTotal,
             onExpand: loadProjectSessions,
             onOpen: (id) => onOpenStored(id, ""),
-            onNewChat: onNewChatInProject
+            onNewChat: onNewChatInProject,
+            onRename: onRenameProject,
+            onRemove: onRemoveProject,
+            onRestoreHidden: onRestoreHiddenProjects
           },
           sessions: stored,
           loading: loadingStored,

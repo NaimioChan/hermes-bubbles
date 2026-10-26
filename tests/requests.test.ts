@@ -8,6 +8,9 @@ import {
   clarifyResult,
   parseApproval,
   parseClarifyQuestions,
+  stageChoice,
+  stageFreeText,
+  stagedAnswerParts,
 } from "../src/core/requests";
 
 describe("requests: approval", () => {
@@ -123,5 +126,59 @@ describe("requests: clarify", () => {
 
   it("is vacuously ready with no questions", () => {
     expect(clarifyReady([], {})).toBe(true);
+  });
+});
+
+describe("requests: staging a clarify answer", () => {
+  const single = { qid: "a", question: "选哪个？", choices: ["一", "二"], multiSelect: false };
+  const multi = { qid: "b", question: "哪些？", choices: ["x", "y"], multiSelect: true };
+  const open = { qid: "c", question: "补充？", choices: [], multiSelect: false };
+
+  it("splits a staged answer into offered picks and typed text", () => {
+    // The card always ends the list with a free-text row, so one value carries
+    // both kinds; anything the server did not offer can only have been typed.
+    expect(stagedAnswerParts(single, ["一"])).toEqual({ picked: ["一"], text: "" });
+    expect(stagedAnswerParts(single, ["我自己写的"])).toEqual({ picked: [], text: "我自己写的" });
+    expect(stagedAnswerParts(multi, ["x", "y", "别的"])).toEqual({ picked: ["x", "y"], text: "别的" });
+    expect(stagedAnswerParts(open, ["随便"])).toEqual({ picked: [], text: "随便" });
+    expect(stagedAnswerParts(single, [])).toEqual({ picked: [], text: "" });
+  });
+
+  it("keeps single-select mutually exclusive between a pick and typed text", () => {
+    expect(stageChoice(single, [], "一")).toEqual(["一"]);
+    // Picking replaces the other choice…
+    expect(stageChoice(single, ["一"], "二")).toEqual(["二"]);
+    // …clears typed text (the wire carries one string per question)…
+    expect(stageChoice(single, ["我写的"], "一")).toEqual(["一"]);
+    // …and clicking the picked choice again un-picks it.
+    expect(stageChoice(single, ["一"], "一")).toEqual([]);
+  });
+
+  it("lets multi-select keep picks and typed text together", () => {
+    expect(stageChoice(multi, [], "x")).toEqual(["x"]);
+    expect(stageChoice(multi, ["x"], "y")).toEqual(["x", "y"]);
+    // Typed text survives a toggle: it is an additional answer, not a pick.
+    expect(stageChoice(multi, ["x", "我写的"], "y")).toEqual(["x", "y", "我写的"]);
+    expect(stageChoice(multi, ["x", "我写的"], "x")).toEqual(["我写的"]);
+  });
+
+  it("stages typed text, replacing a pick only where the wire forces it", () => {
+    expect(stageFreeText(single, [], "自由回答")).toEqual(["自由回答"]);
+    expect(stageFreeText(single, ["一"], "自由回答")).toEqual(["自由回答"]);
+    expect(stageFreeText(multi, ["x"], "自由回答")).toEqual(["x", "自由回答"]);
+    // Editing the text after clearing it drops just the text, keeping picks.
+    expect(stageFreeText(multi, ["x", "自由回答"], "")).toEqual(["x"]);
+    expect(stageFreeText(single, ["自由回答"], "   ")).toEqual([]);
+    expect(stageFreeText(open, [], "开放式")).toEqual(["开放式"]);
+  });
+
+  it("turns a staged free-text answer into the string the backend receives", () => {
+    // End to end through the same helpers the card uses: a custom answer to a
+    // choice question is what the model actually reads.
+    const values = stageFreeText(single, stageChoice(single, [], "一"), "还是换个说法");
+    expect(clarifyResult({ a: values })).toEqual({ answers: { a: "还是换个说法" } });
+    const both = stageFreeText(multi, stageChoice(multi, [], "x"), "再加一条");
+    expect(clarifyResult({ b: both })).toEqual({ answers: { b: "x, 再加一条" } });
+    expect(clarifyReady([single, multi], { a: values, b: both })).toBe(true);
   });
 });

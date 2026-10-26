@@ -138,3 +138,65 @@ export function clarifyResult(answers: Record<string, readonly string[]>): { ans
 export function clarifyReady(questions: readonly ClarifyQuestionView[], answers: Record<string, readonly string[]>): boolean {
   return questions.every((q) => clarifyAnswer(answers[q.qid] ?? []) !== null);
 }
+
+// ── staging a clarify answer ─────────────────────────────────────────────────
+
+/**
+ * Split a staged answer back into "offered choices I picked" and "text I typed".
+ *
+ * The card always ends a choice list with a free-text row (the desktop app's
+ * "Other"), so one question's staged value mixes both kinds: an entry that the
+ * server did not offer can only have been typed. Keeping that split in a pure
+ * function is what lets single-select and multi-select share one state shape —
+ * the desktop renderer keeps them in separate fields and has to branch on
+ * `multiSelect` in every handler.
+ */
+export function stagedAnswerParts(
+  question: ClarifyQuestionView,
+  values: readonly string[],
+): { picked: string[]; text: string } {
+  const offered = new Set(question.choices);
+  const picked = values.filter((value) => offered.has(value));
+  const text = values.find((value) => !offered.has(value)) ?? "";
+  return { picked, text };
+}
+
+/**
+ * Pick (or unpick) one of the server's own choices.
+ *
+ * Single-select stays mutually exclusive with the typed text — picking a choice
+ * clears what was typed, and vice versa in `stageFreeText`. Multi-select keeps
+ * both: the typed text is an additional answer rather than a replacement, which
+ * is what the backend's comma-joined result can carry.
+ */
+export function stageChoice(
+  question: ClarifyQuestionView,
+  values: readonly string[],
+  choice: string,
+): string[] {
+  const { picked, text } = stagedAnswerParts(question, values);
+  if (question.multiSelect) {
+    const next = picked.includes(choice)
+      ? picked.filter((value) => value !== choice)
+      : [...picked, choice];
+    return text ? [...next, text] : next;
+  }
+  return picked[0] === choice ? [] : [choice];
+}
+
+/**
+ * Stage typed text for one question.
+ *
+ * Every question with choices gets an extra free-text row, so this is reachable
+ * on single-select too: typing replaces the pick there, because the wire carries
+ * one string per question and "both" cannot be expressed.
+ */
+export function stageFreeText(
+  question: ClarifyQuestionView,
+  values: readonly string[],
+  text: string,
+): string[] {
+  const { picked } = stagedAnswerParts(question, values);
+  if (!text.trim()) return question.multiSelect ? picked : [];
+  return question.multiSelect ? [...picked, text] : [text];
+}

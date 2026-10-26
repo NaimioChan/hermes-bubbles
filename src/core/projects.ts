@@ -158,3 +158,98 @@ export function projectIdForSession(tree: ProjectsTree | null | undefined, sessi
   }
   return null;
 }
+
+// ── removing / renaming a project ────────────────────────────────────────────
+
+/**
+ * What "delete" can even mean for one node.
+ *
+ * Only an explicit project has a row in `projects.db`, so only it can be
+ * deleted (`projects.delete`). An auto-discovered git repo's id is just its
+ * path — the backend answers `5062 no such project` — so the desktop app hides
+ * it client-side instead, and this plugin does the same. The Home bucket is
+ * synthesised by the backend every read; there is nothing to remove.
+ */
+export type ProjectRemoval = "delete" | "hide" | "none";
+
+export function projectRemoval(project: ProjectNode): ProjectRemoval {
+  if (project.isNoProject) return "none";
+  return project.isAuto ? "hide" : "delete";
+}
+
+/** Renaming writes a `projects.db` row, which only an explicit project has. */
+export function canRenameProject(project: ProjectNode): boolean {
+  return !project.isNoProject && !project.isAuto;
+}
+
+/**
+ * Client-side hides, per profile.
+ *
+ * Mirrors the desktop sidebar's `hermes.desktop.dismissedAutoProjects`: a
+ * hidden auto project is filtered out of the tree the user sees, and nothing is
+ * written to the backend. Kept here (not in `localStorage` directly) so the
+ * filter is testable and the key is per-profile — two profiles that drive
+ * different repos must not hide each other's rows.
+ */
+export const HIDDEN_PROJECTS_STORAGE_PREFIX = "hermes-bubbles-hidden-projects:";
+
+export interface HiddenProjectStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export function hiddenProjectsKey(profile?: string | null): string {
+  return `${HIDDEN_PROJECTS_STORAGE_PREFIX}${profile ?? ""}`;
+}
+
+/** The hidden ids for one profile; a malformed value reads as "none hidden". */
+export function readHiddenProjects(storage: HiddenProjectStorage | null, profile?: string | null): string[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(hiddenProjectsKey(profile));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the hidden ids; an empty list clears the key rather than storing `[]`. */
+export function writeHiddenProjects(
+  storage: HiddenProjectStorage | null,
+  profile: string | null | undefined,
+  ids: readonly string[],
+): void {
+  if (!storage) return;
+  try {
+    const key = hiddenProjectsKey(profile);
+    const unique = [...new Set(ids.filter((id) => id.length > 0))];
+    if (unique.length) storage.setItem(key, JSON.stringify(unique));
+    else storage.removeItem(key);
+  } catch {
+    // Storage unavailable (private mode / quota): the hide still applies to
+    // this page's state, which is what the user is looking at.
+  }
+}
+
+/**
+ * Drop the hidden rows from a project list.
+ *
+ * Only auto nodes are affected: an explicit project's id can never collide with
+ * a hidden entry, and the Home bucket must stay visible.
+ */
+export function visibleProjectRows(rows: readonly ProjectRow[], hidden: readonly string[]): ProjectRow[] {
+  if (!hidden.length) return [...rows];
+  const hiddenSet = new Set(hidden);
+  return rows.filter((row) => !(row.project.isAuto === true && hiddenSet.has(row.project.id)));
+}
+
+/** How many hiding entries still match a row — the count behind "restore". */
+export function hiddenProjectCount(rows: readonly ProjectRow[], hidden: readonly string[]): number {
+  if (!hidden.length) return 0;
+  const hiddenSet = new Set(hidden);
+  return rows.filter((row) => row.project.isAuto === true && hiddenSet.has(row.project.id)).length;
+}

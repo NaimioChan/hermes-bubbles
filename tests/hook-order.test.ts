@@ -150,7 +150,9 @@ export function findOffences(source: string): Offence[] {
 }
 
 describe("hook ordering in UI components", () => {
-  const files = readdirSync(UI_DIR).filter((name) => name.endsWith(".ts"));
+  // `.tsx` included: a hook after an early return in a TSX component throws
+  // React #310 exactly the same way, and React #310 blanks the whole page.
+  const files = readdirSync(UI_DIR).filter((name) => /\.tsx?$/.test(name));
 
   it("finds the component files to scan", () => {
     expect(files.length).toBeGreaterThan(3);

@@ -62,6 +62,13 @@ class FakeSocket {
     this.deliver({ jsonrpc: "2.0", id: frame?.id, result });
   }
 
+  /** Answer the last request of `method` with a JSON-RPC error. */
+  replyError(method: string, code: number, message: string): void {
+    const frames = this.frames().filter((f) => f.method === method);
+    const frame = frames.at(-1);
+    this.deliver({ jsonrpc: "2.0", id: frame?.id, error: { code, message } });
+  }
+
   event(type: string, payload?: Record<string, unknown>, extra: Record<string, unknown> = {}): void {
     this.deliver({ jsonrpc: "2.0", method: "event", params: { type, payload, ...extra } });
   }
@@ -1354,6 +1361,38 @@ describe("projects", () => {
     await tick();
     socket.replyTo("projects.project_sessions", { project: null });
     expect(await pending).toBeNull();
+  });
+
+  it("renames a project through projects.update", async () => {
+    // `projects.update` is the only writer for a project's display name; the
+    // reply is the refreshed ProjectInfo (not the tree), so the caller re-reads.
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.renameProject("p_1", "New name");
+    await tick();
+    const frame = socket.frames().filter((f) => f.method === "projects.update").at(-1);
+    expect(frame?.params).toEqual({ id: "p_1", name: "New name" });
+    socket.replyTo("projects.update", { project: { id: "p_1", name: "New name" } });
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("deletes a project through projects.delete", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.deleteProject("p_1");
+    await tick();
+    const frame = socket.frames().filter((f) => f.method === "projects.delete").at(-1);
+    expect(frame?.params).toEqual({ id: "p_1" });
+    socket.replyTo("projects.delete", { projects: [], active_id: null });
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("surfaces a refused project delete instead of swallowing it", async () => {
+    // An auto project has no projects.db row, so the backend answers 5062; the
+    // caller must be able to show that rather than think the row went away.
+    const { controller, socket } = await connectAndOpen();
+    const pending = controller.deleteProject("C:/repo/a");
+    await tick();
+    socket.replyError("projects.delete", 5062, "no such project");
+    await expect(pending).rejects.toThrow(/no such project/);
   });
 });
 

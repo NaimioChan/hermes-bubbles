@@ -174,6 +174,24 @@
 
 分组的客户端口径（`core/projects.ts`）：只做两层，把 lane 拍平后按 `id` 去重、按 `last_active` 倒序；Home 桶永远排最后；「在此新建对话」用的路径是 `project.path` → 第一个 `repos[].path` → 空（Home 桶没有路径，按钮不出）。
 
+### `projects.update` / `projects.delete`（重命名 / 删除）
+
+```json
+// projects.update {id, name?, description?, icon?, color?, board_slug?} → {project: ProjectInfo}
+// projects.delete {id} → {projects: ProjectInfo[], active_id}      ← 整个列表，不是树
+```
+
+契约来源 `tui_gateway/contracts/projects_pets.py`（0.22.2 / `d923a5eb487`），实现在 `tui_gateway/methods_projects.py::_register_project_mutator` + `projects_db.update_project / delete_project`。
+
+**只有显式项目（用户在桌面端建的那种、`isAuto: false`）在 `projects.db` 里有行。** 自动发现的 git 仓库（`isAuto: true`）的 id 就是仓库路径，`projects.update`/`projects.delete` 对它回 `5062 no such project` —— 桌面端对这类不写库，只在本地把 id 记进 `localStorage['hermes.desktop.dismissedAutoProjects']` 把行藏起来（`store/layout.ts::dismissAutoProject`，连 8s 撤销都在客户端）。Home 桶（`__no_project__`）是后端合成的，两者都不适用。
+
+所以客户端的动作按节点分三类（`core/projects.ts::projectRemoval`）：显式项目 → 真删除（`projects.delete`）+ 可改名（`projects.update{name}`）；自动项目 → 本地隐藏（同名机制，插件用自己的 key）；Home 桶 → 无动作。
+
+两条实测注意：
+
+- `projects.delete` 删除的是 `projects` 行与 `project_folders`（`ON DELETE CASCADE`），**不删会话**。该项目的会话会掉进「最近」或按 cwd 落回自动仓库桶。
+- 改名只写 `name`，`slug` 与文件夹路径不动；返回的是刷新后的 `ProjectInfo`，**不是树**，列表要重新拉 `projects.tree` 才能看到新的 `label`（树节点的 `label` 在 `isAuto: false` 时取的是项目名）。
+
 ### `session.history`
 
 参数 `{session_id}`（stored id 或 runtime id）→ `{count, messages: TranscriptMessage[]}`。

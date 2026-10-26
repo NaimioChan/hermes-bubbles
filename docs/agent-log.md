@@ -8,6 +8,20 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-26 09:50 · hermes · 项目改名/删除 + 选择题末尾恒定自由输入
+
+- 需求：① 项目页签里的项目不能改名、不能删除，要对齐桌面端补上；② 给选择题时最后一项总允许自己输入。
+- 契约先行（先读后端再写代码）：`projects.update {id,name}` → `ProjectInfo`、`projects.delete {id}` → 整个项目列表；两者都只认 `projects.db` 里有行的**显式项目**，自动发现的 git 仓库 id 是路径、回 `5062 no such project`。桌面端对这类不写库，只记进 `localStorage['hermes.desktop.dismissedAutoProjects']` 隐藏（`store/layout.ts::dismissAutoProject`）。写进 `docs/01-protocol-contract.md` 新的一节。
+- ① 项目：`core/projects.ts` 新增 `projectRemoval`（delete / hide / none）、`canRenameProject`、`visibleProjectRows`、`hiddenProjectCount` 与按 profile 的 localStorage 读写；`controller.renameProject / deleteProject`；`ProjectList.tsx` 项目行加「⋯」菜单（行内输入框改名，回车提交 / Esc 取消 / 失焦提交；删除前 `window.confirm`），隐藏后列表顶部给「显示 N 个已隐藏」——桌面端是 8s toast 撤销，插件面板没有 toast 位，改成常驻入口。菜单**在文档流内**展开而不是绝对定位弹层：`.hb-proj-list` 是滚动容器，绝对定位会被裁掉。未归类桶两者都不给。
+- ② 选择题：`core/requests.ts` 新增 `stagedAnswerParts` / `stageChoice` / `stageFreeText`，把「已选选项」和「自己写的文字」从一个数组里拆开——单选互斥、多选可并存（线上 `answers` 每题一个字符串，多选按 `", "` 合并，所以单选的「两个都要」表达不了）。`RequestCards.ts` 的 clarify 卡在每个选项列表末尾恒定渲染那行输入框（`data-hb=clarify-other`），开放式问题本来就只有输入框。
+- 顺手修的守卫盲区：`scripts/audit-classes.mjs` 与 `tests/layout-classes` / `architecture` / `theme-vars` / `hook-order` 五个扫描器都只读 `.ts`，而 `ProjectList.tsx` / `WorkspacePicker.tsx` 是 `.tsx`——这两个文件一直没被任何源码级守卫看过。全部改成 `/\.tsx?$/` 后 audit 从 200 项变 232 项、全解析，四条守卫也全绿（说明 TSX 本来就没埋雷，但之前是运气）。
+- 验证：`tsc --noEmit` 干净；`vitest run` **601 passed / 28 文件**（新增 requests 5 条覆盖拆分/互斥/合并，projects 8 条覆盖三类节点的动作、按 profile 持久化、只滤自动项、计数只算仍匹配的，controller 3 条覆盖 update/delete 帧与 5062 失败回传）；`audit-classes` 232/232；`node --check` 两个 verify 脚本通过。
+- 真页面验收（**临时 HERMES_HOME + 回环 9121，用户自己的 9119 未启未停未改**；临时实例 .env 里去掉 basic-auth 与 public_url 才起得来，结束已删）：造了一个显式项目 + 一个 dawview 仓库会话。菜单分档正确（自动仓库只有 Remove、显式项目有 Rename+Delete）；改名后 `projects.db` 的 `name` 变了而 `slug` 没动、列表当场刷新；隐藏 → 「Show 1 hidden」→ 恢复 → 再隐藏 → **刷新页面仍生效**（localStorage 生效）；显式项目 Delete 后 `projects` 与 `project_folders` 清空而 `state.db` 的会话仍在（1 条），符合契约。选择题用真模型跑了两轮：卡片结构是 `[选项, 选项, INPUT]` 三行同宽 517px、输入行在最末；打自定义答案 → Submit 变可点；点选项 → 输入框清空；再打字 → 选中态清空；提交后模型日志明确读到 `User chose "Other" and said ...`。
+- 部署：`npm run install-plugin` 已装到 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`，产物里已有新钩子与新样式类；9119 当时没在跑（`/chat` 502），rescan 跳过，用户下次起仪表盘即生效。
+- 遗留：本机 9119 未跑，`scripts/verify.mjs`（新增了项目菜单断言）与 `verify-clarify.mjs`（新增了自由输入行断言）都只做了语法检查、没在用户实例上跑过。项目删除的确认走的是 `window.confirm`，与历史行删除一致；若以后要换成宿主风格的对话框，两处一起改。
+
+---
+
 ## 2026-10-21 14:15 · hermes · 流式输出时不再强制滚到底
 
 - 问题：用户报「正在打印气泡（回复、思考、工具输出全部）时页面被强制滚到最下面，无法滚动页面」。根因在 `ui/ChatPage.ts` 的 `useEffect(() => bottomRef.scrollIntoView())`，依赖是 `[items.length, items.at(-1)]`——每个 delta 都换掉最后一个 item，于是每个 delta 都无条件滚底，读者轮滑上去后下一次 delta 立刻拽回来。

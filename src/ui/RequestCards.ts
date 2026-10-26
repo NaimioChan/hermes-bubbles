@@ -21,6 +21,9 @@ import {
   clarifyResult,
   parseApproval,
   parseClarifyQuestions,
+  stageChoice,
+  stageFreeText,
+  stagedAnswerParts,
   type ApprovalChoice,
 } from "../core/requests";
 import type { HermesPluginSdk } from "./sdk";
@@ -147,19 +150,8 @@ export function ClarifyCard({
   const questions = parseClarifyQuestions(card.params);
   const [picked, setPicked] = useState<Record<string, string[]>>({});
 
-  const toggle = (qid: string, value: string, multi: boolean) => {
-    setPicked((prev: Record<string, string[]>) => {
-      const current = prev[qid] ?? [];
-      if (!multi) return { ...prev, [qid]: current[0] === value ? [] : [value] };
-      return {
-        ...prev,
-        [qid]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
-      };
-    });
-  };
-
-  const setFreeText = (qid: string, value: string) => {
-    setPicked((prev: Record<string, string[]>) => ({ ...prev, [qid]: value ? [value] : [] }));
+  const stage = (qid: string, values: string[]) => {
+    setPicked((prev: Record<string, string[]>) => ({ ...prev, [qid]: values }));
   };
 
   const ready = clarifyReady(questions, picked);
@@ -173,43 +165,62 @@ export function ClarifyCard({
       React.createElement("div", { className: "font-medium" }, t.clarifyTitle),
       questions.map((q) => {
         const on = picked[q.qid] ?? [];
+        const { text } = stagedAnswerParts(q, on);
+        // Every question ends with a free-text row, whether or not the server
+        // offered choices: the model's list is a guess at what the user means,
+        // and a card with no way to say "none of these" is a card that gets
+        // answered wrongly or cancelled. The desktop app does the same ("Other"),
+        // and the wire accepts any string here — `answers` is free-form.
+        const freeText = React.createElement(
+          "input",
+          {
+            key: `${q.qid}-free`,
+            type: "text",
+            className: q.choices.length ? "hb-choice-row hb-input hb-choice-input" : "hb-mt-sm hb-input",
+            "data-hb-input": q.qid,
+            "data-hb": "clarify-other",
+            "aria-label": q.choices.length ? t.clarifyOther : q.question,
+            placeholder: q.choices.length ? t.clarifyOther : undefined,
+            value: text,
+            onChange: (event: { target: { value: string } }) => stage(q.qid, stageFreeText(q, on, event.target.value)),
+          },
+        );
+        if (!q.choices.length) {
+          return React.createElement("div", { key: q.qid }, React.createElement("div", null, q.question), freeText);
+        }
         return React.createElement(
           "div",
           { key: q.qid },
           React.createElement("div", null, q.question),
-          q.choices.length
-            ? React.createElement(
-                "div",
-                { className: "hb-mt-sm hb-choice-col" },
-                q.choices.map((choice) =>
-                  React.createElement(
-                    "button",
-                    {
-                      key: choice,
-                      type: "button",
-                      "data-hb-choice": choice,
-                      "data-hb-selected": on.includes(choice) ? "true" : "false",
-                      className: "hb-action-btn-text hb-choice-row",
-                      style: {
-                        background: on.includes(choice) ? "var(--color-primary)" : "var(--color-muted)",
-                        color: on.includes(choice)
-                          ? "var(--color-primary-foreground)"
-                          : "var(--color-card-foreground)",
-                        borderRadius: "calc(var(--radius) * 0.6)",
-                      },
-                      onClick: () => toggle(q.qid, choice, q.multiSelect),
-                    },
-                    choice,
-                  ),
-                ),
-              )
-            : React.createElement("input", {
-                type: "text",
-                className: "hb-mt-sm hb-input",
-                "data-hb-input": q.qid,
-                "aria-label": q.question,
-                onChange: (event: { target: { value: string } }) => setFreeText(q.qid, event.target.value),
-              }),
+          React.createElement(
+            "div",
+            { className: "hb-mt-sm hb-choice-col" },
+            q.choices.map((choice) =>
+              React.createElement(
+                "button",
+                {
+                  key: choice,
+                  type: "button",
+                  "data-hb-choice": choice,
+                  "data-hb-selected": on.includes(choice) ? "true" : "false",
+                  className: "hb-action-btn-text hb-choice-row",
+                  style: {
+                    background: on.includes(choice) ? "var(--color-primary)" : "var(--color-muted)",
+                    color: on.includes(choice)
+                      ? "var(--color-primary-foreground)"
+                      : "var(--color-card-foreground)",
+                    borderRadius: "calc(var(--radius) * 0.6)",
+                  },
+                  onClick: () => stage(q.qid, stageChoice(q, on, choice)),
+                },
+                choice,
+              ),
+            ),
+            // Last row, styled as a member of the same list rather than as a
+            // form field: the point is "these are the options; this one is
+            // yours", so it must not read as a separate thing below the list.
+            freeText,
+          ),
         );
       }),
       React.createElement(

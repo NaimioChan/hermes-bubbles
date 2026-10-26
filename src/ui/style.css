@@ -767,6 +767,17 @@
   padding: 0.4rem 0.6rem;
 }
 
+/* The free-text row that closes every choice list. It sits in the same column
+ * as the options (so it reads as one more option, not as a form below them) and
+ * borrows `.hb-input` for the border; this only has to give it the option row's
+ * metrics so the list lines up. */
+.hb-choice-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 0.75rem;
+  color: var(--color-card-foreground);
+}
+
 /* The "editing a sent message" banner above the composer. Its own class so the
  * colour mix and radius live in CSS rather than inline, and so the guards can see
  * it. */
@@ -1610,6 +1621,36 @@ div:hover > .hb-row-tools,
 }
 
 .hb-proj-more:hover {
+  background: var(--color-muted);
+}
+
+/* The per-project action menu. In flow under the project's header (see
+ * ProjectList.tsx for why it is not a popover), indented to line up with the
+ * rows it belongs to. */
+.hb-proj-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 0.1rem 0 0.25rem 0.9rem;
+  padding: 0.15rem;
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) * 0.6);
+  background: var(--color-card);
+}
+
+.hb-proj-menu-item {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  background: transparent;
+  color: var(--color-card-foreground);
+  font-size: 0.6875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hb-proj-menu-item:hover {
   background: var(--color-muted);
 }
 

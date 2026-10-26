@@ -23,8 +23,10 @@ import { describe, expect, it } from "vitest";
 const SRC = join(__dirname, "..", "src");
 
 function sourcesIn(dir: string): { name: string; text: string }[] {
+  // `.tsx` included: banning a DOM global only in `.ts` leaves the TSX
+  // components (ProjectList, WorkspacePicker) as an unguarded door.
   return readdirSync(dir)
-    .filter((name) => name.endsWith(".ts"))
+    .filter((name) => /\.tsx?$/.test(name))
     .map((name) => ({ name: `${dir.split(/[\\/]/).pop()}/${name}`, text: readFileSync(join(dir, name), "utf8") }));
 }
 

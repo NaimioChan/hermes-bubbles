@@ -25,7 +25,18 @@ import {
   writeStoredWorkspace,
   type WorkspacesPayload,
 } from "../core/workspaces";
-import { projectRows, sessionsOfProject, type ProjectSessionRow, type ProjectsTree } from "../core/projects";
+import {
+  hiddenProjectCount,
+  projectRows,
+  projectRemoval,
+  readHiddenProjects,
+  sessionsOfProject,
+  visibleProjectRows,
+  writeHiddenProjects,
+  type ProjectNode,
+  type ProjectSessionRow,
+  type ProjectsTree,
+} from "../core/projects";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { createControllerHolder } from "../app/persistent";
 import { Bubble } from "./Bubble";
@@ -156,6 +167,12 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // (its first read git-probes every distinct session cwd on the host).
   const [historyMode, setHistoryMode] = useState<HistoryMode>("recent");
   const [projectTree, setProjectTree] = useState<ProjectsTree | null>(null);
+  // Auto-discovered repos the user hid from this list. Client-side by design:
+  // `projects.delete` only knows explicit projects (see core/projects.ts), so
+  // hiding is local state, keyed to the profile exactly like the workspace pick.
+  const [hiddenProjects, setHiddenProjects] = useState<string[]>(() =>
+    readHiddenProjects(storageOrNull(), currentProfile()),
+  );
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsFailed, setProjectsFailed] = useState(false);
   const [projectSessionCache, setProjectSessionCache] = useState<
@@ -440,7 +457,70 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     [controller],
   );
 
-  const projectViewRows = useMemo(() => projectRows(projectTree), [projectTree]);
+  const projectRowsAll = useMemo(() => projectRows(projectTree), [projectTree]);
+  // Two lists, one source: the rows to draw and the count behind "show hidden".
+  // The count reads the UNFILTERED rows so a hidden entry that no longer matches
+  // anything (a removed repo) does not advertise a restore that restores nothing.
+  const projectViewRows = useMemo(
+    () => visibleProjectRows(projectRowsAll, hiddenProjects),
+    [projectRowsAll, hiddenProjects],
+  );
+  const hiddenProjectTotal = useMemo(
+    () => hiddenProjectCount(projectRowsAll, hiddenProjects),
+    [projectRowsAll, hiddenProjects],
+  );
+
+  const updateHiddenProjects = useCallback(
+    (next: string[]) => {
+      setHiddenProjects(next);
+      writeHiddenProjects(storageOrNull(), currentProfile(), next);
+    },
+    [],
+  );
+
+  const onRenameProject = useCallback(
+    (projectId: string, name: string) => {
+      controller
+        .renameProject(projectId, name)
+        // The reply carries the refreshed `ProjectInfo`, not the tree it is drawn
+        // from, so the label only changes after a re-read.
+        .then(() => loadProjects())
+        .catch((err: unknown) => {
+          setError(`${t.projectRenameFailed}: ${err instanceof Error ? err.message : String(err)}`);
+          // Roll back the optimistic label by re-reading what the backend has.
+          void loadProjects();
+        });
+    },
+    [controller, loadProjects, t],
+  );
+
+  /**
+   * One row's "remove" action, in the two shapes the backend offers.
+   *
+   * An explicit project is deleted for real (`projects.delete`); an auto repo has
+   * no row to delete, so it is hidden locally the way the desktop sidebar hides
+   * it. The deletion answers the project list rather than the tree, so the tree
+   * is re-read either way.
+   */
+  const onRemoveProject = useCallback(
+    (project: ProjectNode) => {
+      const kind = projectRemoval(project);
+      if (kind === "none") return;
+      if (kind === "hide") {
+        updateHiddenProjects([...hiddenProjects, project.id]);
+        return;
+      }
+      controller
+        .deleteProject(project.id)
+        .then(() => loadProjects())
+        .catch((err: unknown) =>
+          setError(`${t.projectRemoveFailed}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+    },
+    [controller, hiddenProjects, loadProjects, t, updateHiddenProjects],
+  );
+
+  const onRestoreHiddenProjects = useCallback(() => updateHiddenProjects([]), [updateHiddenProjects]);
 
   const onNewChatInProject = useCallback(
     (workspace: string) => {
@@ -982,9 +1062,13 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
             .filter((id): id is string => Boolean(id)),
           sessionCache: projectSessionCache,
           loadingProjectId,
+          hiddenCount: hiddenProjectTotal,
           onExpand: loadProjectSessions,
           onOpen: (id: string) => onOpenStored(id, ""),
           onNewChat: onNewChatInProject,
+          onRename: onRenameProject,
+          onRemove: onRemoveProject,
+          onRestoreHidden: onRestoreHiddenProjects,
         },
         sessions: stored,
         loading: loadingStored,

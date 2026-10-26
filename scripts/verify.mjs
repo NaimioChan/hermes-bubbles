@@ -2034,6 +2034,36 @@ async function main() {
         JSON.stringify({ news: shape.news, path: shape.path }),
       );
 
+      // Every project row that can be acted on carries the kebab menu, and the
+      // menu's items follow the backend's two tiers: rename only where a
+      // projects.db row exists, remove on both (delete vs local hide).
+      const menuShape = await session.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-hb="project-row"]')];
+        const out = [];
+        for (const row of rows) {
+          const btn = row.querySelector('[data-hb="project-menu"]');
+          const id = btn ? btn.dataset.hbProject : null;
+          if (!btn) { out.push({ id: null }); continue; }
+          btn.click();
+          const panel = row.querySelector('[data-hb="project-menu-panel"]');
+          out.push({
+            id,
+            items: panel ? [...panel.querySelectorAll("button")].map((b) => b.dataset.hb) : null,
+          });
+          btn.click();
+        }
+        return out;
+      })()`);
+      const withMenu = (menuShape || []).filter((row) => row.id);
+      check(
+        "project rows expose a rename/remove menu (never on the ungrouped bucket)",
+        withMenu.length >= 1
+          && withMenu.every((row) => Array.isArray(row.items) && row.items.includes("project-remove"))
+          // Explicit projects also offer rename; an auto repo has no row to patch.
+          && withMenu.every((row) => !String(row.id).startsWith("p_") || row.items.includes("project-rename")),
+        JSON.stringify(withMenu).slice(0, 400),
+      );
+
       // Expand up to three projects; the drill-in is what carries the sessions.
       await session.evaluate(`(() => {
         const toggles = [...document.querySelectorAll('[data-hb="project-toggle"]')];

@@ -48,7 +48,10 @@ const ownCss = readFileSync(join(uiDir, "style.css"), "utf8");
 const ownClasses = new Set([...ownCss.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]));
 
 const found = new Map();
-for (const file of readdirSync(uiDir).filter((f) => f.endsWith(".ts"))) {
+// `.tsx` too: the project list and the workspace picker are TSX, and when this
+// loop only read `.ts` their classes were never audited — a class the host lacks
+// would have failed silently exactly the way this script exists to prevent.
+for (const file of readdirSync(uiDir).filter((f) => /\.tsx?$/.test(f) && f !== "sdk.ts" && f !== "format.ts")) {
   const src = readFileSync(join(uiDir, file), "utf8");
   for (const match of src.matchAll(/className:\s*"([^"]+)"/g)) {
     for (const cls of match[1].split(/\s+/).filter(Boolean)) {

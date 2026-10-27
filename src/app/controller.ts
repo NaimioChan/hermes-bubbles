@@ -10,6 +10,19 @@
  */
 
 import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
+import {
+  isWithdrawalEvent,
+  withdrawalsFrom,
+  type CardWithdrawal,
+} from "../core/cards";
+import {
+  fenceQuery,
+  isBusyRefusal,
+  mutationFence,
+  newRequestId,
+  type MutationFence,
+  type MutationSnapshot,
+} from "../core/mutation";
 import { EventDedupe } from "../core/dedupe";
 import { sessionContextBlock, type ContextBlock, type ContextSourceMessage } from "../core/context";
 import { messagesFor, normalizeLocale, type Locale } from "../core/i18n";
@@ -45,6 +58,15 @@ export interface ServerRequestCard {
   id: string;
   method: string;
   params: Record<string, unknown>;
+  /**
+   * Runtime id of the session that asked (`params.session_id`).
+   *
+   * One socket carries every session's requests, so this is the only thing that
+   * says which transcript the card belongs to. Without it the page drew every
+   * card in whichever session was focused — a question asked in a background
+   * session showed up (and could be answered) in the one on screen.
+   */
+  sessionId: string;
   respond: (result: Record<string, unknown>) => void;
   fail: (code: number, message: string) => void;
 }
@@ -61,6 +83,16 @@ export interface ControllerOptions {
 
 /** Server→client requests this page renders. Anything else is answered `-32601`. */
 const HANDLED_REQUESTS = new Set(["approval", "clarify"]);
+
+/**
+ * A request the backend withdrew before it was answered (see `core/cards.ts`).
+ *
+ * `request.cancel` is per-session; `approval.cancelled` is a global broadcast
+ * carrying the ids it dropped. Both mean "this card is gone" — a card left on
+ * screen keeps offering buttons for a request whose wait already returned, and
+ * the human would answer into nothing.
+ */
+export type ServerRequestWithdrawal = CardWithdrawal;
 
 export interface ModelOptionProvider {
   slug: string;
@@ -88,8 +120,18 @@ export class ChatController {
    * the page mounts again.
    */
   private pendingCards: ServerRequestCard[] = [];
+  /**
+   * Requests the backend withdrew while the page was unmounted.
+   *
+   * Same parking rule as `pendingCards`: the page subscribes on mount, so an id
+   * that was cancelled in between must still reach it, or a card replayed from
+   * `pendingCards` would outlive the request it answers.
+   */
+  private pendingWithdrawals: ServerRequestWithdrawal[] = [];
   /** Desktop-notification sink (see `setNoticeSink`). */
   private noticeSink: ((notice: TurnNotice) => void) | null = null;
+  /** Page sink for withdrawn cards (see `setWithdrawalSink`). */
+  private withdrawalSink: ((withdrawal: ServerRequestWithdrawal) => void) | null = null;
   /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
   private http: ((path: string, init: RequestInit) => Promise<unknown>) | null = null;
   /** Storage sink for workspace picks; absent means "this document only". */
@@ -165,8 +207,25 @@ export class ChatController {
     return parked;
   }
 
+  /** Withdrawals parked while the page was unmounted (see `pendingWithdrawals`). */
+  takeParkedWithdrawals(): ServerRequestWithdrawal[] {
+    const parked = this.pendingWithdrawals;
+    this.pendingWithdrawals = [];
+    return parked;
+  }
+
   setServerRequestSink(sink: ((card: ServerRequestCard) => void) | null): void {
     this.cardSink = sink;
+  }
+
+  /**
+   * Page sink for "this card is withdrawn".
+   *
+   * Cleared with the card sink on unmount and replayed from
+   * `pendingWithdrawals` on the next mount, so the two always move together.
+   */
+  setWithdrawalSink(sink: ((withdrawal: ServerRequestWithdrawal) => void) | null): void {
+    this.withdrawalSink = sink;
   }
 
   /** Desktop-notification sink. Set by the page; absent means "notify nobody". */
@@ -387,6 +446,21 @@ export class ChatController {
 
   focusSession(key: string): void {
     this.setState(focus(this.state, key));
+  }
+
+  /**
+   * Focus whichever tab owns this runtime session, if any.
+   *
+   * Used by the notification click: a request is scoped to one session, and the
+   * click is the human saying "show me the one that needs me". Resolved at click
+   * time rather than at notification time because the tab may have been closed
+   * and reopened (a new key) in between.
+   */
+  focusSessionId(sessionId: string): boolean {
+    const key = sessionId ? this.state.tabs.find((tab) => tab.runtimeId === sessionId)?.key : undefined;
+    if (!key) return false;
+    this.focusSession(key);
+    return true;
   }
 
   closeSession(key: string): void {
@@ -692,6 +766,62 @@ export class ChatController {
   // ── stored-session management ────────────────────────────────────────────
 
   /**
+   * The optimistic-concurrency fence a session mutation needs on 0.22.5+.
+   *
+   * Read fresh per attempt: a revision that changed since the sidebar rendered is
+   * exactly what the fence exists to catch, and reusing a stale one just gets
+   * refused. `null` when the backend has no snapshot route (older build), so the
+   * request goes out the way it always did.
+   */
+  private async mutationFence(storedId: string): Promise<MutationFence | null> {
+    try {
+      const snapshot = await this.fetchJSON<MutationSnapshot>(
+        `/api/sessions/${encodeURIComponent(storedId)}/mutation-snapshot`,
+        { method: "GET" },
+      );
+      return mutationFence(snapshot ?? null, newRequestId());
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * DELETE / PATCH, retried while the store still reports the row busy.
+   *
+   * `session.close` returns before the gateway has finished retiring the session,
+   * so a mutation issued straight after it is answered `409 session_busy`
+   * (`MUTATION_GUARD_REFUSALS`). Measured on 0.22.5, that window outlives a few
+   * hundred milliseconds: retries at 200ms still lost, ~1.5s won. The fence also
+   * has to be re-read per attempt, because the revision moves as the close
+   * settles.
+   *
+   * Four attempts (~2s total) is a settle delay a human will not notice on a
+   * delete; a longer one would need a progress indicator to be honest.
+   */
+  private async mutateStoredSession(
+    storedId: string,
+    init: { method: "DELETE" | "PATCH"; body?: Record<string, unknown> },
+  ): Promise<unknown> {
+    const RETRY_DELAYS_MS = [200, 500, 1200];
+    const path = `/api/sessions/${encodeURIComponent(storedId)}`;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+      const fence = await this.mutationFence(storedId);
+      const url = init.method === "DELETE" && fence ? `${path}?${fenceQuery(fence)}` : path;
+      const body =
+        init.method === "PATCH" ? { ...(init.body ?? {}), ...(fence ?? {}) } : undefined;
+      try {
+        return await this.fetchJSON(url, { method: init.method, body });
+      } catch (error) {
+        lastError = error;
+        if (!isBusyRefusal(error)) throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  /**
    * Delete a stored session.
    *
    * Goes through REST (`DELETE /api/sessions/{id}`), NOT `session.delete`: the
@@ -721,9 +851,11 @@ export class ChatController {
     }
     if (openTab) this.closeSession(openTab.key);
 
-    await this.fetchJSON(`/api/sessions/${encodeURIComponent(storedId)}`, {
-      method: "DELETE",
-    });
+    // The fence is read AFTER the close: `session.close` itself advances the
+    // row's revision, and a fence captured before it would be refused as stale.
+    // `mutateStoredSession` re-reads it per attempt and rides out the short
+    // `session_busy` window the close leaves behind.
+    await this.mutateStoredSession(storedId, { method: "DELETE" });
 
     // REST answers `{ok: true}` even when the row is still active on the gateway
     // and will simply re-persist. Confirm it is actually gone rather than
@@ -747,11 +879,11 @@ export class ChatController {
     const next = title.trim();
     if (!next) throw new Error(messagesFor(this.locale).titleRequired);
 
-    const result = await this.fetchJSON<{ ok?: boolean; title?: string }>(
-      `/api/sessions/${encodeURIComponent(storedId)}`,
-      { method: "PATCH", body: { title: next } },
-    );
-    const finalTitle = result?.title || next;
+    const result = await this.mutateStoredSession(storedId, {
+      method: "PATCH",
+      body: { title: next },
+    });
+    const finalTitle = (result as { title?: string } | null)?.title || next;
 
     this.setState({ ...this.state, tabs: retitleStoredSession(this.state.tabs, storedId, finalTitle) });
     return finalTitle;
@@ -1039,6 +1171,18 @@ export class ChatController {
 
   private handleEvent(event: GatewayEvent): void {
     if (event.type === "gateway.ready") this.dedupe.setEpoch(this.client.epoch);
+    // A withdrawal is a UI instruction, not a timeline item — but it still has to
+    // reach the page, and a page between mounts has to hear it later. Handle it
+    // before the reducer, which would drop a frame it has no case for anyway.
+    if (isWithdrawalEvent(event.type)) {
+      const withdrawals = withdrawalsFrom(event);
+      if (!withdrawals.length) return;
+      for (const withdrawal of withdrawals) {
+        if (this.withdrawalSink) this.withdrawalSink(withdrawal);
+        else this.pendingWithdrawals.push(withdrawal);
+      }
+      return;
+    }
     // The store decides which timeline owns the event and drops what no tab
     // owns; this method only does the connection-level bookkeeping.
     const result = routeEvent(this.state, event, this.dedupe);
@@ -1089,22 +1233,30 @@ export class ChatController {
 
   private handleServerRequest(request: ServerRequest): boolean {
     if (!HANDLED_REQUESTS.has(request.method)) return false;
+    const sessionId = typeof request.params.session_id === "string" ? request.params.session_id : "";
     const card: ServerRequestCard = {
       id: request.id,
       method: request.method,
       params: request.params,
+      sessionId,
       respond: request.respond,
       fail: request.fail,
     };
     // Announce before parking: a request that arrives while the page is unmounted
     // still needs the human, and that is exactly the case the window is not on.
+    // The title names WHICH conversation is asking — with several sessions open
+    // a bare "Hermes has a question" gives no way to tell them apart, and the
+    // notification is the only thing on screen when the window is in the back.
+    const owner = sessionId
+      ? this.state.tabs.find((tab) => tab.runtimeId === sessionId)
+      : undefined;
     this.noticeSink?.({
       kind: "request",
       method: request.method as "approval" | "clarify",
       params: request.params,
       requestId: request.id,
-      sessionKey: typeof request.params.session_id === "string" ? request.params.session_id : "",
-      title: "",
+      sessionKey: sessionId,
+      title: owner?.title ?? "",
       text: "",
     });
     if (!this.cardSink) {

@@ -8,6 +8,21 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-27 11:35 · hermes · 审批/选择题按会话归属 + 会话写栅栏
+
+- 需求：同时开多个 sessions 时，一个 session 弹出的选择题/审批会在所有 session 里显示，并打断其他 session 的任务。
+- 根因：一条 socket 收所有会话的 `approval` / `clarify` 帧（`tui_gateway/server_requests.py::ServerRequest.frame` 无条件带 `params.session_id`），而页面把卡片存进一个扁平数组 `cards`，直接渲染到**当前聚焦**的转写区。于是 A 会话提的问题出现在 B 会话，看着像 B 被卡住，点下去答的却是 A 的卡。`visibleCards` 之后用 `core/cards.ts::cardsForTab` 按 `session_id` 过滤；没有对应页签的卡（页签关了/另一窗口开着）仍在唯一可用的转写区可答，不回 `-32601`（铁律 7）。
+- 配套：`ServerRequestCard.sessionId`（controller 打标签）；页签条加 `data-hb=tab-waiting` 的「?」标记（`waitingKeys`），让后台会话的等待可见而不抢焦点；桌面通知标题带会话名（`requestNotice(..., sessionTitle)`），点击通知跳到提问的那个会话（`maybeNotify(notice, locale, onOpen)` → `controller.focusSessionId`）；`request.cancel` / `approval.cancelled` 撤卡（`core/cards.ts::withdrawalsFrom`），页面未挂载时暂存（`pendingWithdrawals`）——以前这些卡永远不会消失。
+- 顺手修的真 bug（0.22.5 起）：`PATCH`/`DELETE /api/sessions/{id}` 现在要求写栅栏 `request_id` + `expected_revision`，不带回 `409 client_upgrade_required`（措辞像「升级 App」，实际是栅栏缺失）。插件的改名/删会话全都没带 → 对当前后端 100% 失败。新增 `core/mutation.ts`（栅栏纯逻辑 + `fenceQuery` + `isBusyRefusal`），`ChatController::mutateStoredSession` 读 `/mutation-snapshot` 后带栅栏发送，并按 200/500/1200ms 重试 `session_busy`（close 返回后仍有一小段忙窗，实测 200ms 级重试会输、~1.5s 才赢）。四个验收脚本的清理路径同步修好——以前它们删不掉自己造的会话，会把行留在用户库里。
+- 契约：`docs/01-protocol-contract.md` 基线从 0.22.2/`d923a5eb487` 升到 0.22.5/`bf0203a794a0`；新增 §6.1（请求归属会话）、§6.2（两种撤回帧）、§6A（写栅栏）；`approval.cancelled` 从 `{...}` 补成真实 payload。AGENTS.md 加铁律 28/29，钩子清单补 `tab-waiting`。
+- 验证：`tsc --noEmit` 干净；`vitest run` **630 passed / 30 文件**（新增 `tests/cards.test.ts` 13 条、`tests/mutation.test.ts` 6 条，controller +6 条：卡片打标签、request.cancel 送达与暂存、approval.cancelled 广播、通知带会话名、点击跳会话、busy 重试换新栅栏、非 busy 不重试）；`audit-classes` 233/233 全解析；四个 verify 脚本 `node --check` 通过。
+- 真页面验收（**临时 HERMES_HOME + 回环 9121，用户自己的 9119 未启未停未改**，结束已停已删）：新写 `scripts/verify-cards.mjs`，CDP 开两个会话、在第一个里用真模型触发 clarify、切到第二个：**10/10 通过** —— 第二会话 `cards=0` 且转写区里没有「写代码/查资料」字样；提问页签 `waiting=true` 且有 `data-hb=tab-waiting`，聚焦页签 `waiting=false`；切回第一页签卡片回来了；答完后卡片与标记都清掉；cleanup `{matched:1, deleted:1, remaining:0}`。截图 `.cache/shots/10-cards-other-session.png` / `11-cards-answered.png` 目视确认。
+- 也跑了 `scripts/verify.mjs`：**92/95**，剩下 3 条是临时实例里只有「未归类」桶（没有显式项目，按设计不给「新建对话」与「⋯」菜单）——不是回归。改名/删会话两条这次全过（修复前是 FAIL）。
+- 部署：`npm run install-plugin` 已装到 `%LOCALAPPDATA%\hermes\plugins\hermes-bubbles\dashboard`；rescan 因 9119 有 basic-auth 回 401，用户刷新一次 `/chat` 生效。注意：装到临时 HERMES_HOME 里是没用的——服务端解析插件目录时不看 `HERMES_HOME`，踩过一次（白跑一轮验收）。
+- 遗留：`open_requests`（`session.resume` / `session.events.since` 带回的未答请求）插件还没消费，断线期间**新发起**的请求要等 resume 才看得到；撤回靠 `request.cancel` 兜底。临时实例无显式项目，项目视图那三条断言没在真项目上验过。
+
+---
+
 ## 2026-10-26 09:50 · hermes · 项目改名/删除 + 选择题末尾恒定自由输入
 
 - 需求：① 项目页签里的项目不能改名、不能删除，要对齐桌面端补上；② 给选择题时最后一项总允许自己输入。

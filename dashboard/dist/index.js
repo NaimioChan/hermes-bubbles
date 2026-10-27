@@ -56,6 +56,55 @@ var HermesBubbles = (() => {
     return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
   }
 
+  // src/core/cards.ts
+  function ownerKeyOf(state, sessionId) {
+    if (!sessionId) return null;
+    const tab = state.tabs.find((candidate) => candidate.runtimeId === sessionId);
+    return tab?.key ?? null;
+  }
+  function cardsForTab(state, cards, tabKey) {
+    if (!tabKey) return [...cards];
+    return cards.filter((card) => {
+      const owner = ownerKeyOf(state, card.sessionId);
+      if (owner === null) return tabKey === state.activeKey;
+      return owner === tabKey;
+    });
+  }
+  function waitingKeys(state, cards) {
+    const keys = [];
+    for (const card of cards) {
+      const owner = ownerKeyOf(state, card.sessionId);
+      if (owner !== null && !keys.includes(owner)) keys.push(owner);
+    }
+    return keys;
+  }
+  function str(value) {
+    return typeof value === "string" ? value : "";
+  }
+  function withdrawalsFrom(event) {
+    const payload = event.payload ?? {};
+    const reason = str(payload.reason);
+    if (event.type === "request.cancel") {
+      const id = str(payload.id);
+      return id ? [{ id, reason, sessionId: str(event.session_id) || str(payload.session_id) }] : [];
+    }
+    if (event.type === "approval.cancelled") {
+      const ids = Array.isArray(payload.request_ids) ? payload.request_ids : [];
+      const sessionId = str(payload.session_id);
+      return ids.filter((id) => typeof id === "string" && id.length > 0).map((id) => ({ id, reason, sessionId }));
+    }
+    return [];
+  }
+  function isWithdrawalEvent(type) {
+    return type === "request.cancel" || type === "approval.cancelled";
+  }
+  function withoutWithdrawn(cards, withdrawals) {
+    if (!withdrawals.length) return cards;
+    const gone = new Set(withdrawals.map((withdrawal) => withdrawal.id));
+    const kept = cards.filter((card) => !gone.has(card.id));
+    return kept.length === cards.length ? cards : kept;
+  }
+
   // src/core/i18n.ts
   var DEFAULT_LOCALE = "en";
   var LOCALE_STORAGE_KEY = "hermes-locale";
@@ -196,6 +245,7 @@ var HermesBubbles = (() => {
     newChat: "New chat",
     closeTab: "Close",
     emptyTabs: "No open sessions",
+    waitingForAnswer: "This chat is waiting for your answer",
     untitled: "Untitled",
     minutesAgo: (n) => `${n} min ago`,
     hoursAgo: (n) => `${n} h ago`,
@@ -386,6 +436,7 @@ var HermesBubbles = (() => {
     newChat: "\u65B0\u5BF9\u8BDD",
     closeTab: "\u5173\u95ED",
     emptyTabs: "\u6CA1\u6709\u6253\u5F00\u7684\u4F1A\u8BDD",
+    waitingForAnswer: "\u8FD9\u4E2A\u5BF9\u8BDD\u5728\u7B49\u4F60\u56DE\u7B54",
     untitled: "\u672A\u547D\u540D",
     minutesAgo: (n) => `${n} \u5206\u949F\u524D`,
     hoursAgo: (n) => `${n} \u5C0F\u65F6\u524D`,
@@ -797,19 +848,19 @@ ${body}`;
   function parseDispatch(raw) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const row = raw;
-    const str3 = (v) => typeof v === "string" ? v : "";
+    const str4 = (v) => typeof v === "string" ? v : "";
     switch (row.type) {
       case "alias":
         return typeof row.target === "string" ? { type: "alias", target: row.target } : null;
       case "exec":
       case "plugin":
-        return { type: row.type, output: str3(row.output) };
+        return { type: row.type, output: str4(row.output) };
       case "prefill":
-        return typeof row.message === "string" ? { type: "prefill", message: row.message, notice: str3(row.notice) } : null;
+        return typeof row.message === "string" ? { type: "prefill", message: row.message, notice: str4(row.notice) } : null;
       case "send":
-        return typeof row.message === "string" ? { type: "send", message: row.message, display: str3(row.display), notice: str3(row.notice) } : null;
+        return typeof row.message === "string" ? { type: "send", message: row.message, display: str4(row.display), notice: str4(row.notice) } : null;
       case "skill":
-        return typeof row.name === "string" ? { type: "skill", name: row.name, message: str3(row.message), display: str3(row.display) } : null;
+        return typeof row.name === "string" ? { type: "skill", name: row.name, message: str4(row.message), display: str4(row.display) } : null;
       default:
         return null;
     }
@@ -920,7 +971,7 @@ ${body}`;
     counter += 1;
     return `${prefix}-${counter}`;
   }
-  function str(value) {
+  function str2(value) {
     return typeof value === "string" ? value : "";
   }
   function num(value) {
@@ -985,7 +1036,7 @@ ${body}`;
   }
   function inferToolStatus(payload) {
     if (payload.error) return "error";
-    const summary = str(payload.summary);
+    const summary = str2(payload.summary);
     if (/\b(error|failed|failure|traceback|exception|denied|refused|timed out)\b/i.test(summary)) {
       return "error";
     }
@@ -997,28 +1048,28 @@ ${body}`;
   }
   function toolFromStart(event) {
     const p = event.payload ?? {};
-    const name = str(p.name) || "tool";
+    const name = str2(p.name) || "tool";
     return {
       kind: "tool",
       id: nextId("tool"),
       at: Date.now(),
-      toolId: str(p.tool_id),
+      toolId: str2(p.tool_id),
       name,
-      summary: str(p.context) || str(p.preview) || "",
+      summary: str2(p.context) || str2(p.preview) || "",
       status: "running",
       args: p.args,
-      argsText: str(p.args_text) || void 0
+      argsText: str2(p.args_text) || void 0
     };
   }
   var MAX_PROGRESS_LINES = 6;
   function todoEntry(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const row = value;
-    const id = str(row.id);
-    const content = str(row.content);
+    const id = str2(row.id);
+    const content = str2(row.content);
     if (!id || !content) return null;
-    const parent = str(row.parent);
-    return { id, content, status: (str(row.status) || "pending").toLowerCase(), parent: parent || void 0 };
+    const parent = str2(row.parent);
+    return { id, content, status: (str2(row.status) || "pending").toLowerCase(), parent: parent || void 0 };
   }
   function reduceTodos(current, payload) {
     if (!Array.isArray(payload.todos)) return void 0;
@@ -1038,7 +1089,7 @@ ${body}`;
     "interrupted"
   ];
   function subagentStatusOf(value) {
-    const raw = str(value).toLowerCase();
+    const raw = str2(value).toLowerCase();
     return SUBAGENT_STATUSES.includes(raw) ? raw : void 0;
   }
   function stringList(value) {
@@ -1049,16 +1100,16 @@ ${body}`;
   function outputTailOf(value) {
     if (!Array.isArray(value)) return void 0;
     const rows = value.filter((row) => Boolean(row) && typeof row === "object").map((row) => ({
-      tool: str(row.tool),
-      preview: str(row.preview),
+      tool: str2(row.tool),
+      preview: str2(row.preview),
       isError: Boolean(row.is_error)
     })).filter((row) => row.tool || row.preview);
     return rows.length ? rows.slice(-6) : void 0;
   }
   function batchKeyOf(p) {
-    const delegation = str(p.delegation_id);
+    const delegation = str2(p.delegation_id);
     if (delegation) return delegation;
-    const parent = str(p.parent_id);
+    const parent = str2(p.parent_id);
     return parent ? `flat:${parent}` : "flat";
   }
   function mergeChild(prev, type, p, key, taskIndex) {
@@ -1073,9 +1124,9 @@ ${body}`;
       thinking: ""
     };
     const next = { ...base, progress: base.progress.slice() };
-    const goal = str(p.goal);
+    const goal = str2(p.goal);
     if (goal) next.goal = goal;
-    const model = str(p.model);
+    const model = str2(p.model);
     if (model) next.model = model;
     const toolsets = stringList(p.toolsets);
     if (toolsets) next.toolsets = toolsets;
@@ -1095,25 +1146,25 @@ ${body}`;
         next.status = "running";
         break;
       case "subagent.progress": {
-        const line = str(p.text);
+        const line = str2(p.text);
         if (line) next.progress = [...base.progress, line].slice(-MAX_PROGRESS_LINES);
         break;
       }
       case "subagent.thinking": {
-        const text = str(p.text);
+        const text = str2(p.text);
         if (text) next.thinking = text.length > 240 ? `\u2026${text.slice(-240)}` : text;
         break;
       }
       case "subagent.tool": {
-        const tool = str(p.tool_name) || str(p.name);
+        const tool = str2(p.tool_name) || str2(p.name);
         if (tool) next.lastTool = tool;
-        const preview = str(p.tool_preview) || str(p.text);
+        const preview = str2(p.tool_preview) || str2(p.text);
         if (preview) next.progress = [...base.progress, preview].slice(-MAX_PROGRESS_LINES);
         break;
       }
       case "subagent.complete": {
         next.status = subagentStatusOf(p.status) ?? "completed";
-        const summary = str(p.summary) || str(p.text);
+        const summary = str2(p.summary) || str2(p.text);
         if (summary) next.summary = summary;
         const duration = num(p.duration_seconds);
         if (duration !== void 0) next.durationS = duration;
@@ -1129,7 +1180,7 @@ ${body}`;
   function upsertSubagent(items, event) {
     const p = event.payload ?? {};
     const type = event.type;
-    const key = str(p.subagent_id) || `idx:${num(p.task_index) ?? 0}`;
+    const key = str2(p.subagent_id) || `idx:${num(p.task_index) ?? 0}`;
     const batchKey = batchKeyOf(p);
     const taskCount = num(p.task_count) ?? 1;
     const taskIndex = num(p.task_index) ?? 0;
@@ -1176,7 +1227,7 @@ ${body}`;
     return copy;
   }
   function resultTextOf(p) {
-    const explicit = str(p.result_text);
+    const explicit = str2(p.result_text);
     if (explicit) return explicit;
     const result = p.result;
     if (result === void 0 || result === null) return void 0;
@@ -1202,7 +1253,7 @@ ${body}`;
           meta: { ...meta, running: true, status: "", statusKind: "" }
         };
       case "message.delta": {
-        const text = str(p.text);
+        const text = str2(p.text);
         if (!text) return timeline;
         const base = sealReasoning(items);
         const open = openAssistant(base);
@@ -1221,7 +1272,7 @@ ${body}`;
       case "message.interim": {
         const sealed = sealReasoning(sealAssistant(items));
         if (p.already_streamed) return { items: sealed, meta };
-        const text = str(p.text);
+        const text = str2(p.text);
         if (!text) return { items: sealed, meta };
         const last = lastAssistant(sealed);
         if (last) return { items: replaceLast(sealed, { ...last, text: last.text + text }), meta };
@@ -1235,9 +1286,9 @@ ${body}`;
         return { items: [...sealed, fresh], meta };
       }
       case "message.complete": {
-        const status = str(p.status);
-        const finalText = str(p.text);
-        const error = str(p.error) || str(p.failure_reason);
+        const status = str2(p.status);
+        const finalText = str2(p.text);
+        const error = str2(p.error) || str2(p.failure_reason);
         const usage = p.usage ?? null;
         const settled = sealReasoning(items);
         const target = openAssistant(settled) ?? turnAssistant(settled);
@@ -1301,12 +1352,12 @@ ${body}`;
         };
       }
       case "reasoning.delta": {
-        const text = str(p.text);
+        const text = str2(p.text);
         if (!text) return timeline;
         return { items: appendReasoning(sealAssistant(items), text), meta };
       }
       case "reasoning.available": {
-        const text = str(p.text);
+        const text = str2(p.text);
         if (!text) return timeline;
         const reply = lastAssistant(items);
         if (reply && sameText(reply.text, text)) return timeline;
@@ -1317,7 +1368,7 @@ ${body}`;
         return { items: [...sealReasoning(sealAssistant(items)), tool], meta };
       }
       case "tool.complete": {
-        const toolId = str(p.tool_id);
+        const toolId = str2(p.tool_id);
         const existing = findTool(items, toolId);
         const status = inferToolStatus(p);
         const resultText = resultTextOf(p);
@@ -1327,8 +1378,8 @@ ${body}`;
             id: nextId("tool"),
             at: Date.now(),
             toolId,
-            name: str(p.name) || "tool",
-            summary: str(p.summary),
+            name: str2(p.name) || "tool",
+            summary: str2(p.summary),
             status,
             args: p.args,
             resultText,
@@ -1339,17 +1390,17 @@ ${body}`;
         const updated = {
           ...existing,
           status,
-          summary: str(p.summary) || existing.summary,
+          summary: str2(p.summary) || existing.summary,
           resultText: resultText ?? existing.resultText,
           durationS: num(p.duration_s) ?? existing.durationS
         };
         return { items: items.map((item) => item === existing ? updated : item), meta };
       }
       case "tool.output_risk": {
-        const toolId = str(p.tool_id);
+        const toolId = str2(p.tool_id);
         const existing = findTool(items, toolId);
         if (!existing) return timeline;
-        const updated = { ...existing, risk: str(p.risk) || "unknown" };
+        const updated = { ...existing, risk: str2(p.risk) || "unknown" };
         return { items: items.map((item) => item === existing ? updated : item), meta };
       }
       case "todo.updated": {
@@ -1365,8 +1416,8 @@ ${body}`;
       case "subagent.complete":
         return { items: upsertSubagent(items, event), meta };
       case "status.update": {
-        const text = str(p.text);
-        const kind = str(p.kind);
+        const text = str2(p.text);
+        const kind = str2(p.kind);
         return { items, meta: { ...meta, status: text || (kind ? `${kind}\u2026` : ""), statusKind: "" } };
       }
       case "session.usage": {
@@ -1374,18 +1425,18 @@ ${body}`;
         return { items, meta: { ...meta, usage: usage ?? meta.usage } };
       }
       case "session.title":
-        return { items, meta: { ...meta, title: str(p.title) || meta.title } };
+        return { items, meta: { ...meta, title: str2(p.title) || meta.title } };
       case "session.info": {
         const info = p;
         return {
           items,
           meta: {
             ...meta,
-            model: str(info.model) || meta.model,
-            provider: str(info.provider) || meta.provider,
-            reasoningEffort: str(info.reasoning_effort) || meta.reasoningEffort,
+            model: str2(info.model) || meta.model,
+            provider: str2(info.provider) || meta.provider,
+            reasoningEffort: str2(info.reasoning_effort) || meta.reasoningEffort,
             running: typeof info.running === "boolean" ? info.running : meta.running,
-            title: str(info.title) || meta.title,
+            title: str2(info.title) || meta.title,
             usage: info.usage ?? meta.usage
           }
         };
@@ -1394,7 +1445,7 @@ ${body}`;
         return {
           items: [
             ...items,
-            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.text) || str(p.message), tone: "info" }
+            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str2(p.text) || str2(p.message), tone: "info" }
           ],
           meta
         };
@@ -1402,7 +1453,7 @@ ${body}`;
         return {
           items: [
             ...items,
-            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str(p.message), tone: "error" }
+            { kind: "notice", id: nextId("notice"), at: Date.now(), text: str2(p.message), tone: "error" }
           ],
           meta: { ...meta, running: false }
         };
@@ -1923,6 +1974,36 @@ ${body}`;
     return rows.filter((row) => row.project.isAuto === true && hiddenSet.has(row.project.id)).length;
   }
 
+  // src/core/mutation.ts
+  function newRequestId(prefix = "hb", now = Date.now(), random = Math.random()) {
+    return `${prefix}-${now.toString(36)}-${Math.floor(random * 4294967296).toString(36)}`;
+  }
+  function mutationFence(snapshot, requestId) {
+    if (!snapshot) return null;
+    const revision = snapshot.runtime_revision;
+    if (typeof revision !== "number" || !Number.isFinite(revision) || revision < 0) return null;
+    const generation = snapshot.runtime_generation;
+    return {
+      request_id: requestId,
+      expected_revision: revision,
+      ...typeof generation === "number" && Number.isFinite(generation) && generation >= 0 ? { expected_generation: generation } : {}
+    };
+  }
+  function fenceQuery(fence) {
+    const params = new URLSearchParams({
+      request_id: fence.request_id,
+      expected_revision: String(fence.expected_revision)
+    });
+    if (fence.expected_generation !== void 0) {
+      params.set("expected_generation", String(fence.expected_generation));
+    }
+    return params.toString();
+  }
+  function isBusyRefusal(error) {
+    const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    return /session_busy|storage_unavailable|runtime_draining/i.test(text);
+  }
+
   // src/gateway/channel.ts
   var DEFAULT_REQUEST_TIMEOUT_MS = 12e4;
   var DEFAULT_HEARTBEAT_INTERVAL_MS = 15e3;
@@ -2330,8 +2411,18 @@ ${body}`;
      * the page mounts again.
      */
     pendingCards = [];
+    /**
+     * Requests the backend withdrew while the page was unmounted.
+     *
+     * Same parking rule as `pendingCards`: the page subscribes on mount, so an id
+     * that was cancelled in between must still reach it, or a card replayed from
+     * `pendingCards` would outlive the request it answers.
+     */
+    pendingWithdrawals = [];
     /** Desktop-notification sink (see `setNoticeSink`). */
     noticeSink = null;
+    /** Page sink for withdrawn cards (see `setWithdrawalSink`). */
+    withdrawalSink = null;
     /** Auth-aware REST transport, injected by the page (SDK.fetchJSON). */
     http = null;
     /** Storage sink for workspace picks; absent means "this document only". */
@@ -2395,8 +2486,23 @@ ${body}`;
       this.pendingCards = [];
       return parked;
     }
+    /** Withdrawals parked while the page was unmounted (see `pendingWithdrawals`). */
+    takeParkedWithdrawals() {
+      const parked = this.pendingWithdrawals;
+      this.pendingWithdrawals = [];
+      return parked;
+    }
     setServerRequestSink(sink) {
       this.cardSink = sink;
+    }
+    /**
+     * Page sink for "this card is withdrawn".
+     *
+     * Cleared with the card sink on unmount and replayed from
+     * `pendingWithdrawals` on the next mount, so the two always move together.
+     */
+    setWithdrawalSink(sink) {
+      this.withdrawalSink = sink;
     }
     /** Desktop-notification sink. Set by the page; absent means "notify nobody". */
     setNoticeSink(sink) {
@@ -2592,6 +2698,20 @@ ${body}`;
     }
     focusSession(key) {
       this.setState(focus(this.state, key));
+    }
+    /**
+     * Focus whichever tab owns this runtime session, if any.
+     *
+     * Used by the notification click: a request is scoped to one session, and the
+     * click is the human saying "show me the one that needs me". Resolved at click
+     * time rather than at notification time because the tab may have been closed
+     * and reopened (a new key) in between.
+     */
+    focusSessionId(sessionId) {
+      const key = sessionId ? this.state.tabs.find((tab) => tab.runtimeId === sessionId)?.key : void 0;
+      if (!key) return false;
+      this.focusSession(key);
+      return true;
     }
     closeSession(key) {
       this.setState(closeTab(this.state, key));
@@ -2836,6 +2956,56 @@ ${body}`;
     }
     // ── stored-session management ────────────────────────────────────────────
     /**
+     * The optimistic-concurrency fence a session mutation needs on 0.22.5+.
+     *
+     * Read fresh per attempt: a revision that changed since the sidebar rendered is
+     * exactly what the fence exists to catch, and reusing a stale one just gets
+     * refused. `null` when the backend has no snapshot route (older build), so the
+     * request goes out the way it always did.
+     */
+    async mutationFence(storedId) {
+      try {
+        const snapshot = await this.fetchJSON(
+          `/api/sessions/${encodeURIComponent(storedId)}/mutation-snapshot`,
+          { method: "GET" }
+        );
+        return mutationFence(snapshot ?? null, newRequestId());
+      } catch {
+        return null;
+      }
+    }
+    /**
+     * DELETE / PATCH, retried while the store still reports the row busy.
+     *
+     * `session.close` returns before the gateway has finished retiring the session,
+     * so a mutation issued straight after it is answered `409 session_busy`
+     * (`MUTATION_GUARD_REFUSALS`). Measured on 0.22.5, that window outlives a few
+     * hundred milliseconds: retries at 200ms still lost, ~1.5s won. The fence also
+     * has to be re-read per attempt, because the revision moves as the close
+     * settles.
+     *
+     * Four attempts (~2s total) is a settle delay a human will not notice on a
+     * delete; a longer one would need a progress indicator to be honest.
+     */
+    async mutateStoredSession(storedId, init) {
+      const RETRY_DELAYS_MS = [200, 500, 1200];
+      const path = `/api/sessions/${encodeURIComponent(storedId)}`;
+      let lastError = null;
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+        const fence = await this.mutationFence(storedId);
+        const url = init.method === "DELETE" && fence ? `${path}?${fenceQuery(fence)}` : path;
+        const body = init.method === "PATCH" ? { ...init.body ?? {}, ...fence ?? {} } : void 0;
+        try {
+          return await this.fetchJSON(url, { method: init.method, body });
+        } catch (error) {
+          lastError = error;
+          if (!isBusyRefusal(error)) throw error;
+        }
+      }
+      throw lastError;
+    }
+    /**
      * Delete a stored session.
      *
      * Goes through REST (`DELETE /api/sessions/{id}`), NOT `session.delete`: the
@@ -2855,9 +3025,7 @@ ${body}`;
         }
       }
       if (openTab) this.closeSession(openTab.key);
-      await this.fetchJSON(`/api/sessions/${encodeURIComponent(storedId)}`, {
-        method: "DELETE"
-      });
+      await this.mutateStoredSession(storedId, { method: "DELETE" });
       const still = await this.listSessions(200);
       if (still.some((row) => row.id === storedId)) {
         throw new Error(messagesFor(this.locale).deleteRefused);
@@ -2875,10 +3043,10 @@ ${body}`;
     async renameStoredSession(storedId, title) {
       const next = title.trim();
       if (!next) throw new Error(messagesFor(this.locale).titleRequired);
-      const result = await this.fetchJSON(
-        `/api/sessions/${encodeURIComponent(storedId)}`,
-        { method: "PATCH", body: { title: next } }
-      );
+      const result = await this.mutateStoredSession(storedId, {
+        method: "PATCH",
+        body: { title: next }
+      });
       const finalTitle = result?.title || next;
       this.setState({ ...this.state, tabs: retitleStoredSession(this.state.tabs, storedId, finalTitle) });
       return finalTitle;
@@ -3096,6 +3264,15 @@ ${body}`;
     // ── event intake ─────────────────────────────────────────────────────────
     handleEvent(event) {
       if (event.type === "gateway.ready") this.dedupe.setEpoch(this.client.epoch);
+      if (isWithdrawalEvent(event.type)) {
+        const withdrawals = withdrawalsFrom(event);
+        if (!withdrawals.length) return;
+        for (const withdrawal of withdrawals) {
+          if (this.withdrawalSink) this.withdrawalSink(withdrawal);
+          else this.pendingWithdrawals.push(withdrawal);
+        }
+        return;
+      }
       const result = routeEvent(this.state, event, this.dedupe);
       if (result.applied && result.state !== this.state) {
         this.setState(result.state);
@@ -3137,20 +3314,23 @@ ${body}`;
     }
     handleServerRequest(request) {
       if (!HANDLED_REQUESTS.has(request.method)) return false;
+      const sessionId = typeof request.params.session_id === "string" ? request.params.session_id : "";
       const card = {
         id: request.id,
         method: request.method,
         params: request.params,
+        sessionId,
         respond: request.respond,
         fail: request.fail
       };
+      const owner = sessionId ? this.state.tabs.find((tab) => tab.runtimeId === sessionId) : void 0;
       this.noticeSink?.({
         kind: "request",
         method: request.method,
         params: request.params,
         requestId: request.id,
-        sessionKey: typeof request.params.session_id === "string" ? request.params.session_id : "",
-        title: "",
+        sessionKey: sessionId,
+        title: owner?.title ?? "",
         text: ""
       });
       if (!this.cardSink) {
@@ -6264,7 +6444,7 @@ ${body}`;
     always: "approvalAlways",
     deny: "approvalDeny"
   };
-  function str2(value) {
+  function str3(value) {
     return typeof value === "string" ? value : "";
   }
   function toChoice(value) {
@@ -6274,10 +6454,10 @@ ${body}`;
     const raw = Array.isArray(params.choices) ? params.choices : [];
     const parsed = raw.map(toChoice).filter((c) => c !== null);
     return {
-      requestId: str2(params.request_id),
-      command: str2(params.command),
-      description: str2(params.description),
-      toolName: str2(params.tool_name),
+      requestId: str3(params.request_id),
+      command: str3(params.command),
+      description: str3(params.description),
+      toolName: str3(params.tool_name),
       choices: parsed.length ? parsed : [...APPROVAL_CHOICES]
     };
   }
@@ -6293,11 +6473,11 @@ ${body}`;
     for (const entry of raw) {
       if (!entry || typeof entry !== "object") continue;
       const q = entry;
-      const qid = str2(q.qid);
+      const qid = str3(q.qid);
       if (!qid) continue;
       out.push({
         qid,
-        question: str2(q.question),
+        question: str3(q.question),
         choices: Array.isArray(q.choices) ? q.choices.filter((c) => typeof c === "string") : [],
         multiSelect: q.multi_select === true
       });
@@ -6595,6 +6775,19 @@ ${body}`;
               onClick: () => props.onFocus(tab.key)
             },
             props.runningKeys.includes(tab.key) ? React.createElement("span", { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } }, "\u25CF") : null,
+            // "Needs an answer": a card is waiting in this tab. Static, not
+            // animated — the running caret already owns motion, and a second
+            // blinking dot would read as the same thing.
+            props.waitingKeys.includes(tab.key) ? React.createElement(
+              "span",
+              {
+                className: "hb-wait-dot shrink-0",
+                title: t.waitingForAnswer,
+                "data-hb": "tab-waiting",
+                "aria-label": t.waitingForAnswer
+              },
+              "?"
+            ) : null,
             React.createElement("span", { className: "hb-truncate" }, tabLabel(tab, t)),
             React.createElement(
               "span",
@@ -6784,12 +6977,13 @@ ${body}`;
   function firstString(value) {
     return typeof value === "string" ? value.trim() : "";
   }
-  function requestNotice(method, params, t, tag) {
+  function requestNotice(method, params, t, tag, sessionTitle = "") {
+    const name = sessionTitle.trim();
     if (method === "approval") {
       const detail = firstString(params.description) || firstString(params.command) || firstString(params.tool_name);
       return {
         kind: "approval",
-        title: t.notifyApprovalTitle,
+        title: name ? `${t.notifyApprovalTitle} \xB7 ${name}` : t.notifyApprovalTitle,
         body: flatten2(detail, 160) || firstString(params.tool_name) || t.approvalTitle,
         tag,
         sticky: true
@@ -6801,7 +6995,7 @@ ${body}`;
     const extra = questions.length > 1 ? ` (+${questions.length - 1})` : "";
     return {
       kind: "clarify",
-      title: t.notifyClarifyTitle,
+      title: name ? `${t.notifyClarifyTitle} \xB7 ${name}` : t.notifyClarifyTitle,
       body: question ? `${flatten2(question, 140)}${extra}` : t.clarifyTitle,
       tag,
       sticky: true
@@ -6879,7 +7073,7 @@ ${body}`;
     if (notice.kind === "request") {
       const method = notice.method === "clarify" ? "clarify" : "approval";
       const tag = `hb-request-${notice.requestId ?? notice.sessionKey}`;
-      return requestNotice(method, notice.params ?? {}, t, tag);
+      return requestNotice(method, notice.params ?? {}, t, tag, notice.title);
     }
     return completionNotice(
       { title: notice.title, text: notice.text, error: notice.error },
@@ -6887,7 +7081,7 @@ ${body}`;
       `hb-turn-${notice.sessionKey}`
     );
   }
-  function raiseNotification(spec) {
+  function raiseNotification(spec, onOpen) {
     if (!notificationSupported()) return;
     try {
       const notification = new window.Notification(spec.title, {
@@ -6900,6 +7094,7 @@ ${body}`;
       notification.onclick = () => {
         try {
           window.focus();
+          onOpen?.();
         } finally {
           notification.close();
         }
@@ -6910,14 +7105,14 @@ ${body}`;
   function raiseTestNotification(locale) {
     raiseNotification(testNotice(messagesFor(locale)));
   }
-  function maybeNotify(notice, locale) {
+  function maybeNotify(notice, locale, onOpen) {
     const gate = {
       enabled: notifyEnabled(),
       permission: notificationPermission(),
       background: windowBackgrounded()
     };
     if (!shouldNotify(gate)) return;
-    raiseNotification(specFor(notice, locale));
+    raiseNotification(specFor(notice, locale), onOpen);
   }
 
   // src/ui/useLocale.ts
@@ -7049,6 +7244,8 @@ ${body}`;
     const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
     const timeline = activeTimeline(state);
     const running = runningKeys(state);
+    const visibleCards = cardsForTab(state, cards, state.activeKey);
+    const waiting = waitingKeys(state, cards);
     useEffect(() => {
       controller.setLocale(locale);
       localeRef.current = locale;
@@ -7061,7 +7258,14 @@ ${body}`;
       controller.setServerRequestSink((card) => {
         setCards((prev) => prev.some((c) => c.id === card.id) ? prev : [...prev, card]);
       });
-      controller.setNoticeSink((notice) => maybeNotify(notice, localeRef.current));
+      controller.setWithdrawalSink((withdrawal) => {
+        setCards((prev) => withoutWithdrawn(prev, [withdrawal]));
+      });
+      controller.setNoticeSink(
+        (notice) => maybeNotify(notice, localeRef.current, () => {
+          if (notice.kind === "request" && notice.sessionKey) controller.focusSessionId(notice.sessionKey);
+        })
+      );
       const parked = controller.takeParkedCards();
       if (parked.length) {
         setCards((prev) => {
@@ -7069,10 +7273,13 @@ ${body}`;
           return [...prev, ...parked.filter((c) => !seen.has(c.id))];
         });
       }
+      const withdrawn = controller.takeParkedWithdrawals();
+      if (withdrawn.length) setCards((prev) => withoutWithdrawn(prev, withdrawn));
       controller.start().then(() => refreshStored()).catch((err) => setError(err instanceof Error ? err.message : String(err)));
       controller.commandsCatalog().then((raw) => setCatalog(entriesFromCatalog(raw))).catch(() => setCatalog([]));
       return () => {
         controller.setServerRequestSink(null);
+        controller.setWithdrawalSink(null);
         chatController.release();
       };
     }, [controller]);
@@ -7250,7 +7457,7 @@ ${body}`;
       );
       pinRef.current = next.state;
       if (next.decision === "follow") el.scrollTop = el.scrollHeight;
-    }, [timeline.items.length, timeline.items.at(-1), cards.length]);
+    }, [timeline.items.length, timeline.items.at(-1), visibleCards.length]);
     const retire = useCallback((id) => {
       setCards((prev) => prev.filter((card) => card.id !== id));
     }, []);
@@ -7444,6 +7651,7 @@ ${body}`;
         tabs,
         activeKey: state.activeKey,
         runningKeys: running,
+        waitingKeys: waiting,
         historyOpen,
         notifyState,
         onToggleNotify,
@@ -7515,7 +7723,7 @@ ${body}`;
                     })
                   )
                 ),
-                cards.map(
+                visibleCards.map(
                   (card) => React.createElement(
                     "div",
                     { key: card.id, className: "hb-bubble-gap" },

@@ -118,6 +118,29 @@ describe("request notices", () => {
     expect(requestNotice("approval", {}, t, "tag").sticky).toBe(true);
     expect(requestNotice("clarify", {}, t, "tag").sticky).toBe(true);
   });
+
+  it("names which conversation is asking when several are open", () => {
+    // The notification is the only thing on screen when the window is in the
+    // background, so "a question" with no name is unactionable.
+    const clarify = requestNotice(
+      "clarify",
+      { questions: [{ question: "要覆盖吗？" }] },
+      t,
+      "tag",
+      "修 BUG",
+    );
+    expect(clarify.title).toBe(`${t.notifyClarifyTitle} · 修 BUG`);
+
+    const approval = requestNotice("approval", { command: "ls" }, t, "tag", "跑验收");
+    expect(approval.title).toBe(`${t.notifyApprovalTitle} · 跑验收`);
+  });
+
+  it("uses the plain title when the session has no title yet", () => {
+    // An untitled session is the common case for a question arriving early in a
+    // turn; a dangling " · " would be worse than no name at all.
+    expect(requestNotice("clarify", {}, t, "tag", "   ").title).toBe(t.notifyClarifyTitle);
+    expect(requestNotice("clarify", {}, t, "tag").title).toBe(t.notifyClarifyTitle);
+  });
 });
 
 describe("completion notices", () => {

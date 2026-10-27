@@ -2,8 +2,9 @@
 
 本文件是插件与 Hermes 后端之间的唯一契约来源。改代码前先改这里。
 
-**核对基线**：hermes-agent `0.22.2`（本机 `%LOCALAPPDATA%\hermes\hermes-agent`，commit `d923a5eb487`）。
-核对方式：读 `tui_gateway/contracts/*.py`（后端自己声明的契约表）+ `tui_gateway/ws.py`（传输）+ `apps/shared/src/gateway-contract.generated.ts`（自动生成的 TS 镜像）。
+**核对基线**：hermes-agent `0.22.5`（本机 `%LOCALAPPDATA%\hermes\hermes-agent`，commit `bf0203a794a0`）。
+核对方式：读 `tui_gateway/contracts/*.py`（后端自己声明的契约表）+ `tui_gateway/ws.py`（传输）+ `tui_gateway/server_requests.py`（服务端请求的收发与撤回）+ `apps/shared/src/gateway-contract.generated.ts`（自动生成的 TS 镜像）。
+服务端请求与撤回在 `0.22.5` 重新核对过（§6）；会话改名/删除的写栅栏是 `0.22.5` 新增的（§6A，自 `0.22.2` 起不兼容）。
 
 > 这套协议**没有 OpenAPI 描述**，是内部实现。`hermes update` 之后可能漂移。核对基线版本号变了就要重跑一遍本文档的核对清单（见文末）。
 
@@ -402,7 +403,7 @@
 | `status.update` | `{kind, text}` | 底部状态行。`kind` 取值含 `status` / `lifecycle` / `compacting` / `goal` / `loop` / `heartbeat` / `process` |
 | `notice` | `{...}` | 系统提示 |
 | `session.info` | `SessionLiveInfo` | 刷新模型/运行状态 |
-| `approval.cancelled` | `{...}` | 关掉审批卡 |
+| `approval.cancelled` | `{session_id, stored_session_id, reason, cancelled_count, request_ids[]}` | 关掉这些 id 的审批卡（**全局广播**：外层 `session_id` 为空，会话 id 与 id 列表都在 payload 里） |
 | `sessions.changed` | 无 session_id | 刷新会话列表（防抖） |
 
 ### 客户端本地（非后端）
@@ -421,6 +422,47 @@
 | `approval` | `{session_id, request_id, command, description, choices:["once","session","always","deny"], allow_permanent?, allow_session?, smart_denied?, tool_name?}` | `{"choice":"once"}`，拒绝 `{"choice":"deny"}` |
 | `clarify` | `{session_id, questions:[{qid,question,choices?,multi_select?}]}` | `{"answers":{"<qid>":"<choice>"}}`；取消 `{}` |
 | 其他 | — | 回 `-32601`，让后端 fail fast 而不是等满超时 |
+
+### 6.1 一条 socket 承载**所有会话**的请求
+
+服务端请求的 `params.session_id` 是投递该请求的会话 runtime id（`tui_gateway/server_requests.py::ServerRequest.frame` 无条件带它）。
+一个插件 socket 会收到所有已打开会话的请求，所以 `session_id` 是卡片归属的唯一依据：卡片只画在**它自己那个页签**的转写区里
+（`src/core/cards.ts::cardsForTab`）。没有它时页面把卡片画在当前聚焦的会话里，于是在 A 会话问的问题出现在 B 会话，
+两边都能看到、也都能点。
+
+`session_id` 落到一个**没有打开页签**的会话时（页签被关掉、或另一个窗口开着它），卡片仍然要在唯一可用的那个转写区里可答——
+后端还阻塞着，按铁律 7 不能回 `-32601`。
+
+### 6.2 撤回
+
+| 事件 | 作用域 | payload | 插件行为 |
+|---|---|---|---|
+| `request.cancel` | 会话内（外层 `session_id` 有值） | `{id, method, reason}` | 按 `id` 撤掉那张卡 |
+| `approval.cancelled` | **全局广播**（外层 `session_id` 为空） | `{session_id, stored_session_id, reason, cancelled_count, request_ids[]}` | 按 `request_ids` 撤掉那批卡 |
+
+`reason` 取值含 `timeout` / `interrupted` / `shutdown` / `resolved` / `session_closed`（`RequestCancelReason`）。
+两者都必须在页面未挂载时暂存、重新挂载后补投，否则从 `pendingCards` 重放出来的卡片会活得比它对应的请求还久。
+
+**重连恢复不靠这两条。** `session.resume` / `session.events.since` 会把仍未回答的请求放在 `open_requests` 里
+（`tui_gateway/server_requests.py::open_requests`），后端按「刚到达」重新投递；插件目前不消费这个字段——
+请求在断线期间撤回时靠 `request.cancel` 兜底，但断线期间**新发起**的请求要等 `session.resume` 回来才看得到。
+
+## 6A. 会话改名 / 删除的写栅栏（0.22.5 起）
+
+`PATCH` / `DELETE /api/sessions/{id}` 自 0.22.5 起要求乐观并发栅栏
+（`hermes_cli/web_server_sessions.py::_mutate_session_request`）：
+
+| 参数 | 位置 | 说明 |
+|---|---|---|
+| `request_id` | PATCH → body；DELETE → query | 每次用户动作一个新的幂等键。**复用会重放第一次的回执**，真正的第二次删除会变成 no-op |
+| `expected_revision` | 同上 | 该行的 `runtime_revision`，乐观锁 |
+| `expected_generation` | 同上 | 存储代次，snapshot 报 `null` 时不发 |
+
+三个都不带 = `409 client_upgrade_required`（措辞故意像「升级 App」，实际是栅栏缺失）。
+两个值从 `GET /api/sessions/{id}/mutation-snapshot` 读；**删会话必须在 `session.close` 之后读**，因为 close 本身会推进 revision。
+`session.close` 返回后网关还没退休完，紧接着的写会被 `409 session_busy`（`MUTATION_GUARD_REFUSALS`）拒掉，需要带着新栅栏重试几次。
+纯逻辑在 `src/core/mutation.ts`，重试在 `ChatController::mutateStoredSession`。
+
 
 ## 7. `TranscriptMessage` 投影
 

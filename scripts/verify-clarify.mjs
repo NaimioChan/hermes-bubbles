@@ -188,10 +188,27 @@ try {
       for (const row of rows) {
         await req('session.close', { session_id: row.resolved_id ?? row.id });
         try {
-          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(row.id), { method: 'DELETE' });
+          // 0.22.5 fences session mutations behind a receipt: a bare DELETE is
+          // answered 409 client_upgrade_required and the row stays. Read the
+          // snapshot AFTER the close (closing advances the revision) and send
+          // all three fence fields.
+          const snap = await sdk.fetchJSON(
+            '/api/sessions/' + encodeURIComponent(row.id) + '/mutation-snapshot', { method: 'GET' });
+          const fence = new URLSearchParams({
+            request_id: 'hb-clean-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+            expected_revision: String(snap?.runtime_revision ?? 0),
+          });
+          if (typeof snap?.runtime_generation === 'number') {
+            fence.set('expected_generation', String(snap.runtime_generation));
+          }
+          await sdk.fetchJSON(
+            '/api/sessions/' + encodeURIComponent(row.id) + '?' + fence.toString(), { method: 'DELETE' });
           out.deleted += 1;
-        } catch (error) { /* already gone */ }
+        } catch (error) { out.lastError = String(error && error.message).slice(0, 120); }
       }
+      const after = await req('session.list', { limit: 20 });
+      out.remaining = (after.result?.sessions ?? []).filter((row) =>
+        ((row.preview || '') + (row.title || '')).includes('clarify')).length;
       ws.close();
       return JSON.stringify(out);
     })()`, true);

@@ -63,6 +63,16 @@ export interface TabStripProps {
   tabs: readonly SessionTab[];
   activeKey: string | null;
   runningKeys: readonly string[];
+  /**
+   * Tabs whose session has an approval / clarify card waiting.
+   *
+   * A socket receives every session's requests, so a question can arrive for a
+   * session that is not on screen. Before this marker the only way to find out
+   * was to switch tabs and notice a card that had been sitting there — or, worse,
+   * to read the question in the wrong session, which is where it used to be
+   * drawn. The dot says "this one needs an answer" without moving the reader.
+   */
+  waitingKeys: readonly string[];
   historyOpen: boolean;
   /** Desktop notifications: the switch, and the state the user can actually act on. */
   notifyState: NotifySwitch;
@@ -121,6 +131,21 @@ export function TabStrip(props: TabStripProps) {
               },
               props.runningKeys.includes(tab.key)
                 ? React.createElement("span", { className: "hb-caret shrink-0", style: { color: "var(--color-primary)" } }, "●")
+                : null,
+              // "Needs an answer": a card is waiting in this tab. Static, not
+              // animated — the running caret already owns motion, and a second
+              // blinking dot would read as the same thing.
+              props.waitingKeys.includes(tab.key)
+                ? React.createElement(
+                    "span",
+                    {
+                      className: "hb-wait-dot shrink-0",
+                      title: t.waitingForAnswer,
+                      "data-hb": "tab-waiting",
+                      "aria-label": t.waitingForAnswer,
+                    },
+                    "?",
+                  )
                 : null,
               React.createElement("span", { className: "hb-truncate" }, tabLabel(tab, t)),
               React.createElement(

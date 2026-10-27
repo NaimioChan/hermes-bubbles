@@ -12,6 +12,7 @@
  */
 
 import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
+import { cardsForTab, waitingKeys, withoutWithdrawn } from "../core/cards";
 import { parseSessionDrop } from "../core/context";
 import { messagesFor, type Locale } from "../core/i18n";
 import { gitTargetDir, type GitInfo } from "../core/gitinfo";
@@ -209,6 +210,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const timeline = activeTimeline(state);
   const running = runningKeys(state);
+  // A socket carries every session's requests, so the flat card list is every
+  // session's. Only the ones owning the focused transcript belong on screen:
+  // drawing session A's question in session B is how answering it derailed B's
+  // turn instead (see `core/cards.ts`).
+  const visibleCards = cardsForTab(state, cards, state.activeKey);
+  // Tabs that have a question waiting, for the strip's marker — the visible
+  // signal that a background session needs you, without switching to it.
+  const waiting = waitingKeys(state, cards);
 
   // The controller emits a few strings of its own (notices, errors); keep its
   // locale in step with what is on screen.
@@ -229,11 +238,24 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     controller.setServerRequestSink((card) => {
       setCards((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
     });
+    // A card whose request the backend withdrew must come off the screen, even
+    // when the withdrawal arrived while this page was unmounted. Two frames mean
+    // the same thing here (`request.cancel`, `approval.cancelled`); the
+    // controller normalises both (see `core/cards.ts`).
+    controller.setWithdrawalSink((withdrawal) => {
+      setCards((prev) => withoutWithdrawn(prev, [withdrawal]));
+    });
     // The controller decides *when* a turn ended or a request is pending; the
     // language and the browser permission are page concerns, so the page turns
     // one into the other. `maybeNotify` then applies the "only while in the
-    // background" rule.
-    controller.setNoticeSink((notice) => maybeNotify(notice, localeRef.current));
+    // background" rule. The click handler jumps to the session that asked: with
+    // several tabs open the notice is about ONE of them, and the reader was
+    // probably not in it.
+    controller.setNoticeSink((notice) =>
+      maybeNotify(notice, localeRef.current, () => {
+        if (notice.kind === "request" && notice.sessionKey) controller.focusSessionId(notice.sessionKey);
+      }),
+    );
     // Anything that asked while this page was unmounted (the user was on another
     // dashboard tab) is replayed now rather than having been refused.
     const parked = controller.takeParkedCards();
@@ -243,6 +265,11 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         return [...prev, ...parked.filter((c) => !seen.has(c.id))];
       });
     }
+    // Withdrawals take precedence over whatever was parked: a request that was
+    // both asked and cancelled while the page was away must not come back as a
+    // live card.
+    const withdrawn = controller.takeParkedWithdrawals();
+    if (withdrawn.length) setCards((prev) => withoutWithdrawn(prev, withdrawn));
     // `start()` waits for the socket before opening the session. Calling
     // `connect()` then `openSession()` races and reports "gateway not connected"
     // on a connection that succeeds a moment later.
@@ -262,6 +289,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
     return () => {
       controller.setServerRequestSink(null);
+      controller.setWithdrawalSink(null);
       // The notice sink deliberately stays: the controller outlives this page
       // (see `persistent.ts`), so a turn that finishes while the user is on
       // another dashboard route still rings the desktop. `maybeNotify` is
@@ -568,8 +596,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     // streaming delta replaces the last item, so growth at the end is caught,
     // while a status change on an older card must not drag the view (the reader
     // may be reading that card, or one the click just expanded). A duplicate
-    // dropped by dedupe never reaches here at all.
-  }, [timeline.items.length, timeline.items.at(-1), cards.length]);
+    // dropped by dedupe never reaches here at all. `visibleCards` rather than
+    // `cards`: a question raised in ANOTHER session must not move this view —
+    // before the filter existed it did exactly that in every open tab.
+  }, [timeline.items.length, timeline.items.at(-1), visibleCards.length]);
 
   // ── actions ─────────────────────────────────────────────────────────────
 
@@ -871,6 +901,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       tabs,
       activeKey: state.activeKey,
       runningKeys: running,
+      waitingKeys: waiting,
       historyOpen,
       notifyState,
       onToggleNotify,
@@ -946,7 +977,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                     }),
                   ),
                 ),
-            cards.map((card) =>
+            visibleCards.map((card) =>
               React.createElement(
                 "div",
                 { key: card.id, className: "hb-bubble-gap" },

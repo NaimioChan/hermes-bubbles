@@ -193,6 +193,8 @@ export interface Messages {
   newChat: string;
   closeTab: string;
   emptyTabs: string;
+  /** Tab marker: this session has a request waiting for an answer. */
+  waitingForAnswer: string;
   untitled: string;
   minutesAgo: (n: number) => string;
   hoursAgo: (n: number) => string;
@@ -387,6 +389,7 @@ const EN: Messages = {
   newChat: "New chat",
   closeTab: "Close",
   emptyTabs: "No open sessions",
+  waitingForAnswer: "This chat is waiting for your answer",
   untitled: "Untitled",
   minutesAgo: (n) => `${n} min ago`,
   hoursAgo: (n) => `${n} h ago`,
@@ -582,6 +585,7 @@ const ZH: Messages = {
   newChat: "新对话",
   closeTab: "关闭",
   emptyTabs: "没有打开的会话",
+  waitingForAnswer: "这个对话在等你回答",
   untitled: "未命名",
   minutesAgo: (n) => `${n} 分钟前`,
   hoursAgo: (n) => `${n} 小时前`,

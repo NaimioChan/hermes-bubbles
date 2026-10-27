@@ -232,7 +232,21 @@ async function cleanupRunSession(session, probeText) {
             await new Promise((r) => setTimeout(r, 500));
           }
           try {
-            await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(mine.id), { method: 'DELETE' });
+            // 0.22.5 fences session mutations behind a receipt: a bare DELETE is
+            // answered 409 client_upgrade_required and the row stays. Read the
+            // snapshot AFTER the close (closing advances the revision) and send
+            // all three fence fields.
+            const snap = await sdk.fetchJSON(
+              '/api/sessions/' + encodeURIComponent(mine.id) + '/mutation-snapshot', { method: 'GET' });
+            const fence = new URLSearchParams({
+              request_id: 'hb-clean-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+              expected_revision: String(snap && typeof snap.runtime_revision === 'number' ? snap.runtime_revision : 0),
+            });
+            if (snap && typeof snap.runtime_generation === 'number') {
+              fence.set('expected_generation', String(snap.runtime_generation));
+            }
+            await sdk.fetchJSON(
+              '/api/sessions/' + encodeURIComponent(mine.id) + '?' + fence.toString(), { method: 'DELETE' });
             out.deleted = true;
           } catch (error) {
             out.error = error && error.message;

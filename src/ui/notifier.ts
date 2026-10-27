@@ -80,7 +80,7 @@ export function specFor(notice: TurnNotice, locale: Locale): NotifySpec {
   if (notice.kind === "request") {
     const method = notice.method === "clarify" ? "clarify" : "approval";
     const tag = `hb-request-${notice.requestId ?? notice.sessionKey}`;
-    return requestNotice(method, notice.params ?? {}, t, tag);
+    return requestNotice(method, notice.params ?? {}, t, tag, notice.title);
   }
   return completionNotice(
     { title: notice.title, text: notice.text, error: notice.error },
@@ -89,7 +89,7 @@ export function specFor(notice: TurnNotice, locale: Locale): NotifySpec {
   );
 }
 
-export function raiseNotification(spec: NotifySpec): void {
+export function raiseNotification(spec: NotifySpec, onOpen?: () => void): void {
   if (!notificationSupported()) return;
   try {
     const notification = new window.Notification(spec.title, {
@@ -102,6 +102,7 @@ export function raiseNotification(spec: NotifySpec): void {
     notification.onclick = () => {
       try {
         window.focus();
+        onOpen?.();
       } finally {
         notification.close();
       }
@@ -122,13 +123,21 @@ export function raiseTestNotification(locale: Locale): void {
   raiseNotification(testNotice(messagesFor(locale)));
 }
 
-/** The whole decision, in one place for the page's sink. */
-export function maybeNotify(notice: TurnNotice, locale: Locale): void {
+/**
+ * The whole decision, in one place for the page's sink.
+ *
+ * `onOpen` runs when the human clicks the notification. A pending request is
+ * scoped to ONE session, and the click is the moment they decided to deal with
+ * it — landing them in whatever tab happened to be focused would put them in a
+ * conversation that is not the one asking (which is also where the card used to
+ * be drawn).
+ */
+export function maybeNotify(notice: TurnNotice, locale: Locale, onOpen?: () => void): void {
   const gate = {
     enabled: notifyEnabled(),
     permission: notificationPermission(),
     background: windowBackgrounded(),
   };
   if (!shouldNotify(gate)) return;
-  raiseNotification(specFor(notice, locale));
+  raiseNotification(specFor(notice, locale), onOpen);
 }

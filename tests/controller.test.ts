@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ChatController } from "../src/app/controller";
+import { ChatController, type ServerRequestCard } from "../src/app/controller";
 import { messagesFor } from "../src/core/i18n";
 import type { TurnNotice } from "../src/core/notify";
 import { activeTimeline, timelineOf } from "../src/core/sessions";
@@ -883,6 +883,11 @@ describe("stored-session management", () => {
     controller.setHttpFetcher((path, init) => {
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ path, method: String(init.method), body });
+      // The mutation fence's snapshot read. It is a separate GET, so the tests
+      // below filter to the mutation itself rather than asserting the whole list.
+      if (String(init.method) === "GET" && path.endsWith("/mutation-snapshot")) {
+        return Promise.resolve({ session_id: "s", exists: true, runtime_revision: 4, runtime_generation: 2 });
+      }
       if (init.method === "PATCH") return Promise.resolve({ ok: true, title: (body as { title: string }).title });
       return Promise.resolve({ ok: true });
     });
@@ -896,9 +901,16 @@ describe("stored-session management", () => {
 
     await controller.renameStoredSession(storedId, "新名字");
 
-    expect(calls).toEqual([
-      { path: `/api/sessions/${storedId}`, method: "PATCH", body: { title: "新名字" } },
-    ]);
+    // 0.22.5 refuses a body with neither `request_id` nor `expected_revision`
+    // (409 client_upgrade_required), so the fence rides along with the title.
+    const patch = calls.find((call) => call.method === "PATCH");
+    expect(patch?.path).toBe(`/api/sessions/${storedId}`);
+    expect(patch?.body).toMatchObject({
+      title: "新名字",
+      expected_revision: 4,
+      expected_generation: 2,
+    });
+    expect(String((patch?.body as { request_id: string }).request_id)).toMatch(/^hb-/);
     // `session.title` needs a LIVE session, which means resuming the row — and a
     // resumed row is then refused by delete with 4023. It must not be used here.
     const methods = socket.frames().map((f) => f.method);
@@ -940,11 +952,94 @@ describe("stored-session management", () => {
 
     const methods = socket.frames().map((f) => f.method);
     expect(methods).toContain("session.close");
-    expect(calls).toEqual([
-      { path: `/api/sessions/${storedId}`, method: "DELETE", body: undefined },
-    ]);
+    // The fence rides in the query, not a body: DELETE has no body the backend
+    // reads, and 0.22.5 answers a bare DELETE with 409 client_upgrade_required.
+    const del = calls.find((call) => call.method === "DELETE");
+    expect(del?.path.startsWith(`/api/sessions/${storedId}?`)).toBe(true);
+    const query = new URLSearchParams(String(del?.path.split("?")[1] ?? ""));
+    expect(query.get("expected_revision")).toBe("4");
+    expect(query.get("expected_generation")).toBe("2");
+    expect(query.get("request_id")).toMatch(/^hb-/);
     expect(controller.getSnapshot().tabs.length).toBeLessThan(tabsBefore);
     expect(controller.getSnapshot().tabs.some((t) => t.storedId === storedId)).toBe(false);
+  });
+
+  it("sends no fence at all when the backend has no snapshot route", async () => {
+    // An older hermes-agent: no receipt, so the request goes out bare, exactly as
+    // it used to. Guessing a revision there would be refused as stale.
+    const { controller, socket } = await connectAndOpen();
+    const calls: { path: string; method: string; body?: unknown }[] = [];
+    controller.setHttpFetcher((path, init) => {
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ path, method: String(init.method), body });
+      if (String(init.method) === "GET") return Promise.reject(new Error("404 Not Found"));
+      if (init.method === "PATCH") return Promise.resolve({ ok: true, title: (body as { title: string }).title });
+      return Promise.resolve({ ok: true });
+    });
+    const storedId = controller.getSnapshot().tabs[0]?.storedId ?? "";
+    controller.listSessions = async () => [];
+
+    await controller.renameStoredSession(storedId, "旧后端");
+    const patch = calls.find((call) => call.method === "PATCH");
+    expect(patch?.body).toEqual({ title: "旧后端" });
+
+    const done = controller.deleteStoredSession(storedId);
+    await tick();
+    socket.replyTo("session.close", {});
+    await done;
+    const del = calls.find((call) => call.method === "DELETE");
+    expect(del?.path).toBe(`/api/sessions/${storedId}`);
+  });
+
+  it("retries a mutation the store still calls busy, with a fresh fence", async () => {
+    // `session.close` returns before the gateway retires the session, so the
+    // DELETE straight after it is answered 409 session_busy. Nothing was written,
+    // so a retry is correct — and the fence must be re-read, because the revision
+    // moves as the close settles.
+    const { controller, socket } = await connectAndOpen();
+    let snapshots = 0;
+    let deletes = 0;
+    const calls: string[] = [];
+    controller.setHttpFetcher((path, init) => {
+      calls.push(`${init.method} ${path}`);
+      if (String(init.method) === "GET") {
+        snapshots += 1;
+        return Promise.resolve({ runtime_revision: snapshots - 1, runtime_generation: 0 });
+      }
+      deletes += 1;
+      if (deletes === 1) return Promise.reject(new Error("session_busy"));
+      return Promise.resolve({ ok: true });
+    });
+    const storedId = controller.getSnapshot().tabs[0]?.storedId ?? "";
+    controller.listSessions = async () => [];
+
+    const done = controller.deleteStoredSession(storedId);
+    await tick();
+    socket.replyTo("session.close", {});
+    await tick();
+    // Two deletes means the first was refused as busy and retried.
+    await done;
+
+    expect(deletes).toBe(2);
+    expect(snapshots).toBe(2);
+    const deleteCalls = calls.filter((entry) => entry.startsWith("DELETE"));
+    // The retry carries the revision read after the first refusal (1), not the
+    // one the first attempt used (0).
+    expect(deleteCalls[0]).toContain("expected_revision=0");
+    expect(deleteCalls[1]).toContain("expected_revision=1");
+  });
+
+  it("does not retry a refusal that is not about the store settling", async () => {
+    const { controller } = await connectAndOpen();
+    let deletes = 0;
+    controller.setHttpFetcher((_path, init) => {
+      if (String(init.method) === "GET") return Promise.resolve({ runtime_revision: 0 });
+      deletes += 1;
+      return Promise.reject(new Error("403 permission_denied"));
+    });
+
+    await expect(controller.deleteStoredSession("s1")).rejects.toThrow(/permission_denied/);
+    expect(deletes).toBe(1);
   });
 
   it("reports a delete that silently failed, instead of trusting REST's ok", async () => {
@@ -1184,6 +1279,115 @@ describe("server requests across a route change", () => {
 
     expect(seen).toEqual(["approval"]);
     expect(controller.takeParkedCards()).toHaveLength(0);
+  });
+
+  it("tags each card with the session that asked", async () => {
+    // The tag is the whole point: one socket carries every session's requests, so
+    // without it the page cannot tell which transcript a card belongs to and drew
+    // all of them in whichever one was focused.
+    const { controller, socket } = await connectAndOpen();
+    const cards: ServerRequestCard[] = [];
+    controller.setServerRequestSink((card) => cards.push(card));
+
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "srv-a",
+      method: "clarify",
+      params: { session_id: "runtime-1", questions: [{ qid: "q", question: "?" }] },
+    });
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "srv-b",
+      method: "approval",
+      params: { session_id: "runtime-other", command: "ls" },
+    });
+    await tick();
+
+    expect(cards.map((card) => [card.id, card.sessionId])).toEqual([
+      ["srv-a", "runtime-1"],
+      ["srv-b", "runtime-other"],
+    ]);
+  });
+
+  it("withdraws a card on request.cancel, and parks it if the page is away", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const seen: string[] = [];
+    controller.setServerRequestSink(() => undefined);
+    controller.setWithdrawalSink((withdrawal) => seen.push(withdrawal.id));
+
+    socket.event("request.cancel", { id: "srv-1", method: "clarify", reason: "interrupted" }, {
+      session_id: "runtime-1",
+      seq: 9,
+    });
+
+    expect(seen).toEqual(["srv-1"]);
+
+    // Unmounted: the withdrawal must survive the way a card does, or a card
+    // replayed from `pendingCards` would outlive the request it answers.
+    controller.setWithdrawalSink(null);
+    socket.event("request.cancel", { id: "srv-2", method: "approval", reason: "shutdown" }, {
+      session_id: "runtime-1",
+      seq: 10,
+    });
+    expect(controller.takeParkedWithdrawals().map((w) => w.id)).toEqual(["srv-2"]);
+    expect(controller.takeParkedWithdrawals()).toHaveLength(0);
+  });
+
+  it("withdraws the ids a global approval.cancelled broadcast carries", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const seen: string[] = [];
+    controller.setWithdrawalSink((withdrawal) => seen.push(`${withdrawal.sessionId}:${withdrawal.id}`));
+
+    // Broadcast: no session_id at the top level, everything inside the payload.
+    socket.event("approval.cancelled", {
+      session_id: "runtime-1",
+      stored_session_id: "20261026_1",
+      reason: "interrupt",
+      cancelled_count: 2,
+      request_ids: ["srq-1", "srq-2"],
+    });
+
+    expect(seen).toEqual(["runtime-1:srq-1", "runtime-1:srq-2"]);
+  });
+
+  it("names the asking session in the request notification", async () => {
+    const notices: TurnNotice[] = [];
+    const { controller, socket } = await connectAndOpen();
+    controller.setNoticeSink((notice) => notices.push(notice));
+
+    // Give the tab a title the way the backend does.
+    socket.event("session.title", { title: "修 BUG" }, { session_id: "runtime-1", seq: 1 });
+    socket.deliver({
+      jsonrpc: "2.0",
+      id: "srv-t",
+      method: "clarify",
+      params: { session_id: "runtime-1", questions: [{ qid: "q", question: "?" }] },
+    });
+
+    expect(notices[0]).toMatchObject({ kind: "request", title: "修 BUG", sessionKey: "runtime-1" });
+  });
+
+  it("focuses the asking session when a notification is clicked", async () => {
+    const { controller, socket } = await connectAndOpen();
+    // A second tab, focused, so "runtime-1" is the one in the background.
+    // `newSession()` awaits the create reply, so fire it and answer separately.
+    const opened = controller.newSession();
+    await tick();
+    socket.replyTo("session.create", {
+      session_id: "runtime-2",
+      stored_session_id: "20261026_2",
+      messages: [],
+      info: { model: "m", provider: "p", running: false },
+    });
+    await opened;
+    await tick();
+    expect(controller.getSnapshot().activeKey).toBe("runtime-2");
+
+    expect(controller.focusSessionId("runtime-1")).toBe(true);
+    expect(controller.getSnapshot().activeKey).toBe("runtime-1");
+    // A session with no tab cannot be focused; the caller stays where it was.
+    expect(controller.focusSessionId("runtime-gone")).toBe(false);
+    expect(controller.getSnapshot().activeKey).toBe("runtime-1");
   });
 });
 

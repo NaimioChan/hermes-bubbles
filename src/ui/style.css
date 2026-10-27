@@ -235,6 +235,24 @@
   transition: opacity 0.12s ease;
 }
 
+/* The "waiting for an answer" marker on a tab. A filled disc in the accent
+ * colour: it must read as a state, not as a control, and it must be visible on
+ * both the active (muted) and inactive (transparent) tab backgrounds. Static —
+ * the running caret already owns motion. */
+.hb-wait-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
 .hb-tab-close:hover {
   opacity: 1;
 }

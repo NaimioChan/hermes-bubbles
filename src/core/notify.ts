@@ -116,13 +116,22 @@ export function requestNotice(
   params: Record<string, unknown>,
   t: Messages,
   tag: string,
+  /**
+   * Which conversation is asking.
+   *
+   * With several sessions open, a title that only says "a question" is
+   * unactionable: the notification is the only thing on screen when the window is
+   * in the background, and the human needs to know which chat to come back to.
+   */
+  sessionTitle = "",
 ): NotifySpec {
+  const name = sessionTitle.trim();
   if (method === "approval") {
     const detail =
       firstString(params.description) || firstString(params.command) || firstString(params.tool_name);
     return {
       kind: "approval",
-      title: t.notifyApprovalTitle,
+      title: name ? `${t.notifyApprovalTitle} · ${name}` : t.notifyApprovalTitle,
       body: flatten(detail, 160) || firstString(params.tool_name) || t.approvalTitle,
       tag,
       sticky: true,
@@ -134,7 +143,7 @@ export function requestNotice(
   const extra = questions.length > 1 ? ` (+${questions.length - 1})` : "";
   return {
     kind: "clarify",
-    title: t.notifyClarifyTitle,
+    title: name ? `${t.notifyClarifyTitle} · ${name}` : t.notifyClarifyTitle,
     body: question ? `${flatten(question, 140)}${extra}` : t.clarifyTitle,
     tag,
     sticky: true,

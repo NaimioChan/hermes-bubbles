@@ -300,8 +300,34 @@ async function cleanupRunSessions(session, sinceSeconds) {
           await new Promise((resolve) => setTimeout(resolve, 400));
         }
         try {
-          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(target.stored), { method: 'DELETE' });
-          out.deleted += 1;
+          // 0.22.5 fences session mutations behind a receipt: a bare DELETE is
+          // answered 409 client_upgrade_required and the row stays. Read the
+          // snapshot AFTER the close (closing advances the revision) and send
+          // all three fence fields. A close leaves a short session_busy window,
+          // so re-read the fence and retry a few times.
+          // NOTE: no backticks in this block — it lives inside a template literal.
+          let done = false;
+          let last = '';
+          for (let attempt = 0; attempt < 4 && !done; attempt += 1) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 200 * attempt));
+            const snap = await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(target.stored) + '/mutation-snapshot', { method: 'GET' });
+            const fence = new URLSearchParams({
+              request_id: 'hb-clean-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+              expected_revision: String(snap && typeof snap.runtime_revision === 'number' ? snap.runtime_revision : 0),
+            });
+            if (snap && typeof snap.runtime_generation === 'number') {
+              fence.set('expected_generation', String(snap.runtime_generation));
+            }
+            try {
+              await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(target.stored) + '?' + fence.toString(), { method: 'DELETE' });
+              done = true;
+            } catch (error) {
+              last = String(error && error.message);
+              if (!/session_busy|storage_unavailable|runtime_draining/.test(last)) break;
+            }
+          }
+          if (done) out.deleted += 1;
+          else out.failed.push(target.stored + ': ' + last);
         } catch (error) {
           out.failed.push(target.stored + ': ' + (error && error.message));
         }
@@ -927,10 +953,21 @@ async function main() {
       const restored = await session.evaluate(`(async () => {
         const sdk = window.__HERMES_PLUGIN_SDK__;
         try {
-          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(${JSON.stringify(target?.id ?? "")}), {
+          // 0.22.5 fences PATCH behind the same receipt as DELETE (request_id +
+          // expected_revision, or 409 client_upgrade_required). Read the snapshot
+          // right before writing so the revision is current.
+          const sid = ${JSON.stringify(target?.id ?? "")};
+          const snap = await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(sid) + '/mutation-snapshot', { method: 'GET' });
+          const body = {
+            title: ${JSON.stringify(originalTitle)},
+            request_id: 'hb-restore-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+            expected_revision: snap && typeof snap.runtime_revision === 'number' ? snap.runtime_revision : 0,
+          };
+          if (snap && typeof snap.runtime_generation === 'number') body.expected_generation = snap.runtime_generation;
+          await sdk.fetchJSON('/api/sessions/' + encodeURIComponent(sid), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: ${JSON.stringify(originalTitle)} }),
+            body: JSON.stringify(body),
           });
           return 'ok';
         } catch (error) {

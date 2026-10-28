@@ -5594,11 +5594,13 @@ ${refs.join("\n")}`.trim() : trimmed;
             )
           )
         ) : null,
-        // ── phone tool menu ──────────────────────────────────────────────────
-        // What the desktop shows as two inline chips and a notification glyph in
-        // the tab strip: model, reasoning strength, notifications. One row each,
-        // because these are full-sentence options, not pills (铁律 20).
-        props.mobile && toolsOpen ? React.createElement(
+        // ── tool menu ────────────────────────────────────────────────────────
+        // Model, reasoning strength and notifications. One row each, because
+        // these are full sentences rather than pills (铁律 20), and because an
+        // inline model chip is what used to squeeze the textarea to four
+        // characters on a narrow screen. Same control on both layouts: a phone
+        // and a desktop should not teach two different ways to switch models.
+        toolsOpen ? React.createElement(
           "div",
           { className: "hb-tools-menu", "data-hb": "composer-menu" },
           React.createElement(
@@ -5684,18 +5686,22 @@ ${refs.join("\n")}`.trim() : trimmed;
           )
         ) : null,
         // ── input row ────────────────────────────────────────────────────────
+        // `items-center`, not `items-end`: the row's controls are round buttons
+        // now, and the textarea's own padding used to make a one-line draft sit
+        // low against a bottom-aligned row. Centring puts the glyph's optical
+        // middle on the text's, at one line and at eight.
         React.createElement(
           "div",
           {
-            className: "hb-composer-row flex items-end gap-1.5 px-2 py-1.5",
+            className: "hb-composer-row flex items-center gap-1.5 px-2 py-1.5",
             style: {
               background: "var(--color-card)",
               borderRadius: "var(--radius)",
               boxShadow: "inset 0 0 0 1px var(--color-border)"
             }
           },
-          // ── left: the phone's tool menu, or the desktop's attach button ─────
-          props.mobile ? React.createElement(
+          // ── left: the tool menu ─────────────────────────────────────────────
+          React.createElement(
             "button",
             {
               type: "button",
@@ -5708,16 +5714,6 @@ ${refs.join("\n")}`.trim() : trimmed;
               onClick: () => setToolsOpen((v) => !v)
             },
             Icon(sdk, { name: "dots", size: 18 })
-          ) : React.createElement(
-            "button",
-            {
-              type: "button",
-              title: t.attachFiles,
-              "aria-label": t.attachFiles,
-              className: "hb-composer-btn hb-composer-attach",
-              onClick: () => fileRef.current?.click()
-            },
-            "+"
           ),
           React.createElement("input", {
             ref: fileRef,
@@ -5757,38 +5753,12 @@ ${refs.join("\n")}`.trim() : trimmed;
             onKeyDown,
             onPaste
           }),
-          // right: model + reasoning + send/stop (desktop), or upload / stop / send
-          // as round icon buttons (phone — the model and reasoning chips moved into
-          // the "···" menu above).
+          // right: stop / upload / send, as round icon buttons on BOTH layouts.
+          // The model and reasoning chips that used to sit here moved into the
+          // "···" menu above, on both sizes, so the row is identical everywhere.
           React.createElement(
             "div",
             { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
-            props.mobile ? null : React.createElement(
-              "button",
-              {
-                type: "button",
-                "data-hb": "model-picker-open",
-                title: `${t.pickModel}: ${props.model || "default"}`,
-                className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
-                onClick: props.onOpenModelPicker
-              },
-              props.model || "model"
-            ),
-            props.mobile ? null : React.createElement(
-              "button",
-              {
-                type: "button",
-                title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
-                className: "hb-composer-btn hb-text-micro",
-                onClick: () => {
-                  const current = props.reasoning || "medium";
-                  const index = REASONING_LEVELS.indexOf(current);
-                  const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
-                  if (next) props.onPickReasoning(next);
-                }
-              },
-              reasoningLabel(props.reasoning || "medium", props.locale)
-            ),
             // While a turn runs the primary action becomes "insert": the message is
             // delivered mid-turn (queued / steered / redirected by the backend).
             // Stop is a separate control so correcting and cancelling do not
@@ -5800,19 +5770,12 @@ ${refs.join("\n")}`.trim() : trimmed;
                 title: t.stopReasoningTitle,
                 "aria-label": t.stop,
                 "data-hb": "stop-action",
-                className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-stop" : "hb-composer-btn hb-composer-stop",
-                style: props.mobile ? void 0 : {
-                  background: "var(--color-muted)",
-                  color: "var(--color-muted-foreground)",
-                  borderRadius: "calc(var(--radius) * 0.6)"
-                },
+                className: "hb-composer-btn hb-round-btn hb-round-stop",
                 onClick: props.onStop
               },
-              props.mobile ? Icon(sdk, { name: "stop", size: 15 }) : t.stop
+              Icon(sdk, { name: "stop", size: 15 })
             ) : null,
-            // The upload button only exists on a phone: the desktop keeps its `+`
-            // at the left edge of the row, which is where a mouse expects it.
-            props.mobile ? React.createElement(
+            React.createElement(
               "button",
               {
                 type: "button",
@@ -5823,7 +5786,7 @@ ${refs.join("\n")}`.trim() : trimmed;
                 onClick: () => fileRef.current?.click()
               },
               Icon(sdk, { name: "paperclip", size: 17 })
-            ) : null,
+            ),
             React.createElement(
               "button",
               {
@@ -5832,11 +5795,11 @@ ${refs.join("\n")}`.trim() : trimmed;
                 title: props.running ? t.insert : t.send,
                 "aria-label": props.running ? t.insert : t.send,
                 "data-hb": "primary-action",
-                className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-send" : "hb-composer-btn hb-composer-send",
+                className: "hb-composer-btn hb-round-btn hb-round-send",
                 style: {
                   background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                   color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",
-                  borderRadius: props.mobile ? "9999px" : "calc(var(--radius) * 0.6)",
+                  borderRadius: "9999px",
                   // `disabled:opacity-40` is absent from the host bundle, so the
                   // dimming is done here rather than hoped for.
                   opacity: canSend ? 1 : 0.4,
@@ -5844,7 +5807,7 @@ ${refs.join("\n")}`.trim() : trimmed;
                 },
                 onClick: submit
               },
-              props.mobile ? Icon(sdk, { name: props.running ? "insert" : "send", size: 18 }) : props.running ? t.insert : t.send
+              Icon(sdk, { name: props.running ? "insert" : "send", size: 18 })
             )
           )
         ),
@@ -6309,13 +6272,32 @@ ${refs.join("\n")}`.trim() : trimmed;
   function HistoryPanel(props) {
     const { sdk } = props;
     const { React } = sdk;
-    const { useState } = sdk.hooks;
+    const { useState, useEffect } = sdk.hooks;
     const t = messagesFor(props.locale);
     const [renamingId, setRenamingId] = useState(null);
     const [draft, setDraft] = useState("");
     const [menuId, setMenuId] = useState(null);
     const drawer = props.variant === "drawer";
-    if (!props.open) return null;
+    const [closing, setClosing] = useState(false);
+    const requestClose = () => {
+      if (!drawer) {
+        props.onClose();
+        return;
+      }
+      try {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          props.onClose();
+          return;
+        }
+      } catch {
+      }
+      setClosing(true);
+      props.onClose();
+    };
+    useEffect(() => {
+      if (props.open && closing) setClosing(false);
+    }, [props.open, closing]);
+    if (!props.open && !closing) return null;
     const menuItem = (key, hook, label, run, danger = false) => React.createElement(
       "button",
       {
@@ -6341,7 +6323,7 @@ ${refs.join("\n")}`.trim() : trimmed;
       React.createElement("div", {
         className: drawer ? "hb-drawer-backdrop" : "hb-hist-backdrop",
         "data-hb": "history-backdrop",
-        onClick: props.onClose
+        onClick: requestClose
       }),
       React.createElement(
         "div",
@@ -6349,6 +6331,13 @@ ${refs.join("\n")}`.trim() : trimmed;
           className: drawer ? "hb-drawer" : "flex h-full min-h-0 flex-col",
           "data-hb": "history-panel",
           "data-variant": props.variant,
+          "data-state": closing ? "closing" : "open",
+          // The exit ends the animation; `closing` is what keeps the panel mounted
+          // until then, so clearing it here is the unmount.
+          onAnimationEnd: (event) => {
+            event.stopPropagation?.();
+            if (event.animationName === "hb-slide-out-right") setClosing(false);
+          },
           style: drawer ? void 0 : { width: "17rem", borderLeft: "1px solid var(--color-border)" }
         },
         React.createElement(
@@ -6383,7 +6372,7 @@ ${refs.join("\n")}`.trim() : trimmed;
                 title: t.collapse,
                 "data-hb": "history-close",
                 className: "hb-icon-btn",
-                onClick: props.onClose
+                onClick: requestClose
               },
               Icon(sdk, { name: "close", size: 15 })
             )
@@ -7169,43 +7158,10 @@ ${refs.join("\n")}`.trim() : trimmed;
   }
 
   // src/ui/TabStrip.ts
-  function notifyFace(state) {
-    switch (state) {
-      case "on":
-        return {
-          glyph: "\u25C9",
-          color: "var(--color-card-foreground)",
-          opacity: 1,
-          title: (t) => t.notifyOnTitle
-        };
-      case "needs-permission":
-        return {
-          glyph: "\u25D1",
-          color: "var(--color-muted-foreground)",
-          opacity: 0.8,
-          title: (t) => t.notifyPendingTitle
-        };
-      case "blocked":
-        return {
-          glyph: "\u2298",
-          color: "var(--color-muted-foreground)",
-          opacity: 0.45,
-          title: (t) => t.notifyBlockedTitle
-        };
-      default:
-        return {
-          glyph: "\u25CC",
-          color: "var(--color-muted-foreground)",
-          opacity: 1,
-          title: (t) => t.notifyOffTitle
-        };
-    }
-  }
   function TabStrip(props) {
     const { sdk } = props;
     const { React } = sdk;
     const t = messagesFor(props.locale);
-    const notify = notifyFace(props.notifyState);
     return React.createElement(
       "div",
       {
@@ -7231,7 +7187,7 @@ ${refs.join("\n")}`.trim() : trimmed;
               "data-hb": "tab",
               "data-hb-key": tab.key,
               title: tabLabel(tab, t),
-              className: "group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
+              className: "hb-tab group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
               style: {
                 background: tab.key === props.activeKey ? "var(--color-muted)" : "transparent",
                 color: tab.key === props.activeKey ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
@@ -7273,7 +7229,12 @@ ${refs.join("\n")}`.trim() : trimmed;
           )
         )
       ),
-      // Actions, pinned right so they never scroll away.
+      // Actions, pinned right so they never scroll away. Same round buttons as the
+      // phone's floating pair, with the same press motion — one visual language for
+      // "refresh the chat" and "open the chat list" on both sizes. The word
+      // "History" became the "···" here, and the notification switch moved into the
+      // composer's "···" menu, where it is a labelled row instead of a glyph whose
+      // meaning needed a tooltip.
       React.createElement(
         "div",
         { className: "flex shrink-0 items-center gap-1" },
@@ -7281,43 +7242,43 @@ ${refs.join("\n")}`.trim() : trimmed;
           "button",
           {
             type: "button",
-            title: notify.title(t),
-            "data-hb": "notify-toggle",
-            "data-on": props.notifyState === "on" ? "true" : "false",
-            "data-state": props.notifyState,
-            className: "cursor-pointer px-2 py-1 text-xs leading-none",
-            style: { color: notify.color, opacity: notify.opacity },
-            onClick: props.onToggleNotify
+            title: t.refreshChat,
+            "aria-label": t.refreshChat,
+            "data-hb": "refresh-chat",
+            className: "hb-strip-btn",
+            onClick: () => void props.onRefreshChat()
           },
-          notify.glyph
+          Icon(sdk, { name: "refresh", size: 16 })
         ),
         React.createElement(
           "button",
           {
             type: "button",
             title: t.newChat,
+            "aria-label": t.newChat,
             "data-hb": "tab-new",
-            className: "cursor-pointer px-2 py-1 text-sm leading-none",
-            style: { color: "var(--color-muted-foreground)" },
+            className: "hb-strip-btn",
             onClick: props.onNew
           },
-          "+"
+          Icon(sdk, { name: "plus", size: 17 })
         ),
         React.createElement(
           "button",
           {
             type: "button",
             title: props.historyOpen ? t.collapse : t.history,
+            "aria-label": props.historyOpen ? t.collapse : t.history,
             "data-hb": "history-toggle",
-            className: "cursor-pointer px-2 py-1 text-xs",
+            "data-open": props.historyOpen ? "true" : "false",
+            "aria-expanded": props.historyOpen,
+            className: "hb-strip-btn",
             style: {
               color: props.historyOpen ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
-              background: props.historyOpen ? "var(--color-muted)" : "transparent",
-              borderRadius: "calc(var(--radius) * 0.6)"
+              background: props.historyOpen ? "var(--color-muted)" : "transparent"
             },
             onClick: props.onToggleHistory
           },
-          t.history
+          Icon(sdk, { name: "dots", size: 18 })
         )
       )
     );
@@ -8213,11 +8174,10 @@ ${refs.join("\n")}`.trim() : trimmed;
         runningKeys: running,
         waitingKeys: waiting,
         historyOpen,
-        notifyState,
-        onToggleNotify,
         onFocus: (key) => controller.focusSession(key),
         onClose: (key) => controller.closeSession(key),
         onNew,
+        onRefreshChat: refreshChat,
         onToggleHistory: () => setHistoryOpen((v) => !v)
       }),
       // ── transcript + history ────────────────────────────────────────────

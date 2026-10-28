@@ -8,6 +8,20 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-28 19:35 · hermes · 抽屉改右侧、加关闭动效、文字居中、桌面统一控件与动效
+
+- 需求（用户第二轮反馈）：**移动端**① 抽屉弹出方向反了，应从右往左，弹出后不要背后阴影；② 抽屉收起没有动效，加上；③ 文本（输入框内、历史会话里）相对框体偏下，改居中。**桌面端**④ 把手机版那套按钮改动搬过来，但保留页签，刷新与更多按钮放在页签栏；⑤ 强化 hover / 点击的缓动，与移动端一致。
+- 抽屉：`.hb-drawer` 改 `right:0` + `hb-slide-in-right`；关闭是**两段状态**——`requestClose` 立刻把 `open` 交给父级（真相是"已关"），本地 `closing` 让面板继续挂着播 `hb-slide-out-right`，`animationend` 时才清标志、真正卸载（用定时器会在大帧上提前截断或在快帧上留鬼）。`prefers-reduced-motion` 直接跳过整段。实测：`["closing:hb-slide-out-right" ×4, "gone" ×6]`。
+- 不再有遮罩层：`.hb-drawer-backdrop` 保留（点外面仍能关）但 `background: transparent`，同时抽屉的 `box-shadow` 换成 1px 左边框——半透明黑色蒙层会把背后的对话压成"禁用态"。
+- 居中：输入行 `items-end` → `items-center`（配 `.hb-composer-input` 的对称 6px padding）；`.hb-hist-main` / `.hb-proj-session` 的 `align-items: baseline` → `center`。实测输入框、圆钮、行中心三者偏差均为 0px。
+- 桌面统一：`Composer` 不再按 `mobile` 分支——左 `···` 菜单（模型/思考强度/通知）+ 右 三个圆钮（停止/上传/发送），两种尺寸同一套；页签栏保留，右侧换成一排 30px 圆钮（刷新 / 新建 / `···`），通知开关移进输入框菜单（那里是有文字的整行，比一个要靠 tooltip 猜的符号清楚）。`hb-composer-attach`/`hb-composer-send`/`hb-composer-stop`/`hb-strip-notify` 这些死规则一并删掉。
+- 动效词汇：`:root` 里只留四个 token（`--hb-move` 160ms 状态变化 / `--hb-press` 90ms 按下 / 一条 `cubic-bezier(0.22,0.8,0.3,1)` / 两个缩放系数），页签、行、菜单项、圆钮、浮钮、拖拽条全部引用它；`prefers-reduced-motion` 只需把 token 归零。守卫测试直接扫 `transition: … 0.x s ease`，出现即失败。实测 hover 背景变化、按下 `matrix(0.92…)`、`transitionDuration: 0.16s,0.16s,0.16s,0.09s`。
+- 验证：`tsc` 干净；`vitest` **652 passed / 30 文件**（layout-classes 新增 5 条：动效 token、抽屉方向/无蒙层/关闭动画、居中、单一控件集）；`audit-classes` 264/264；`build` + `install-plugin` 已装。
+- 真页面（临时 HERMES_HOME + 回环 **9122**，用户的 9119 未动）：新写 `scripts/verify-drawer.mjs` **13/13**；`verify-mobile.mjs` **25/25**（含桌面同控件的三条新断言）；`verify-attachments.mjs` **15/15**；`verify.mjs` **92/95**——失败三条仍是"临时实例只有未归类桶"。顺手修好 `verify.mjs` 的两处过时断言：发送按钮已是图标，文案检查改读 `aria-label`；通知开关已进菜单，读之前先展开菜单（语言断言从 FAIL 回到 PASS）。
+- 遗留：`README.md` / `DESIGN.md` 的移动端段落已改写成实况；`AGENTS.md` 的钩子清单仍未补（保护文件需用户批准，两轮都没改）。滑动关闭（swipe-to-dismiss）仍未做。
+
+---
+
 ## 2026-10-28 18:20 · hermes · 手机布局重做、附件进气泡、上传过程可见、动效
 
 - 需求（用户原话分两段）：**只在手机尺寸**① 去掉页签/历史那一横栏；② 右上浮动圆形「···」→ 左侧拉出二级菜单，顶部「新建会话」，下接最近/项目列表，每个会话项的操作收进该行自己的「···」；③ 左上浮动圆形按钮刷新**本 chat 页**（不是 dashboard）；④ 输入框去掉 `+`/模型/思考强度，左侧改成「···」二级菜单（模型、思考强度、通知设置），停止/发送/插入从文字改圆形图标，发送左侧加「上传文件」。**两种尺寸**：① 发出的消息要显示附件（图/视频小方形预览，其它文件名）；② 从 `hermes.naimio.online` 访问时上传过程要显式可见；③ 整体动效打磨（控件运动、触摸响应）。追加：思考流程默认限高，别占满聊天区。

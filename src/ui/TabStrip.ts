@@ -5,57 +5,16 @@
  * panel on the right. Splitting the two is deliberate — "what I have open" and
  * "what exists" are different questions, and a single merged list makes it
  * impossible to tell whether clicking a row switches to it or opens a copy.
+ *
+ * The right-hand cluster is the same three round buttons the phone floats over
+ * the transcript (refresh / new chat / "···"), so one visual language covers both
+ * sizes; the desktop keeps its strip and simply hosts them there.
  */
 
 import { messagesFor, type Locale } from "../core/i18n";
-import type { NotifySwitch } from "../core/notify";
 import { tabLabel, type SessionTab } from "../core/sessions";
 import type { HermesPluginSdk } from "./sdk";
-
-/**
- * The switch's face, per state.
- *
- * The permission is half of the state, so the glyph has to carry it: a switch
- * that reads "on" while the browser has never been asked is a lie the user only
- * discovers when a notification they were waiting for never arrives.
- */
-function notifyFace(state: NotifySwitch): {
-  glyph: string;
-  color: string;
-  opacity: number;
-  title: (t: ReturnType<typeof messagesFor>) => string;
-} {
-  switch (state) {
-    case "on":
-      return {
-        glyph: "\u25C9",
-        color: "var(--color-card-foreground)",
-        opacity: 1,
-        title: (t) => t.notifyOnTitle,
-      };
-    case "needs-permission":
-      return {
-        glyph: "\u25D1",
-        color: "var(--color-muted-foreground)",
-        opacity: 0.8,
-        title: (t) => t.notifyPendingTitle,
-      };
-    case "blocked":
-      return {
-        glyph: "\u2298",
-        color: "var(--color-muted-foreground)",
-        opacity: 0.45,
-        title: (t) => t.notifyBlockedTitle,
-      };
-    default:
-      return {
-        glyph: "\u25CC",
-        color: "var(--color-muted-foreground)",
-        opacity: 1,
-        title: (t) => t.notifyOffTitle,
-      };
-  }
-}
+import { Icon } from "./icons";
 
 export interface TabStripProps {
   sdk: HermesPluginSdk;
@@ -74,12 +33,11 @@ export interface TabStripProps {
    */
   waitingKeys: readonly string[];
   historyOpen: boolean;
-  /** Desktop notifications: the switch, and the state the user can actually act on. */
-  notifyState: NotifySwitch;
-  onToggleNotify: () => void;
   onFocus: (key: string) => void;
   onClose: (key: string) => void;
   onNew: () => void;
+  /** Re-read this chat's transcript (not the browser page). */
+  onRefreshChat: () => void;
   onToggleHistory: () => void;
 }
 
@@ -87,7 +45,6 @@ export function TabStrip(props: TabStripProps) {
   const { sdk } = props;
   const { React } = sdk;
   const t = messagesFor(props.locale);
-  const notify = notifyFace(props.notifyState);
 
   return React.createElement(
     "div",
@@ -117,7 +74,7 @@ export function TabStrip(props: TabStripProps) {
                 "data-hb": "tab",
                 "data-hb-key": tab.key,
                 title: tabLabel(tab, t),
-                className: "group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
+                className: "hb-tab group flex hb-max-w-22ch shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs",
                 style: {
                   background: tab.key === props.activeKey ? "var(--color-muted)" : "transparent",
                   color:
@@ -167,7 +124,12 @@ export function TabStrip(props: TabStripProps) {
           ),
     ),
 
-    // Actions, pinned right so they never scroll away.
+    // Actions, pinned right so they never scroll away. Same round buttons as the
+    // phone's floating pair, with the same press motion — one visual language for
+    // "refresh the chat" and "open the chat list" on both sizes. The word
+    // "History" became the "···" here, and the notification switch moved into the
+    // composer's "···" menu, where it is a labelled row instead of a glyph whose
+    // meaning needed a tooltip.
     React.createElement(
       "div",
       { className: "flex shrink-0 items-center gap-1" },
@@ -175,43 +137,43 @@ export function TabStrip(props: TabStripProps) {
         "button",
         {
           type: "button",
-          title: notify.title(t),
-          "data-hb": "notify-toggle",
-          "data-on": props.notifyState === "on" ? "true" : "false",
-          "data-state": props.notifyState,
-          className: "cursor-pointer px-2 py-1 text-xs leading-none",
-          style: { color: notify.color, opacity: notify.opacity },
-          onClick: props.onToggleNotify,
+          title: t.refreshChat,
+          "aria-label": t.refreshChat,
+          "data-hb": "refresh-chat",
+          className: "hb-strip-btn",
+          onClick: () => void props.onRefreshChat(),
         },
-        notify.glyph,
+        Icon(sdk, { name: "refresh", size: 16 }),
       ),
       React.createElement(
         "button",
         {
           type: "button",
           title: t.newChat,
+          "aria-label": t.newChat,
           "data-hb": "tab-new",
-          className: "cursor-pointer px-2 py-1 text-sm leading-none",
-          style: { color: "var(--color-muted-foreground)" },
+          className: "hb-strip-btn",
           onClick: props.onNew,
         },
-        "+",
+        Icon(sdk, { name: "plus", size: 17 }),
       ),
       React.createElement(
         "button",
         {
           type: "button",
           title: props.historyOpen ? t.collapse : t.history,
+          "aria-label": props.historyOpen ? t.collapse : t.history,
           "data-hb": "history-toggle",
-          className: "cursor-pointer px-2 py-1 text-xs",
+          "data-open": props.historyOpen ? "true" : "false",
+          "aria-expanded": props.historyOpen,
+          className: "hb-strip-btn",
           style: {
             color: props.historyOpen ? "var(--color-card-foreground)" : "var(--color-muted-foreground)",
             background: props.historyOpen ? "var(--color-muted)" : "transparent",
-            borderRadius: "calc(var(--radius) * 0.6)",
           },
           onClick: props.onToggleHistory,
         },
-        t.history,
+        Icon(sdk, { name: "dots", size: 18 }),
       ),
     ),
   );

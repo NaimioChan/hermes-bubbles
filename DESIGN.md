@@ -105,7 +105,12 @@ Spacing between turns is `--spacing-mul`-scaled so the dashboard's compact/comfo
 
 ### Narrow screens
 
-The page is also reached from a phone, so below 768px (`src/ui/style.css`, one media block) the layout restructures rather than shrinks: bubbles go full-width (the 72ch cap can never bind on a ~390px screen, and 82% just steals gutter), the composer wraps to two lines so the textarea keeps a usable width, controls grow to the 44px touch minimum, hover-only action rows become permanently visible (touch has no hover — otherwise copy / rename / delete are unreachable), the history panel turns into a bottom sheet over a dimmed backdrop, and the locator rail is dropped. It is all width-based CSS, so one bundle serves both.
+The page is also reached from a phone, and there the layout has to restructure rather than shrink. Most of that is one `@media (max-width: 768px)` block in `src/ui/style.css`, but two things cannot be CSS because the elements themselves differ, so they branch on width in `src/ui/useMobile.ts` (`matchMedia`, same 768px as the media query):
+
+- the tab strip is replaced by two floating round buttons — refresh this chat on the left, and a "···" on the right that opens the session drawer. The drawer slides in from the **right**, adds no dimming layer (the chat behind stays readable), animates both in and out, starts with a "new chat" row, and keeps each session row's three tools behind one "···";
+- the composer drops the inline model/reasoning chips for a "···" menu.
+
+Everything else is width-based CSS: bubbles go full-width (the 72ch cap can never bind on a ~390px screen, and 82% just steals gutter), hover-only action rows become permanently visible (touch has no hover — otherwise copy / rename / delete are unreachable), and the locator rail is dropped. One bundle serves both, and the desktop keeps its tab strip and hosts the same round buttons there.
 
 ## Elevation & Depth
 

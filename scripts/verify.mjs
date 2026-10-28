@@ -1327,8 +1327,11 @@ async function main() {
     );
 
     // ── item 5: the plugin follows the dashboard's language ────────────────
+    // The send control is an ICON now (both layouts), so its label lives on
+    // `aria-label` rather than in its text content — reading the text would find
+    // nothing and the language check would fail for the wrong reason.
     const langBefore = await session.evaluate(
-      `JSON.stringify({ placeholder: document.querySelector('textarea')?.placeholder, send: [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(x=>x==='Send'||x==='发送')[0] })`,
+      `JSON.stringify({ placeholder: document.querySelector('textarea')?.placeholder, send: document.querySelector('[data-hb="primary-action"]')?.getAttribute('aria-label') })`,
     );
     check(
       "the default UI language is English",
@@ -1345,7 +1348,7 @@ async function main() {
     await sleep(1500);
     const langZh = await session.evaluate(`JSON.stringify({
       placeholder: document.querySelector('textarea')?.placeholder,
-      send: [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(x=>x==='Send'||x==='发送')[0],
+      send: document.querySelector('[data-hb="primary-action"]')?.getAttribute('aria-label'),
       actionTitles: [...document.querySelectorAll('.hb-actions button')].map(b=>b.getAttribute('title')).slice(0,3),
       thought: /思考|THOUGHT/i.test(document.body.innerText),
     })`);
@@ -1813,6 +1816,18 @@ async function main() {
     await sleep(1500);
 
     // ── task list, subagents, notification switch ──────────────────────────
+    // The notification switch lives in the composer's "···" menu now (both
+    // layouts), so the menu has to be open before it can be read.
+    const openComposerMenu = async () => {
+      const open = await session.evaluate(
+        `Boolean(document.querySelector('[data-hb="composer-menu"]'))`,
+      );
+      if (!open) {
+        await session.evaluate(`document.querySelector('[data-hb="composer-more"]')?.click()`);
+        await sleep(350);
+      }
+    };
+    await openComposerMenu();
     const notifyState = await session.evaluate(`(() => {
       const btn = document.querySelector('[data-hb="notify-toggle"]');
       if (!btn) return null;
@@ -1823,7 +1838,7 @@ async function main() {
       });
     })()`);
     check(
-      "notification switch is in the tab strip",
+      "notification switch is in the composer menu",
       typeof notifyState === "string",
       String(notifyState),
     );
@@ -1843,6 +1858,7 @@ async function main() {
     await session.send("Browser.grantPermissions", { origin: DASHBOARD, permissions: ["notifications"] });
     await session.evaluate(`window.dispatchEvent(new Event('focus'))`);
     await sleep(400);
+    await openComposerMenu();
     const grantedState = await session.evaluate(
       `document.querySelector('[data-hb="notify-toggle"]').getAttribute('data-state')`,
     );
@@ -1853,10 +1869,14 @@ async function main() {
     await sleep(300);
     const storedOff = await session.evaluate(`localStorage.getItem('hb-notify')`);
     check("notification switch persists its state", storedOff === "off", String(storedOff));
+    await openComposerMenu();
     await session.evaluate(`document.querySelector('[data-hb="notify-toggle"]').click()`);
     await sleep(300);
     const storedOn = await session.evaluate(`localStorage.getItem('hb-notify')`);
     check("notification switch turns back on", storedOn === "on", String(storedOn));
+    // Leave the menu closed: the turn sent next needs the row, not the overlay.
+    await session.evaluate(`document.querySelector('[data-hb="composer-menu"] [aria-label]')?.click()`);
+    await sleep(250);
 
     // A turn that has to plan AND delegate. The model choosing not to call the
     // tools is not a plugin failure, so everything below is soft.

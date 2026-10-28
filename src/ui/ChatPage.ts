@@ -1013,11 +1013,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           runningKeys: running,
           waitingKeys: waiting,
           historyOpen,
-          notifyState,
-          onToggleNotify,
           onFocus: (key: string) => controller.focusSession(key),
           onClose: (key: string) => controller.closeSession(key),
           onNew,
+          onRefreshChat: refreshChat,
           onToggleHistory: () => setHistoryOpen((v: boolean) => !v),
         }),
 

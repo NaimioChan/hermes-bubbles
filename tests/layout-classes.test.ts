@@ -132,6 +132,54 @@ describe("layout classes", () => {
     expect(composer).toContain("hb-composer-tools");
   });
 
+  it("moves every control with one motion vocabulary", () => {
+    // Ad-hoc durations are how a page ends up feeling like several apps: a tab
+    // easing at 120ms, a menu row at 100ms, a round button at 140ms. Two tokens
+    // (`--hb-move` for the state change, `--hb-press` for the click down) and one
+    // curve are the whole vocabulary, and reduced motion zeroes them in one place.
+    expect(ownCss).toMatch(/:root\s*\{[^}]*--hb-move:/);
+    expect(ownCss).toMatch(/:root\s*\{[^}]*--hb-ease:\s*cubic-bezier/);
+    const raw = [...ownCss.matchAll(/transition:[^;]*?\b0\.\d+s\s+ease/g)].map((m) => m[0]);
+    expect(raw).toEqual([]);
+    // The tokens are zeroed for `prefers-reduced-motion`, not each rule.
+    const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)([\s\S]*)$/.exec(ownCss)?.[1] ?? "";
+    expect(reduced).toMatch(/--hb-move:\s*0s/);
+    expect(reduced).toMatch(/--hb-press-btn:\s*1/);
+  });
+
+  it("leaves the drawer undimmed, slides it from the right, and animates it shut", () => {
+    // Three separate expectations, all measured against the live page:
+    //  - the sheet comes in from the RIGHT edge;
+    //  - no darkening layer over the transcript (a 50% wash made the chat behind
+    //    look disabled);
+    //  - closing plays an exit, which means the panel stays mounted until the
+    //    animation ends (`[data-state="closing"]`).
+    expect(ownCss).toMatch(/\.hb-drawer\s*\{[^}]*right:\s*0/);
+    expect(ownCss).toMatch(/\.hb-drawer\s*\{[^}]*animation:\s*hb-slide-in-right/);
+    expect(ownCss).toMatch(/\.hb-drawer\[data-state="closing"\]\s*\{[^}]*animation:\s*hb-slide-out-right/);
+    expect(ownCss).toMatch(/@keyframes hb-slide-out-right\s*\{[\s\S]*?translateX\(100%\)/);
+    expect(ownCss).toMatch(/\.hb-drawer-backdrop\s*\{[^}]*background:\s*transparent/);
+  });
+
+  it("centres text inside the composer row and the history rows", () => {
+    // Both were bottom- or baseline-aligned, which reads as "sitting low" once the
+    // neighbouring control is a round button rather than a same-size line box.
+    const composer = readFileSync(join(UI_DIR, "Composer.ts"), "utf8");
+    expect(composer).toMatch(/hb-composer-row flex items-center/);
+    expect(ownCss).toMatch(/\.hb-hist-main\s*\{[^}]*align-items:\s*center/);
+    expect(ownCss).toMatch(/\.hb-proj-session\s*\{[^}]*align-items:\s*center/);
+  });
+
+  it("keeps one control set for both layouts", () => {
+    // The composer used to branch on `mobile`: two chips inline on a desktop, a
+    // menu on a phone. They are the same three round buttons and the same "···"
+    // menu everywhere now, which is what makes the two sizes feel like one app.
+    const composer = readFileSync(join(UI_DIR, "Composer.ts"), "utf8");
+    expect(composer).not.toMatch(/props\.mobile\s*\?\s*null/);
+    expect(composer).toMatch(/data-hb":\s*"composer-upload"/);
+    expect(composer).toMatch(/data-hb":\s*"composer-more"/);
+  });
+
   it("keeps the phone drawer anchored to the chat area, not the viewport", () => {
     // `position: fixed` anchors to the viewport, and the dashboard's own top bar
     // paints over it — the sheet's header lands above the visible screen and the
@@ -217,12 +265,16 @@ describe("layout classes", () => {
   it("scales phone controls to their glyphs instead of inflating empty boxes", () => {
     // First pass at touch targets only grew the BOX to 44px and left the glyph at
     // its 12px desktop size: four fat squares with a speck in the middle, and the
-    // composer alone stood 105px tall. The visual box has to come down and the
-    // mark has to go up, with the tap target restored on a transparent overlay.
-    expect(ownCss).toMatch(/\.hb-composer-btn\s*\{[^}]*height:\s*32px/);
+    // composer alone stood 105px tall. The rule that survived: the visual box
+    // stays small and the tap target lives on a transparent overlay.
+    //
+    // The composer's controls are round icon buttons now (34px on a desktop,
+    // 38px on a phone) and carry their target on `.hb-round-btn::after`; the
+    // message action glyphs keep the older 28px + inset overlay.
     expect(ownCss).toMatch(/\.hb-action-btn\s*\{[^}]*width:\s*28px/);
     expect(ownCss).toMatch(/\.hb-action-btn::after\s*\{[^}]*inset:\s*-5px/);
     expect(ownCss).toMatch(/\.hb-tab-close\s*\{[^}]*width:\s*28px/);
+    expect(ownCss).toMatch(/\.hb-round-btn\s*\{[^}]*width:\s*34px/);
     // No mobile rule may still widen a control to 44px: that is the regression.
     const mobile = /@media\s*\(max-width:\s*768px\)([\s\S]*)$/.exec(ownCss)?.[1] ?? "";
     expect(mobile).not.toMatch(/(?:min-)?(?:width|height):\s*44px/);

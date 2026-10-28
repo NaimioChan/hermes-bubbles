@@ -447,11 +447,13 @@ export function Composer(props: ComposerProps) {
           )
         : null,
 
-      // ── phone tool menu ──────────────────────────────────────────────────
-      // What the desktop shows as two inline chips and a notification glyph in
-      // the tab strip: model, reasoning strength, notifications. One row each,
-      // because these are full-sentence options, not pills (铁律 20).
-      props.mobile && toolsOpen
+      // ── tool menu ────────────────────────────────────────────────────────
+      // Model, reasoning strength and notifications. One row each, because
+      // these are full sentences rather than pills (铁律 20), and because an
+      // inline model chip is what used to squeeze the textarea to four
+      // characters on a narrow screen. Same control on both layouts: a phone
+      // and a desktop should not teach two different ways to switch models.
+      toolsOpen
         ? React.createElement(
             "div",
             { className: "hb-tools-menu", "data-hb": "composer-menu" },
@@ -542,10 +544,14 @@ export function Composer(props: ComposerProps) {
         : null,
 
       // ── input row ────────────────────────────────────────────────────────
+      // `items-center`, not `items-end`: the row's controls are round buttons
+      // now, and the textarea's own padding used to make a one-line draft sit
+      // low against a bottom-aligned row. Centring puts the glyph's optical
+      // middle on the text's, at one line and at eight.
       React.createElement(
         "div",
         {
-          className: "hb-composer-row flex items-end gap-1.5 px-2 py-1.5",
+          className: "hb-composer-row flex items-center gap-1.5 px-2 py-1.5",
           style: {
             background: "var(--color-card)",
             borderRadius: "var(--radius)",
@@ -553,33 +559,21 @@ export function Composer(props: ComposerProps) {
           },
         },
 
-        // ── left: the phone's tool menu, or the desktop's attach button ─────
-        props.mobile
-          ? React.createElement(
-              "button",
-              {
-                type: "button",
-                "data-hb": "composer-more",
-                "data-open": toolsOpen ? "true" : "false",
-                "aria-expanded": toolsOpen,
-                "aria-label": t.composerMore,
-                title: t.composerMore,
-                className: "hb-composer-btn hb-composer-more",
-                onClick: () => setToolsOpen((v: boolean) => !v),
-              },
-              Icon(sdk, { name: "dots", size: 18 }),
-            )
-          : React.createElement(
-              "button",
-              {
-                type: "button",
-                title: t.attachFiles,
-                "aria-label": t.attachFiles,
-                className: "hb-composer-btn hb-composer-attach",
-                onClick: () => fileRef.current?.click(),
-              },
-              "+",
-            ),
+        // ── left: the tool menu ─────────────────────────────────────────────
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "composer-more",
+            "data-open": toolsOpen ? "true" : "false",
+            "aria-expanded": toolsOpen,
+            "aria-label": t.composerMore,
+            title: t.composerMore,
+            className: "hb-composer-btn hb-composer-more",
+            onClick: () => setToolsOpen((v: boolean) => !v),
+          },
+          Icon(sdk, { name: "dots", size: 18 }),
+        ),
         React.createElement("input", {
           ref: fileRef,
           type: "file",
@@ -624,42 +618,12 @@ export function Composer(props: ComposerProps) {
           onPaste,
         }),
 
-        // right: model + reasoning + send/stop (desktop), or upload / stop / send
-        // as round icon buttons (phone — the model and reasoning chips moved into
-        // the "···" menu above).
+        // right: stop / upload / send, as round icon buttons on BOTH layouts.
+        // The model and reasoning chips that used to sit here moved into the
+        // "···" menu above, on both sizes, so the row is identical everywhere.
         React.createElement(
           "div",
           { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
-          props.mobile
-            ? null
-            : React.createElement(
-                "button",
-                {
-                  type: "button",
-                  "data-hb": "model-picker-open",
-                  title: `${t.pickModel}: ${props.model || "default"}`,
-                  className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
-                  onClick: props.onOpenModelPicker,
-                },
-                props.model || "model",
-              ),
-          props.mobile
-            ? null
-            : React.createElement(
-                "button",
-                {
-                  type: "button",
-                  title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
-                  className: "hb-composer-btn hb-text-micro",
-                  onClick: () => {
-                    const current = props.reasoning || "medium";
-                    const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
-                    const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
-                    if (next) props.onPickReasoning(next);
-                  },
-                },
-                reasoningLabel(props.reasoning || "medium", props.locale),
-              ),
           // While a turn runs the primary action becomes "insert": the message is
           // delivered mid-turn (queued / steered / redirected by the backend).
           // Stop is a separate control so correcting and cancelling do not
@@ -672,35 +636,24 @@ export function Composer(props: ComposerProps) {
                   title: t.stopReasoningTitle,
                   "aria-label": t.stop,
                   "data-hb": "stop-action",
-                  className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-stop" : "hb-composer-btn hb-composer-stop",
-                  style: props.mobile
-                    ? undefined
-                    : {
-                        background: "var(--color-muted)",
-                        color: "var(--color-muted-foreground)",
-                        borderRadius: "calc(var(--radius) * 0.6)",
-                      },
+                  className: "hb-composer-btn hb-round-btn hb-round-stop",
                   onClick: props.onStop,
                 },
-                props.mobile ? Icon(sdk, { name: "stop", size: 15 }) : t.stop,
+                Icon(sdk, { name: "stop", size: 15 }),
               )
             : null,
-          // The upload button only exists on a phone: the desktop keeps its `+`
-          // at the left edge of the row, which is where a mouse expects it.
-          props.mobile
-            ? React.createElement(
-                "button",
-                {
-                  type: "button",
-                  title: t.attachFiles,
-                  "aria-label": t.attachFiles,
-                  "data-hb": "composer-upload",
-                  className: "hb-composer-btn hb-round-btn",
-                  onClick: () => fileRef.current?.click(),
-                },
-                Icon(sdk, { name: "paperclip", size: 17 }),
-              )
-            : null,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              title: t.attachFiles,
+              "aria-label": t.attachFiles,
+              "data-hb": "composer-upload",
+              className: "hb-composer-btn hb-round-btn",
+              onClick: () => fileRef.current?.click(),
+            },
+            Icon(sdk, { name: "paperclip", size: 17 }),
+          ),
           React.createElement(
             "button",
             {
@@ -709,11 +662,11 @@ export function Composer(props: ComposerProps) {
               title: props.running ? t.insert : t.send,
               "aria-label": props.running ? t.insert : t.send,
               "data-hb": "primary-action",
-              className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-send" : "hb-composer-btn hb-composer-send",
+              className: "hb-composer-btn hb-round-btn hb-round-send",
               style: {
                 background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                 color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",
-                borderRadius: props.mobile ? "9999px" : "calc(var(--radius) * 0.6)",
+                borderRadius: "9999px",
                 // `disabled:opacity-40` is absent from the host bundle, so the
                 // dimming is done here rather than hoped for.
                 opacity: canSend ? 1 : 0.4,
@@ -721,11 +674,7 @@ export function Composer(props: ComposerProps) {
               },
               onClick: submit,
             },
-            props.mobile
-              ? Icon(sdk, { name: props.running ? "insert" : "send", size: 18 })
-              : props.running
-                ? t.insert
-                : t.send,
+            Icon(sdk, { name: props.running ? "insert" : "send", size: 18 }),
           ),
         ),
       ),

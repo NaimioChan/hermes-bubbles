@@ -161,7 +161,7 @@ try {
     return {
       open: true,
       variant: panel.getAttribute("data-variant"),
-      fromLeft: Math.abs(r.left - area.left) <= 1,
+      fromRight: Math.abs(r.right - area.right) <= 1,
       fromTop: Math.abs(r.top - area.top) <= 1,
       width: Math.round(r.width),
       windowW: window.innerWidth,
@@ -169,14 +169,54 @@ try {
     };
   })()`);
   check(
-    "drawer opens from the left edge of the chat area",
-    drawerChrome.open === true && drawerChrome.variant === "drawer" && drawerChrome.fromLeft && drawerChrome.fromTop,
+    "drawer opens from the right edge of the chat area",
+    drawerChrome.open === true && drawerChrome.variant === "drawer" && drawerChrome.fromRight && drawerChrome.fromTop,
     JSON.stringify(drawerChrome),
   );
   check("drawer has a new-chat row at the top", drawerChrome.newChat === true);
   await shot("21-phone-drawer");
-  await evaluate("document.querySelector('[data-hb=\"history-close\"]')?.click()");
-  await sleep(400);
+
+  // No dimming: the transcript behind the sheet must stay at full strength.
+  const scrim = await evaluate(`(() => {
+    const b = document.querySelector('[data-hb="history-backdrop"]');
+    if (!b) return null;
+    const cs = getComputedStyle(b);
+    return { background: cs.backgroundColor, opacity: cs.opacity };
+  })()`);
+  check(
+    "drawer adds no darkening layer over the chat",
+    scrim !== null &&
+      (scrim.background === "rgba(0, 0, 0, 0)" || scrim.background === "transparent") &&
+      scrim.opacity === "1",
+    JSON.stringify(scrim),
+  );
+
+  // Closing must animate: the panel stays mounted, in the `closing` state, then
+  // goes away. A close that unmounts synchronously leaves nothing to watch.
+  const closingFrames = [];
+  await evaluate('document.querySelector(`[data-hb="history-close"]`)?.click()');
+  for (let i = 0; i < 8; i += 1) {
+    await sleep(40);
+    closingFrames.push(
+      await evaluate(`(() => {
+        const p = document.querySelector('[data-hb="history-panel"]');
+        if (!p) return "gone";
+        return p.getAttribute("data-state") + ":" + getComputedStyle(p).animationName;
+      })()`),
+    );
+  }
+  check(
+    "closing the drawer plays an exit animation",
+    closingFrames.some((f) => String(f).startsWith("closing:hb-slide-out-right")),
+    JSON.stringify(closingFrames),
+  );
+  let gone = false;
+  for (let i = 0; i < 30 && !gone; i += 1) {
+    await sleep(100);
+    gone = await evaluate(`!document.querySelector('[data-hb="history-panel"]')`);
+  }
+  check("the drawer unmounts once the exit finishes", gone === true);
+  await sleep(300);
 
   // ── 3. composer ──────────────────────────────────────────────────────────
   const composer = await evaluate(`(() => {
@@ -288,24 +328,37 @@ try {
   await evaluate("document.querySelector('[data-hb=\"composer-menu\"] [aria-label]')?.click()");
   await sleep(250);
 
-  // ── 5. desktop is untouched by the same bundle ───────────────────────────
+  // ── 5. desktop: same controls, plus the tab strip ────────────────────────
   await viewport(1440, 900, false);
   await sleep(900);
   const desktop = await evaluate(`(() => {
     const row = document.querySelector('.hb-composer-row');
+    const round = (el) => el && parseFloat(getComputedStyle(el).borderTopLeftRadius) >= 18;
+    const strip = document.querySelector('[data-hb="refresh-chat"]');
     return {
       tabs: document.querySelectorAll('[data-hb="tab"]').length,
       tabStrip: Boolean(document.querySelector('[data-hb="tab-new"]')),
       fabs: Boolean(document.querySelector('[data-hb="drawer-toggle"]')),
-      modelChip: Boolean(row?.querySelector('[data-hb="model-picker-open"]')),
+      stripRefresh: Boolean(strip),
+      stripRefreshRound: round(strip),
+      // The composer is the SAME control set as the phone's.
       composerMore: Boolean(row?.querySelector('[data-hb="composer-more"]')),
+      upload: Boolean(row?.querySelector('[data-hb="composer-upload"]')),
       send: Boolean(row?.querySelector('[data-hb="primary-action"]')),
-      sendText: (row?.querySelector('[data-hb="primary-action"]')?.textContent ?? "").trim(),
+      sendRound: round(row?.querySelector('[data-hb="primary-action"]')),
+      modelChip: Boolean(row?.querySelector('[data-hb="model-picker-open"]')),
+      attachPlus: Boolean(row?.querySelector('.hb-composer-attach')),
     };
   })()`);
   check("desktop keeps its tab strip", desktop.tabStrip === true, JSON.stringify(desktop));
   check("desktop has no floating drawer button", desktop.fabs === false);
-  check("desktop keeps the model chip and a word Send", desktop.modelChip === true && desktop.sendText.length > 0, JSON.stringify(desktop.sendText));
+  check("desktop strip carries a round refresh button", desktop.stripRefresh === true && desktop.stripRefreshRound === true);
+  check(
+    "desktop composer matches the phone: menu + round upload/send",
+    desktop.composerMore === true && desktop.upload === true && desktop.sendRound === true,
+    JSON.stringify(desktop),
+  );
+  check("no model chip / `+` left in the composer row", desktop.modelChip === false && desktop.attachPlus === false);
   await shot("24-desktop-unchanged");
 
   const failed = results.filter((r) => !r.ok).length;

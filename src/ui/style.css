@@ -44,13 +44,15 @@
  * a pasted wall of text can never paint a screen-tall textarea. `overflow-y`
  * only takes effect once the content exceeds the box — a one-line draft shows
  * no scrollbar.
+ *
+ * The padding is what centres the TEXT in the row: the row is `items-center` and
+ * the box is `min-height: 32px`, so a symmetric 6px keeps the first line's
+ * optical middle on the buttons' centre at one line and at eight. Asymmetric
+ * padding (or `items-end` on the row) is what made a one-line draft sit low.
  */
 .hb-composer-input {
   max-height: 192px;
   overflow-y: auto;
-  /* One text line is exactly the row's control height (32px = 6 + 20 + 6), so
-   * the last line's centre sits where the buttons' centres sit: 16px above the
-   * row's bottom edge, at one line and at eight. */
   padding: 6px 0;
   line-height: 20px;
 }
@@ -146,22 +148,18 @@
 /* ── composer controls ────────────────────────────────────────────────────── */
 
 /*
- * One height for every control in the composer row: the attach button, the model
- * and reasoning chips, send and stop.
+ * The base for every control in the composer row.
  *
- * They used to be sized by their own padding and font-size (a 16px `+`, a 12px
- * label, a 12px `Send`), so bottoms lined up but the glyph centres did not —
- * the row looked hand-placed. A fixed 2rem box with centred content puts every
- * centre 16px above the row's bottom edge, and since the textarea's own padding
- * puts its last line's centre exactly there too, one-, three- and eight-line
- * drafts all stay aligned. Both numbers are px and must match `INPUT_MIN_PX`.
+ * The round buttons set their own 38px box (see `.hb-round-btn`); this class only
+ * carries the parts they share — centring, no border, the ghost colour and the
+ * inherit-font reset. It used to pin `height: 32px` for all of them, which is why
+ * a 38px round button had to override two properties to look round.
  */
 .hb-composer-btn {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  height: 32px;
   padding: 0 0.5rem;
   border: 0;
   background: transparent;
@@ -173,26 +171,6 @@
 
 .hb-composer-btn:hover {
   color: var(--color-card-foreground);
-}
-
-/* The `+` is a glyph, not a word: keep it square-ish and a touch larger than
- * body text so it reads as a button rather than a stray character. */
-.hb-composer-attach {
-  width: 2rem;
-  padding: 0;
-  font-size: 1.0625rem;
-}
-
-/* The two coloured actions override the ghost treatment. */
-.hb-composer-send {
-  padding: 0 0.75rem;
-  font-size: 0.75rem;
-}
-
-.hb-composer-stop {
-  padding: 0 0.625rem;
-  font-size: 0.75rem;
-  background: var(--color-muted);
 }
 
 /* ── typography ───────────────────────────────────────────────────────────── */
@@ -229,10 +207,31 @@
   max-width: 22ch;
 }
 
+/* A tab: the same hover fill and press as every other clickable surface. Its
+ * own class rather than `.hb-tap` because the tab's background is set INLINE for
+ * the active state, and an inline value wins over a hover rule — so the hover has
+ * to paint through a different property. */
+.hb-tab {
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    box-shadow var(--hb-move) var(--hb-ease),
+    filter var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
+.hb-tab:hover {
+  filter: brightness(1.25);
+}
+
+.hb-tab:active {
+  transform: scale(var(--hb-press-row));
+}
+
 /* The tab close button: hidden until the tab is hovered or active. */
 .hb-tab-close {
   opacity: 0.35;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--hb-move) var(--hb-ease), transform var(--hb-press) var(--hb-ease);
 }
 
 /* The "waiting for an answer" marker on a tab. A filled disc in the accent
@@ -362,7 +361,10 @@
   line-height: 1.4;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity 0.12s ease, background 0.12s ease;
+  transition:
+    opacity var(--hb-move) var(--hb-ease),
+    background-color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
 /* A block is a quiet surface, so the button only becomes obvious on approach. */
@@ -716,7 +718,7 @@
   padding-top: 0.25rem;
   min-height: 1.25rem;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--hb-move) var(--hb-ease);
 }
 
 .hb-actions:hover,
@@ -749,6 +751,10 @@
   font-size: 0.8125rem;
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
 .hb-action-btn:hover {
@@ -756,9 +762,9 @@
   color: var(--color-card-foreground);
 }
 
-/* A copy confirmation is a momentary change of glyph, so it must not resize. */
+/* Same press as the composer's round buttons — one gesture language. */
 .hb-action-btn:active {
-  transform: translateY(0.5px);
+  transform: scale(var(--hb-press-btn));
 }
 
 /* A labelled button (approval choices, clarify submit). */
@@ -770,8 +776,18 @@
   cursor: pointer;
 }
 
+.hb-action-btn-text {
+  transition:
+    filter var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
 .hb-action-btn-text:hover {
   filter: brightness(1.12);
+}
+
+.hb-action-btn-text:active {
+  transform: scale(var(--hb-press-row));
 }
 
 .hb-input {
@@ -837,7 +853,7 @@
  * the list reads as plain titles until you go to act on one. */
 .hb-row-tools {
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--hb-move) var(--hb-ease);
 }
 
 div:hover > .hb-row-tools,
@@ -873,7 +889,13 @@ div:hover > .hb-row-tools,
   border-radius: 1px;
   background: var(--color-muted-foreground);
   opacity: 0.35;
-  transition: opacity 0.1s ease, width 0.1s ease, margin-left 0.1s ease;
+  /* The active tick's width/margin move is the only motion here; same curve as
+   * everything else so the rail does not feel like a separate widget. */
+  transition:
+    opacity var(--hb-move) var(--hb-ease),
+    width var(--hb-move) var(--hb-ease),
+    margin-left var(--hb-move) var(--hb-ease),
+    background-color var(--hb-move) var(--hb-ease);
 }
 
 .hb-rail-tick[data-active="true"] {
@@ -1618,7 +1640,9 @@ div:hover > .hb-row-tools,
 
 .hb-proj-session {
   display: flex;
-  align-items: baseline;
+  /* Centre, not baseline: the row mixes a title, a lamp dot and a timestamp, and
+   * baseline alignment left the title sitting high against the dot. */
+  align-items: center;
   gap: 0.35rem;
   padding: 0.15rem 0.35rem;
   border-radius: calc(var(--radius) * 0.5);
@@ -1694,6 +1718,38 @@ div:hover > .hb-row-tools,
   background: var(--color-muted);
 }
 
+/* ── motion: one easing curve, two durations ──────────────────────────────── */
+
+/*
+ * Every interactive surface on this page moves with the same curve, so a hover
+ * on a tab, a menu row and a round button feel like the same app. Two durations,
+ * not one:
+ *
+ *   --hb-move  160ms — the state CHANGE (hover fill, colour, shadow)
+ *   --hb-press  90ms — the click DOWN, which has to feel immediate
+ *
+ * `cubic-bezier(0.22, 0.8, 0.3, 1)` starts fast and settles: the point of an
+ * ease-out here is that the response to the cursor is visible in the first frame
+ * rather than after a linear ramp.
+ */
+:root {
+  --hb-move: 0.16s;
+  --hb-press: 0.09s;
+  --hb-ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  /* How far a pressed element shrinks. Rows (which are wide) move less than
+   * round buttons, or a long tab appears to jump. */
+  --hb-press-row: 0.985;
+  --hb-press-btn: 0.92;
+}
+
+/*
+ * The tokens below are the whole motion vocabulary. Every interactive surface
+ * composes them directly in its own rule (rather than going through one shared
+ * class) because the properties that need transitioning differ per control — a
+ * tab paints through `filter` (its background is inline), a row through
+ * `background-color`, a button through both plus `transform`.
+ */
+
 /* ── icons, round buttons, floating chrome ────────────────────────────────── */
 
 /*
@@ -1716,7 +1772,10 @@ div:hover > .hb-row-tools,
   background: transparent;
   color: var(--color-muted-foreground);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
 .hb-icon-btn:hover {
@@ -1725,29 +1784,33 @@ div:hover > .hb-row-tools,
 }
 
 .hb-icon-btn:active {
-  transform: scale(0.94);
+  transform: scale(var(--hb-press-btn));
 }
 
 /*
- * Round action buttons in the composer (phone): stop, upload, send.
+ * Round action buttons in the composer: stop, upload, send — on both layouts.
  *
  * The send button is the one accent-filled control on the page, so it carries
  * the primary colour; the other two are ghosts on the composer's own surface.
- * 38px is the compromise between the 44px touch minimum and the 36px row the
- * desktop composer already uses — the visual box stays quiet while a ::after
- * overlay widens the hit area to 44px (see the media block).
+ * Desktop gets a 34px box (a mouse is precise, and the row stays one line); the
+ * phone override below takes it to 38px and restores a 44px touch target with a
+ * ::after overlay.
  */
 .hb-round-btn {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border: 0;
   border-radius: 9999px;
   background: transparent;
   color: var(--color-muted-foreground);
   cursor: pointer;
-  transition: background 0.14s ease, color 0.14s ease, transform 0.1s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    box-shadow var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
 .hb-round-btn:hover {
@@ -1756,7 +1819,7 @@ div:hover > .hb-row-tools,
 }
 
 .hb-round-btn:active {
-  transform: scale(0.92);
+  transform: scale(var(--hb-press-btn));
 }
 
 .hb-round-stop {
@@ -1779,6 +1842,38 @@ div:hover > .hb-row-tools,
 }
 
 /* ── floating chrome (phone) ──────────────────────────────────────────────── */
+
+/* The tab strip's action cluster (desktop) uses the same round buttons as the
+ * phone's floating pair: 30px boxes, `:active` scale, same icon weights. The
+ * strip is 40px tall, so the box is sized to sit inside it without growing the
+ * row. */
+.hb-strip-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
+.hb-strip-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+.hb-strip-btn:active {
+  transform: scale(var(--hb-press-btn));
+}
 
 /* The row the two floating buttons live in. Absolute over the transcript, so it
  * costs no vertical space; `pointer-events` is off so taps pass through the gap
@@ -1817,11 +1912,15 @@ div:hover > .hb-row-tools,
   backdrop-filter: blur(8px);
   pointer-events: auto;
   cursor: pointer;
-  transition: transform 0.14s ease, color 0.14s ease, background 0.14s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    box-shadow var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
 .hb-fab:active {
-  transform: scale(0.9);
+  transform: scale(var(--hb-press-btn));
 }
 
 .hb-fab[data-open="true"] {
@@ -1855,10 +1954,10 @@ div:hover > .hb-row-tools,
   animation: hb-caret 1.1s steps(1, end) infinite;
 }
 
-/* ── drawer (phone history) ───────────────────────────────────────────────── */
+/* ── drawer (history) ─────────────────────────────────────────────────────── */
 
 /*
- * The backdrop and the sheet are ABSOLUTE, not fixed.
+ * The panel and its click-catcher are ABSOLUTE, not fixed.
  *
  * `position: fixed` anchors to the VIEWPORT, and the dashboard's own top bar
  * paints above it — so a fixed sheet's header (title, refresh, close) lands
@@ -1866,26 +1965,33 @@ div:hover > .hb-row-tools,
  * `[data-layout]`, which is `position: relative`, so absolute anchoring covers
  * exactly the chat area and starts under the host's bar.
  */
+
+/*
+ * No dimming layer: the sheet slides over the transcript and the chat stays
+ * readable behind it. The element still exists so a tap outside closes the
+ * panel, but it is transparent — a 50% black wash made the conversation behind
+ * look disabled, which is not what "show me my other chats" means.
+ */
 .hb-drawer-backdrop {
   position: absolute;
   inset: 0;
   z-index: 50;
-  background: rgba(0, 0, 0, 0.5);
-  animation: hb-fade-in 0.16s ease-out;
+  background: transparent;
 }
 
 /*
- * Slides in from the LEFT edge, 84% of the chat area's width.
+ * Slides in from the RIGHT edge, 84% of the chat area's width.
  *
- * `transform` rather than `left` for the entrance: the panel is painted once and
- * moved on the compositor, so it does not re-layout the transcript behind it on
- * every frame of a 200ms slide.
+ * `transform` rather than `right` for both directions: the panel is painted once
+ * and moved on the compositor, so it does not re-layout the transcript behind it
+ * on every frame of a 200ms slide. The exit is the same curve reversed, which is
+ * why closing looks like the open played backwards rather than like a cut.
  */
 .hb-drawer {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 0;
+  right: 0;
   z-index: 51;
   display: flex;
   flex-direction: column;
@@ -1893,10 +1999,19 @@ div:hover > .hb-row-tools,
   max-width: 22rem;
   background: var(--color-card);
   color: var(--color-card-foreground);
-  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
-  border-top-right-radius: var(--radius);
-  border-bottom-right-radius: var(--radius);
-  animation: hb-slide-in 0.2s cubic-bezier(0.22, 0.8, 0.3, 1);
+  /* A hairline instead of a drop shadow: the sheet sits flush against the chat,
+   * and a shadow over an undimmed transcript reads as dirt. */
+  border-left: 1px solid var(--color-border);
+  border-top-left-radius: var(--radius);
+  border-bottom-left-radius: var(--radius);
+  animation: hb-slide-in-right 0.2s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+/* Closing: the same geometry, played out. Unmounted only after this finishes
+ * (see `HistoryPanel`), or the panel would vanish mid-slide. */
+.hb-drawer[data-state="closing"] {
+  animation: hb-slide-out-right 0.18s cubic-bezier(0.4, 0, 0.7, 0.2) forwards;
+  pointer-events: none;
 }
 
 .hb-drawer-head {
@@ -1921,12 +2036,19 @@ div:hover > .hb-row-tools,
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: transform 0.1s ease, filter 0.12s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    filter var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
+.hb-drawer-new:hover {
+  filter: brightness(1.08);
 }
 
 .hb-drawer-new:active {
-  transform: scale(0.98);
-  filter: brightness(1.1);
+  transform: scale(var(--hb-press-row));
+  filter: brightness(1.12);
 }
 
 /* The scrolling list. `min-height:0` is what makes a flex child actually
@@ -1942,15 +2064,33 @@ div:hover > .hb-row-tools,
   padding: 0.4rem 0.45rem;
   border-radius: calc(var(--radius) * 0.6);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
+/* A row is wide; a press reads as a settle, not a shrink. */
+.hb-hist-row:active {
+  transform: scale(var(--hb-press-row));
 }
 
 .hb-hist-main {
   display: flex;
-  align-items: baseline;
+  /* `center`, not `baseline`: the row carries a lamp, a timestamp and a button,
+   * and baseline-aligning the trio against the title left the title riding high
+   * in its own row. */
+  align-items: center;
   gap: 0.35rem;
   font-size: 0.8125rem;
   line-height: 1.35;
+}
+
+/* The title is a span in a flex row; it needs to be a centred box itself, or the
+ * truncation baseline decides where the glyphs sit. */
+.hb-hist-main > .hb-truncate {
+  display: flex;
+  align-items: center;
+  min-height: 1.35em;
 }
 
 .hb-row-more {
@@ -1989,8 +2129,18 @@ div:hover > .hb-row-tools,
   cursor: pointer;
 }
 
+.hb-menu-item {
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
 .hb-menu-item:hover {
   background: var(--color-muted);
+}
+
+.hb-menu-item:active {
+  transform: scale(var(--hb-press-row));
 }
 
 .hb-menu-item-danger {
@@ -1999,16 +2149,26 @@ div:hover > .hb-row-tools,
 
 /* ── composer tool menu (phone) ───────────────────────────────────────────── */
 
+/* The "···" that opens the tool menu. Mirrors `.hb-round-btn` on purpose: it sits
+ * at the other end of the same row and has to match. */
 .hb-composer-more {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 9999px;
   padding: 0;
-  transition: background 0.14s ease, transform 0.1s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
+}
+
+.hb-composer-more:hover {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
 }
 
 .hb-composer-more:active {
-  transform: scale(0.92);
+  transform: scale(var(--hb-press-btn));
 }
 
 .hb-tools-menu {
@@ -2062,12 +2222,18 @@ div:hover > .hb-row-tools,
   font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition:
+    background-color var(--hb-move) var(--hb-ease),
+    transform var(--hb-press) var(--hb-ease);
 }
 
-.hb-tools-row:hover,
+.hb-tools-row:hover {
+  background: var(--color-muted);
+}
+
 .hb-tools-row:active {
   background: var(--color-muted);
+  transform: scale(var(--hb-press-row));
 }
 
 .hb-tools-icon {
@@ -2318,9 +2484,14 @@ div:hover > .hb-row-tools,
   to { opacity: 1; }
 }
 
-@keyframes hb-slide-in {
-  from { transform: translateX(-100%); }
+@keyframes hb-slide-in-right {
+  from { transform: translateX(100%); }
   to { transform: translateX(0); }
+}
+
+@keyframes hb-slide-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
 }
 
 /* Menus and chips arrive from 4px below their resting place rather than scaling
@@ -2431,30 +2602,15 @@ div:hover > .hb-row-tools,
 
   /* Touch targets.
    *
-   * The first version of this block only grew the BOX to 44px and left the glyph
-   * at its 12px desktop size: a phone then showed four fat squares with a tiny
-   * mark floating in the middle of each, and the composer alone stood 105px
-   * tall. Two things are wrong in that trade — the box is heavy and the mark is
-   * small — so they are fixed separately: the visual box goes down to 36px and
-   * the glyph goes UP a step, while the tap target is restored by a transparent
-   * overlay (vertical only, so neighbouring buttons cannot steal each other's
-   * taps in a 4px gap).
+   * Every control in the composer row is a 38px round button now; the tap target
+   * has to reach 44px, and a ::after overlay does that without making the row
+   * taller (see `.hb-round-btn::after` below). Only the message action glyphs
+   * still need the older treatment, so they keep theirs.
    */
   .hb-composer-btn {
     position: relative;
-    height: 32px;
     min-width: 32px;
     padding: 0 0.4rem;
-  }
-  .hb-composer-btn::after {
-    content: "";
-    position: absolute;
-    inset: -4px -2px;
-  }
-  /* A 32px hole needs a 17-18px mark to look like a button. */
-  .hb-composer-attach {
-    width: 32px;
-    font-size: 1.125rem;
   }
   .hb-action-btn {
     position: relative;
@@ -2482,12 +2638,6 @@ div:hover > .hb-row-tools,
    * text. 13-14px against 34px is what a normal touch button looks like. */
   .hb-composer-tools .hb-text-micro {
     font-size: 0.8125rem;
-  }
-  /* The model chip already truncates by `hb-max-w-18ch` (~129px). Capping it
-     tighter to "save space" only produced "eek-v4.1-" — an unreadable stub in a
-     row that has the second line to itself. Leave the desktop cap alone. */
-  .hb-composer-send {
-    font-size: 0.875rem;
   }
   [data-hb="notify-toggle"],
   [data-hb="tab-new"],
@@ -2585,6 +2735,16 @@ div:hover > .hb-row-tools,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* One switch for the whole page: the motion is a property of the session, not
+   * of individual components, so zeroing the tokens in `:root` stills every
+   * transition and keeps the states themselves intact. */
+  :root {
+    --hb-move: 0s;
+    --hb-press: 0s;
+    --hb-press-row: 1;
+    --hb-press-btn: 1;
+  }
+
   .hb-caret,
   .hb-todo-active,
   .hb-fab-dot,
@@ -2597,6 +2757,7 @@ div:hover > .hb-row-tools,
    * The states still change — the drawer is simply there instead of sliding in,
    * and a pressed button does not shrink. */
   .hb-drawer,
+  .hb-drawer[data-state="closing"],
   .hb-drawer-backdrop,
   .hb-tools-menu,
   .hb-row-menu,
@@ -2605,26 +2766,12 @@ div:hover > .hb-row-tools,
     animation: none;
   }
 
-  .hb-icon-btn,
-  .hb-round-btn,
-  .hb-fab,
-  .hb-composer-more,
-  .hb-drawer-new,
   .hb-tool-head,
-  .hb-think-head,
-  .hb-hist-row,
-  .hb-action-btn {
+  .hb-think-head {
     transition: none;
   }
 
-  .hb-icon-btn:active,
-  .hb-round-btn:active,
-  .hb-round-send:not(:disabled):hover,
-  .hb-round-send:not(:disabled):active,
-  .hb-fab:active,
-  .hb-composer-more:active,
-  .hb-drawer-new:active,
-  .hb-action-btn:active {
+  .hb-round-send:not(:disabled):hover {
     transform: none;
   }
 }

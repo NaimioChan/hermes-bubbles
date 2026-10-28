@@ -88,7 +88,7 @@ export function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Loca
 export function HistoryPanel(props: HistoryPanelProps) {
   const { sdk } = props;
   const { React } = sdk;
-  const { useState } = sdk.hooks;
+  const { useState, useEffect } = sdk.hooks;
   const t = messagesFor(props.locale);
   // Which row is being renamed, and the draft. Null means no row is editing.
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -98,8 +98,42 @@ export function HistoryPanel(props: HistoryPanelProps) {
   const [menuId, setMenuId] = useState<string | null>(null);
 
   const drawer = props.variant === "drawer";
+  /**
+   * Closing is a two-step state, because the panel has to stay mounted while it
+   * slides out.
+   *
+   * `requestClose` tells the parent immediately (its `open` flag is the truth:
+   * "closed") and keeps this panel mounted for the length of the exit animation.
+   * `animationend` clears the local flag, which is what unmounts it — driven by
+   * the animation itself rather than a timer, so a slow frame stretches the exit
+   * instead of cutting it, and a fast one cannot leave a ghost panel behind.
+   * Reduced motion skips the whole thing.
+   */
+  const [closing, setClosing] = useState(false);
+  const requestClose = () => {
+    if (!drawer) {
+      props.onClose();
+      return;
+    }
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        props.onClose();
+        return;
+      }
+    } catch {
+      // No matchMedia: fall through and animate.
+    }
+    setClosing(true);
+    props.onClose();
+  };
 
-  if (!props.open) return null;
+  useEffect(() => {
+    // Reopened mid-exit (the parent flips `open` back on): the old panel is back
+    // in service, so drop the exit state and let the entry animation replay.
+    if (props.open && closing) setClosing(false);
+  }, [props.open, closing]);
+
+  if (!props.open && !closing) return null;
 
   const menuItem = (key: string, hook: string, label: string, run: () => void, danger = false) =>
     React.createElement(
@@ -128,7 +162,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
     React.createElement("div", {
       className: drawer ? "hb-drawer-backdrop" : "hb-hist-backdrop",
       "data-hb": "history-backdrop",
-      onClick: props.onClose,
+      onClick: requestClose,
     }),
     React.createElement(
       "div",
@@ -136,6 +170,13 @@ export function HistoryPanel(props: HistoryPanelProps) {
         className: drawer ? "hb-drawer" : "flex h-full min-h-0 flex-col",
         "data-hb": "history-panel",
         "data-variant": props.variant,
+        "data-state": closing ? "closing" : "open",
+        // The exit ends the animation; `closing` is what keeps the panel mounted
+        // until then, so clearing it here is the unmount.
+        onAnimationEnd: (event: { animationName?: string; stopPropagation?: () => void }) => {
+          event.stopPropagation?.();
+          if (event.animationName === "hb-slide-out-right") setClosing(false);
+        },
         style: drawer ? undefined : { width: "17rem", borderLeft: "1px solid var(--color-border)" },
       },
 
@@ -171,7 +212,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
             title: t.collapse,
             "data-hb": "history-close",
             className: "hb-icon-btn",
-            onClick: props.onClose,
+            onClick: requestClose,
           },
           Icon(sdk, { name: "close", size: 15 }),
         ),

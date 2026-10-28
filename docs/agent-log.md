@@ -19,7 +19,7 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 - `style.css`：`.hb-act` 用 flex column + `min-height: 0`，body `flex: 1 1 auto`（否则块级子元素拒绝收缩，190 的封顶变成 205）；`.hb-act-body > * { flex: 0 0 auto }`（否则 15 行被压成互相挤压的一坨——这是第二轮才发现的，第一轮 190px 里塞了 15 行）；表头 `width: fit-content`（`100%` 会把耗时甩到 82% 列宽之外，截图里是断线的两个元素）。
 - 验证：`tsc` 干净；`vitest` **667 passed / 31 文件**（新增 `tests/run.test.ts` 14 条 + `layout-classes` 1 条守卫限高/inert）；`audit-classes` 272/272；`build` + `install-plugin` 已装。
 - 真页面（**临时 HERMES_HOME + 回环 9123，用户的 9119 未启未停未改**；`HERMES_DASHBOARD_PUBLIC_URL` 必须 `unset` 才能起）：新写 `scripts/verify-activity.mjs`，真模型跑 14 条 terminal 调用，**16/16** —— 一个块、折叠 190px、17 行全在 DOM、`clipped=6`、`tabbable=0`、展开 272px 且 `tabbable=17`、再折叠回 190px、桌面与 390px 手机各一遍（手机上块占转写区 30%，无横向溢出）。`probe-furniture` **10/10**（顺带改成先展开区块再点行）；`verify-mobile` **25/25**；`verify-attachments` **15/15**；`verify.mjs` **92/95**（三条失败仍是临时实例只有「未归类」桶）。
-- 遗留：`AGENTS.md` 的钩子清单仍缺 `activity-block` / `activity-toggle`（保护文件，需用户批准）。README / DESIGN 已补 activity-block 段落。
+- 遗留：无。`AGENTS.md` 钩子清单已补 `activity-block` / `activity-toggle`，并新增铁律 30（限高块的三条实现细节与禁止项）；README / DESIGN 已补 activity-block 段落。
 
 ---
 

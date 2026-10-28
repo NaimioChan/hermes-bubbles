@@ -19,7 +19,7 @@ import { gitTargetDir, type GitInfo } from "../core/gitinfo";
 import { followAfterChange, pinnedState, pinAfterScroll, type PinState } from "../core/pin";
 import { entriesFromCatalog, type CommandEntry } from "../core/slash";
 import { activeTimeline, runningKeys, type SessionTab } from "../core/sessions";
-import type { TimelineItem } from "../core/types";
+import { groupTranscript } from "../core/run";
 import {
   readStoredWorkspace,
   workspaceOptions,
@@ -40,6 +40,7 @@ import {
 } from "../core/projects";
 import { ChatController, type ModelOptionProvider, type ServerRequestCard } from "../app/controller";
 import { createControllerHolder } from "../app/persistent";
+import { ActivityBlock } from "./Activity";
 import { Bubble } from "./Bubble";
 import { Composer, screenDroppedFiles } from "./Composer";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -221,6 +222,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   // drawing session A's question in session B is how answering it derailed B's
   // turn instead (see `core/cards.ts`).
   const visibleCards = cardsForTab(state, cards, state.activeKey);
+  // One pass over the timeline per change of it: the grouping decides which rows
+  // share a capped block, and re-deriving it on every unrelated re-render (a
+  // menu opening, a preference) would rebuild every row's props for nothing.
+  const segments = useMemo(() => groupTranscript(timeline.items), [timeline.items]);
   // Tabs that have a question waiting, for the strip's marker — the visible
   // signal that a background session needs you, without switching to it.
   const waiting = waitingKeys(state, cards);
@@ -1063,28 +1068,41 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
                   { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
                   t.empty,
                 )
-              : timeline.items.map((item: TimelineItem) =>
-                  React.createElement(
-                    "div",
-                    {
-                      key: item.id,
-                      className: "hb-bubble-gap",
-                      // Per-kind vertical rhythm: messages breathe, tool rows and
-                      // thinking blocks pack (see style.css).
-                      "data-hb-kind": item.kind,
-                      // Anchor for the locator rail's scroll-to.
-                      "data-hb-item": item.id,
-                    },
-                    React.createElement(Bubble, {
-                      sdk,
-                      item,
-                      locale,
-                      onEdit,
-                      onBranch,
-                      onRegenerate,
-                      onCopy,
-                    }),
-                  ),
+              : segments.map((segment) =>
+                  segment.type === "run"
+                    ? React.createElement(
+                        "div",
+                        {
+                          key: segment.key,
+                          className: "hb-bubble-gap",
+                          // Machinery between two messages, capped (see
+                          // `ui/Activity.ts`). This is the wrapper the block owns,
+                          // so its own rhythm class differs from a single row.
+                          "data-hb-kind": "run",
+                        },
+                        React.createElement(ActivityBlock, { sdk, items: segment.items, locale }),
+                      )
+                    : React.createElement(
+                        "div",
+                        {
+                          key: segment.key,
+                          className: "hb-bubble-gap",
+                          // Per-kind vertical rhythm: messages breathe, tool rows and
+                          // thinking blocks pack (see style.css).
+                          "data-hb-kind": segment.item.kind,
+                          // Anchor for the locator rail's scroll-to.
+                          "data-hb-item": segment.item.id,
+                        },
+                        React.createElement(Bubble, {
+                          sdk,
+                          item: segment.item,
+                          locale,
+                          onEdit,
+                          onBranch,
+                          onRegenerate,
+                          onCopy,
+                        }),
+                      ),
                 ),
             visibleCards.map((card) =>
               React.createElement(

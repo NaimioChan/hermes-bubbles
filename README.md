@@ -39,6 +39,7 @@ Open sessions are tabs along the top, stored sessions live in a collapsible pane
 | Approval mode | Done | A chip under the composer sets the dangerous-command approval mode (`manual` / `smart` / `off`, `config.set key=approvals.mode`). It is profile-wide — the menu says so — because the backend has no per-conversation override |
 | Live metrics | Done | Context bar and percentage, cache hit rate, output speed, cost, updating from `session.usage` |
 | Running indicator | Done | A flicking whale tail (animated PNG, the same asset the DeepSeek harness uses) beside the step that is running: the thinking header while reasoning streams, a tool row while it executes. It is an alpha mask over `currentColor`, so it takes the theme's colour; engines without mask support, and users who asked for reduced motion, get the same tail as a static SVG |
+| Between two messages | Done | Everything that is not a message — thinking segments, tool calls, delegation batches, machinery notices — is folded into one block per run, capped at 190px and clipped at its bottom edge while collapsed. The header counts what is inside (`▸ 3 thoughts · 8 calls 42s`), the rows stay in the DOM but are `inert` so nothing under the clip can be focused or clicked, and expanding reveals all of them (bounded at 60vh, scrolls inside). A run of one row stays a plain row |
 | Interface language | Done | English by default; follows the dashboard's language switch without a reload |
 
 ## Requirements

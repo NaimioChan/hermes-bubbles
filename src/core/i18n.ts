@@ -258,6 +258,18 @@ export interface Messages {
   todoEmpty: string;
   /** Delegated children (`subagent.*`). */
   subagents: string;
+  /**
+   * The collapsed block that holds everything between two messages — thinking,
+   * tool calls, delegation batches. Its header is a count of each kind, so a
+   * reader can tell "three thoughts and one call" from "eleven calls" without
+   * opening it.
+   */
+  activityThoughts: (n: number) => string;
+  activityTools: (n: number) => string;
+  activitySubagents: (n: number) => string;
+  activityNotices: (n: number) => string;
+  activityExpand: string;
+  activityCollapse: string;
   subagentProgress: (done: number, total: number) => string;
   subagentTools: (n: number) => string;
   subagentStatus: (status: string) => string;
@@ -457,6 +469,12 @@ const EN: Messages = {
   todoProgress: (done, total) => `${done}/${total} done`,
   todoEmpty: "No tasks yet",
   subagents: "Subagents",
+  activityThoughts: (n) => `${n} thought${n === 1 ? "" : "s"}`,
+  activityTools: (n) => `${n} call${n === 1 ? "" : "s"}`,
+  activitySubagents: (n) => `${n} delegation${n === 1 ? "" : "s"}`,
+  activityNotices: (n) => `${n} notice${n === 1 ? "" : "s"}`,
+  activityExpand: "Show all of it",
+  activityCollapse: "Fold it back",
   subagentProgress: (done, total) => `${done}/${total} finished`,
   subagentTools: (n) => `${n} tools`,
   subagentStatus: (status) =>
@@ -663,6 +681,12 @@ const ZH: Messages = {
   todoProgress: (done, total) => `完成 ${done}/${total}`,
   todoEmpty: "暂无任务",
   subagents: "子代理",
+  activityThoughts: (n) => `${n} 段思考`,
+  activityTools: (n) => `${n} 次调用`,
+  activitySubagents: (n) => `${n} 组子代理`,
+  activityNotices: (n) => `${n} 条事件`,
+  activityExpand: "展开全部",
+  activityCollapse: "折叠",
   subagentProgress: (done, total) => `完成 ${done}/${total}`,
   subagentTools: (n) => `${n} 次工具`,
   subagentStatus: (status) =>

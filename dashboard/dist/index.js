@@ -338,6 +338,12 @@ var HermesBubbles = (() => {
     todoProgress: (done, total) => `${done}/${total} done`,
     todoEmpty: "No tasks yet",
     subagents: "Subagents",
+    activityThoughts: (n) => `${n} thought${n === 1 ? "" : "s"}`,
+    activityTools: (n) => `${n} call${n === 1 ? "" : "s"}`,
+    activitySubagents: (n) => `${n} delegation${n === 1 ? "" : "s"}`,
+    activityNotices: (n) => `${n} notice${n === 1 ? "" : "s"}`,
+    activityExpand: "Show all of it",
+    activityCollapse: "Fold it back",
     subagentProgress: (done, total) => `${done}/${total} finished`,
     subagentTools: (n) => `${n} tools`,
     subagentStatus: (status) => ({
@@ -539,6 +545,12 @@ var HermesBubbles = (() => {
     todoProgress: (done, total) => `\u5B8C\u6210 ${done}/${total}`,
     todoEmpty: "\u6682\u65E0\u4EFB\u52A1",
     subagents: "\u5B50\u4EE3\u7406",
+    activityThoughts: (n) => `${n} \u6BB5\u601D\u8003`,
+    activityTools: (n) => `${n} \u6B21\u8C03\u7528`,
+    activitySubagents: (n) => `${n} \u7EC4\u5B50\u4EE3\u7406`,
+    activityNotices: (n) => `${n} \u6761\u4E8B\u4EF6`,
+    activityExpand: "\u5C55\u5F00\u5168\u90E8",
+    activityCollapse: "\u6298\u53E0",
     subagentProgress: (done, total) => `\u5B8C\u6210 ${done}/${total}`,
     subagentTools: (n) => `${n} \u6B21\u5DE5\u5177`,
     subagentStatus: (status) => ({
@@ -1884,6 +1896,91 @@ ${body}`;
   }
   function retitleStoredSession(tabs, storedId, title) {
     return tabs.map((tab) => tab.storedId === storedId ? { ...tab, title } : tab);
+  }
+
+  // src/core/run.ts
+  var RUN_MIN_ITEMS = 2;
+  function isFurniture(item) {
+    switch (item.kind) {
+      case "reasoning":
+      case "tool":
+      case "subagents":
+        return true;
+      case "notice":
+        return Boolean(item.noticeKind) && item.tone !== "error";
+      default:
+        return false;
+    }
+  }
+  function groupTranscript(items, minItems = RUN_MIN_ITEMS) {
+    const segments = [];
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      if (run.length >= minItems) {
+        segments.push({ type: "run", key: `run:${run[0].id}`, items: run });
+      } else {
+        for (const item of run) segments.push({ type: "item", key: item.id, item });
+      }
+      run = [];
+    };
+    for (const item of items) {
+      if (isFurniture(item)) {
+        run.push(item);
+        continue;
+      }
+      flush();
+      segments.push({ type: "item", key: item.id, item });
+    }
+    flush();
+    return segments;
+  }
+  function runCounts(items) {
+    const counts = { thoughts: 0, tools: 0, subagents: 0, notices: 0 };
+    for (const item of items) {
+      switch (item.kind) {
+        case "reasoning":
+          counts.thoughts += 1;
+          break;
+        case "tool":
+          counts.tools += 1;
+          break;
+        case "subagents":
+          counts.subagents += 1;
+          break;
+        case "notice":
+          counts.notices += 1;
+          break;
+        default:
+          break;
+      }
+    }
+    return counts;
+  }
+  function endOf(item, now) {
+    if (item.kind === "assistant" && item.completedAt) return item.completedAt;
+    if (item.kind === "reasoning" && item.streaming) return now;
+    if (item.kind === "tool") {
+      if (item.status === "running") return now;
+      if (typeof item.durationS === "number") return item.at + item.durationS * 1e3;
+    }
+    if (item.kind === "subagents" && item.finishedAt) return item.finishedAt;
+    return item.at;
+  }
+  function runIsLive(items) {
+    const last = items.at(-1);
+    if (!last) return false;
+    if (last.kind === "tool") return last.status === "running";
+    if (last.kind === "reasoning") return last.streaming;
+    if (last.kind === "subagents") return last.finishedAt === void 0;
+    return false;
+  }
+  function runElapsedMs(items, now) {
+    const first = items[0];
+    const last = items.at(-1);
+    if (!first || !last) return null;
+    const span = endOf(last, now) - first.at;
+    return Number.isFinite(span) && span > 0 ? span : null;
   }
 
   // src/core/workspaces.ts
@@ -4517,6 +4614,14 @@ ${refs.join("\n")}`.trim() : trimmed;
     if (meta.status) return meta.status;
     return meta.running ? t.working : "";
   }
+  function activitySummary(counts, t) {
+    const parts = [];
+    if (counts.thoughts) parts.push(t.activityThoughts(counts.thoughts));
+    if (counts.tools) parts.push(t.activityTools(counts.tools));
+    if (counts.subagents) parts.push(t.activitySubagents(counts.subagents));
+    if (counts.notices && !parts.length) parts.push(t.activityNotices(counts.notices));
+    return parts.join(" \xB7 ");
+  }
 
   // src/ui/Bubble.ts
   var USER_RADIUS = "calc(var(--radius) * 1.6) calc(var(--radius) * 1.6) calc(var(--radius) * 0.5) calc(var(--radius) * 1.6)";
@@ -4981,6 +5086,83 @@ ${refs.join("\n")}`.trim() : trimmed;
       case "notice":
         return NoticeRow({ sdk, item, locale });
     }
+  }
+
+  // src/ui/Activity.ts
+  var ACTIVITY_MAX_PX = 190;
+  function ActivityBlock({ sdk, items, locale }) {
+    const { React } = sdk;
+    const { useState, useMemo, useEffect, useRef } = sdk.hooks;
+    const t = messagesFor(locale);
+    const [open, setOpen] = useState(false);
+    const bodyRef = useRef(null);
+    const [now, setNow] = useState(() => Date.now());
+    const live = runIsLive(items);
+    const counts = useMemo(() => runCounts(items), [items]);
+    const summary = activitySummary(counts, t);
+    const elapsed = formatElapsed((runElapsedMs(items, now) ?? 0) / 1e3);
+    useEffect(() => {
+      if (!live) return void 0;
+      setNow(Date.now());
+      const handle = window.setInterval(() => setNow(Date.now()), 1e3);
+      return () => window.clearInterval(handle);
+    }, [live]);
+    useEffect(() => {
+      const el = bodyRef.current;
+      if (!el || !open) return;
+      el.scrollTop = 0;
+    }, [open]);
+    return React.createElement(
+      "div",
+      {
+        className: "hb-act",
+        "data-hb": "activity-block",
+        "data-open": open ? "true" : "false",
+        "data-live": live ? "true" : "false",
+        // The ceiling is on the BLOCK, not on the body: a header line plus a
+        // 190px body would measure 205 and quietly break the promise. One number,
+        // and it is the height the reader actually sees.
+        style: open ? void 0 : { maxHeight: `${ACTIVITY_MAX_PX}px` }
+      },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "hb-act-head",
+          "data-hb": "activity-toggle",
+          "data-open": open ? "true" : "false",
+          "aria-expanded": open ? "true" : "false",
+          title: open ? t.activityCollapse : t.activityExpand,
+          onClick: () => setOpen((value) => !value)
+        },
+        React.createElement("span", { className: "hb-act-caret" }, open ? "\u25BE" : "\u25B8"),
+        live ? React.createElement(
+          "span",
+          { className: "hb-act-live" },
+          React.createElement("span", { className: "hb-act-dot" })
+        ) : null,
+        React.createElement("span", { className: "hb-act-summary" }, summary),
+        elapsed ? React.createElement("span", { className: "hb-act-elapsed tabular-nums" }, elapsed) : null
+      ),
+      React.createElement(
+        "div",
+        {
+          className: "hb-act-body",
+          ref: bodyRef,
+          // Collapsed, the rows are decoration: visible, unable to take focus and
+          // unable to be clicked. `inert` is the only attribute that does all
+          // three, and it is what keeps a call's controls from being tabbed to
+          // under a clip the user cannot see the whole of.
+          inert: open ? void 0 : true,
+          "aria-hidden": open ? void 0 : "true",
+          "data-hb-locked": open ? void 0 : "true"
+        },
+        // No `data-hb-kind` on these wrappers: the block IS the transcript row
+        // here, and a child claiming a kind would make `querySelectorAll(
+        // '[data-hb-kind]')` report the run's insides as top-level items.
+        items.map((item) => React.createElement(Bubble, { key: item.id, sdk, item, locale }))
+      )
+    );
   }
 
   // src/core/autosize.ts
@@ -7700,6 +7882,7 @@ ${refs.join("\n")}`.trim() : trimmed;
     const timeline = activeTimeline(state);
     const running = runningKeys(state);
     const visibleCards = cardsForTab(state, cards, state.activeKey);
+    const segments = useMemo(() => groupTranscript(timeline.items), [timeline.items]);
     const waiting = waitingKeys(state, cards);
     useEffect(() => {
       controller.setLocale(locale);
@@ -8220,21 +8403,32 @@ ${refs.join("\n")}`.trim() : trimmed;
                   "div",
                   { className: "py-16 text-center text-sm", style: { color: "var(--color-muted-foreground)" } },
                   t.empty
-                ) : timeline.items.map(
-                  (item) => React.createElement(
+                ) : segments.map(
+                  (segment) => segment.type === "run" ? React.createElement(
                     "div",
                     {
-                      key: item.id,
+                      key: segment.key,
+                      className: "hb-bubble-gap",
+                      // Machinery between two messages, capped (see
+                      // `ui/Activity.ts`). This is the wrapper the block owns,
+                      // so its own rhythm class differs from a single row.
+                      "data-hb-kind": "run"
+                    },
+                    React.createElement(ActivityBlock, { sdk, items: segment.items, locale })
+                  ) : React.createElement(
+                    "div",
+                    {
+                      key: segment.key,
                       className: "hb-bubble-gap",
                       // Per-kind vertical rhythm: messages breathe, tool rows and
                       // thinking blocks pack (see style.css).
-                      "data-hb-kind": item.kind,
+                      "data-hb-kind": segment.item.kind,
                       // Anchor for the locator rail's scroll-to.
-                      "data-hb-item": item.id
+                      "data-hb-item": segment.item.id
                     },
                     React.createElement(Bubble, {
                       sdk,
-                      item,
+                      item: segment.item,
                       locale,
                       onEdit,
                       onBranch,

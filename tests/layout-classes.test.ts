@@ -191,6 +191,25 @@ describe("layout classes", () => {
     expect(ownCss).toMatch(/\[data-layout="mobile"\]\s*\{[^}]*position:\s*relative/);
   });
 
+  it("caps the run of machinery between two messages, not just each row", () => {
+    // The user's actual complaint, twice: thinking and tool calls fill the chat
+    // area. Capping a single reasoning block did not fix it — fifteen capped
+    // rows are still fifteen rows tall. The block has to own a ceiling, and the
+    // collapsed state must be text-only so nothing inside stays focusable while
+    // it is clipped.
+    const activity = readFileSync(join(UI_DIR, "Activity.ts"), "utf8");
+    expect(activity).toMatch(/export const ACTIVITY_MAX_PX = \d+/);
+    expect(activity).toMatch(/maxHeight: `\$\{ACTIVITY_MAX_PX\}px`/);
+    // Collapsed: clipped, not scrollable, and locked against focus/click.
+    expect(ownCss).toMatch(/\.hb-act-body\[data-hb-locked\]\s*\{[^}]*overflow-y:\s*hidden/);
+    // Expanded is bounded too, and scrolls inside itself.
+    expect(ownCss).toMatch(/\.hb-act-body\s*\{[^}]*max-height:\s*\d+vh[^}]*overflow-y:\s*auto/);
+    // `inert` is what makes the clip honest: the rows stay visible but cannot be
+    // focused or pressed while the block is closed.
+    expect(activity).toMatch(/inert:/);
+    expect(activity).toMatch(/"aria-hidden":\s*open \? undefined : "true"/);
+  });
+
   it("caps the reasoning block so it cannot own the transcript", () => {
     // A chain of thought is furniture; unbounded (22rem) it pushed the answer
     // off screen. 7.5rem ≈ 7 lines, and the block scrolls inside itself.

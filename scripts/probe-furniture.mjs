@@ -237,15 +237,29 @@ async function main() {
       shape.collapsed === shape.rows && shape.ariaMatches === true,
       JSON.stringify({ collapsed: shape.collapsed, rows: shape.rows, aria: shape.ariaMatches }),
     );
+    // Inside a collapsed activity block the nearest `[data-hb-kind]` is the
+    // block itself (`run`), not an individual row — the block is what occupies
+    // the transcript's rhythm now.
     check(
       "tool rows sit on the packed rhythm",
-      shape.kind === "tool" && typeof shape.wrapMarginTop === "number" && shape.wrapMarginTop <= 6,
+      (shape.kind === "tool" || shape.kind === "run") &&
+        typeof shape.wrapMarginTop === "number" &&
+        shape.wrapMarginTop <= 8,
       `kind=${shape.kind} margin-top=${shape.wrapMarginTop}px`,
     );
 
     // Expanding is the only thing that may grow the row. React commits the
     // attribute on the next tick, so the read happens in a separate evaluate
     // after a short wait — reading it in the same expression reads the old DOM.
+    // The rows may be inside a collapsed activity block, where they are `inert`
+    // on purpose (visible, not clickable). Open the block first — that is how a
+    // real user reaches a single call now.
+    await s.evaluate(`(() => {
+      const block = ${SCROLLER}.querySelector('[data-hb="activity-toggle"]');
+      if (block && block.getAttribute('data-open') === 'false') block.click();
+      return true;
+    })()`);
+    await sleep(300);
     await s.evaluate(`(() => {
       const head = ${SCROLLER}.querySelector('[data-hb="tool-toggle"]');
       head.click();

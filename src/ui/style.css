@@ -549,6 +549,144 @@
   margin-top: 0.2rem;
 }
 
+.hb-bubble-gap[data-hb-kind="run"] {
+  margin-top: 0.5rem;
+}
+
+/*
+ * The activity block: everything between two messages, capped.
+ *
+ * Thinking segments, tool calls and delegation batches are machinery, and their
+ * count per turn is unbounded. Twenty independent rows (even compact ones) own
+ * most of the column, so messages stop reading as a conversation. The block
+ * holds them at a fixed ceiling until the reader opens it.
+ *
+ * The cap lives here, in CSS, and also in `ACTIVITY_MAX_PX` in `Activity.ts`
+ * (the inline `max-height`). Both are the same number on purpose: the inline one
+ * is what actually clips the peek once React has measured nothing (a static
+ * ceiling needs no measurement), and this rule is what applies before the first
+ * paint and in the collapsed state after a re-render.
+ */
+.hb-act {
+  /* Flex column so the body can be the part that shrinks when the block is
+   * capped (a plain block child would refuse to go below its content). */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: fit-content;
+  /* Same column as a bubble, so the block does not read as a different page. */
+  max-width: min(72ch, 82%);
+  border-left: 1px solid var(--color-border);
+  padding-left: 0.45rem;
+}
+
+.hb-act-head {
+  display: flex;
+  /* Hugs its own text. `width: 100%` put the elapsed stamp at the far right of
+   * the widest row below (82% of the column), so a three-word header read as two
+   * disconnected pieces — the same failure `width: fit-content` on `.hb-tool`
+   * exists to prevent. */
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--hb-move) var(--hb-ease);
+}
+
+.hb-act-head:hover {
+  color: var(--color-card-foreground);
+}
+
+.hb-act-caret {
+  flex: 0 0 auto;
+  opacity: 0.65;
+}
+
+/* The live dot: the whale tail is reserved for a running ROW, and a block can
+ * be live while its newest row is a finished call (a delta is on the way). */
+.hb-act-live {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.hb-act-dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: hb-act-pulse 1.4s ease-in-out infinite;
+}
+
+.hb-act-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-act-elapsed {
+  flex: 0 0 auto;
+  margin-left: 0.15rem;
+  opacity: 0.6;
+}
+
+/* Expanded: the real rows, each keeping its own compact look. Bounded too, so
+ * expanding a thirty-call run does not hand the column back to it — the block
+ * scrolls instead. */
+.hb-act-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-top: 0.2rem;
+}
+
+/* Collapsed, the body is a clipped strip of the run's own rows, read from its
+ * bottom edge: what a turn did LAST is what says what it is doing now, and the
+ * cut then lands at the top, where the fade explains it. Not scrollable while
+ * clipped — a scrollbar on a 190px strip invites dragging through content that
+ * was clipped on purpose — and `inert` (see `Activity.ts`), so nothing inside
+ * can be focused or clicked through the clip.
+ *
+ * The max-height itself is inline (`ACTIVITY_MAX_PX` in `Activity.ts`): one
+ * number in one place beats a CSS constant that has to be kept in step with it. */
+.hb-act-body[data-hb-locked] {
+  overflow-y: hidden;
+  /* Anchored to the bottom edge: when the run is taller than the ceiling, the
+   * overflow goes off the TOP and the newest rows stay visible — with no script
+   * measuring anything and no jump on the first paint. */
+  justify-content: flex-end;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.4rem);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.4rem);
+}
+
+/* A row never shrinks to fit: capping the block must CUT the run at the ceiling,
+ * not squash eleven rows into one another. Flex children default to
+ * `flex-shrink: 1`, so without this a capped block squeezes every row. */
+.hb-act-body > * {
+  flex: 0 0 auto;
+}
+
+/* Inside the block the rows share its rail, so they drop theirs. */
+.hb-act-body .hb-think,
+.hb-act-body .hb-tool {
+  border-left: 0;
+  padding-left: 0;
+}
+
+
 /*
  * A new row eases in once, 180ms.
  *
@@ -2513,6 +2651,14 @@ div:hover > .hb-row-tools,
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* The activity block's live dot. A block is live while a delta is still on the
+ * way, which is not always the same thing as "a row is running" — hence its own
+ * marker rather than the whale tail. */
+@keyframes hb-act-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 /* ── responsive: phone / narrow viewports ─────────────────────────────────── */
 
 /* The history sheet's dimming layer. Invisible on desktop (the panel is an
@@ -2584,6 +2730,7 @@ div:hover > .hb-row-tools,
   .hb-bubble-text,
   .hb-think,
   .hb-tool,
+  .hb-act,
   .hb-sub-card,
   .hb-msg-atts,
   [data-hb="message-actions"],
@@ -2748,6 +2895,7 @@ div:hover > .hb-row-tools,
   .hb-caret,
   .hb-todo-active,
   .hb-fab-dot,
+  .hb-act-dot,
   .hb-att-phase::after,
   .hb-att-bar-indeterminate::after {
     animation: none;

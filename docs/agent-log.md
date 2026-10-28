@@ -8,6 +8,21 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-28 23:05 · hermes · 消息之间的思考/工具/子代理合并成限高区块
+
+- 需求（用户澄清上一轮的偏差）：**「两条文本消息之间思考、工具调用、代码执行等等不属于文本消息的内容，在没有点击展开前都限制在一定高度的区块内」**。上一轮做的是「思考块限高 7.5rem」——那是**逐行**限高，而一回合能产生二十行，二十个被压扁的行仍然占满一屏。这轮限的是**整段**。
+- 新增 `core/run.ts`（纯逻辑）：`isFurniture`（reasoning / tool / subagents / 非 error 的 machinery notice 算家具；error notice 与消息不算）、`groupTranscript`（连续家具 ≥2 合成一段，run key 取**首行 id** 所以流式 delta 不会重挂）、`runCounts` / `runIsLive` / `runElapsedMs`（按墙钟，不是工具耗时之和）。
+- 新增 `ui/Activity.ts`：折叠态 = 一行表头（`▸ 3 段思考 · 8 次调用 42s` + 运行中的脉冲点）+ 该段**真实行**裁到 `ACTIVITY_MAX_PX = 190`（内联 max-height 挂在外层 `.hb-act`，不是 body——表头 15px + body 190px 会变成 205，用户量到的就是 205）。裁剪区 `justify-content: flex-end` 让溢出走**上方**，最新一步留在视野里，fade 也放上边缘。折叠时 body 带 `inert` + `aria-hidden`：行还在 DOM 里（所以工具输出仍是一次点击之遥），但 clip 下的 17 个按钮 `tabIndex` 全不可达（实测 `tabbable=0`）。展开则 `max-height: 60vh` 内滚，回到 `tabbable=17`。
+- `ui/ChatPage.ts`：渲染改为 `segments`（`useMemo` 依赖 `timeline.items`），run 段包 `data-hb-kind="run"`；单行家具仍是普通行，`data-hb-kind` / `data-hb-item` 不变。
+- `ui/format.ts`：`activitySummary`（按实际存在的种类拼短语）。文案进 `core/i18n.ts`（en/zh 各 6 条）。
+- **行内不再嵌套 `data-hb-kind`**：一开始给 body 里每一行加了 `data-hb-kind`，结果 `querySelectorAll('[data-hb-kind]')` 把 17 个内部行都报成了顶层条目（验收的 `order` 变成 21 项）。块的内部行不是 transcript 行。
+- `style.css`：`.hb-act` 用 flex column + `min-height: 0`，body `flex: 1 1 auto`（否则块级子元素拒绝收缩，190 的封顶变成 205）；`.hb-act-body > * { flex: 0 0 auto }`（否则 15 行被压成互相挤压的一坨——这是第二轮才发现的，第一轮 190px 里塞了 15 行）；表头 `width: fit-content`（`100%` 会把耗时甩到 82% 列宽之外，截图里是断线的两个元素）。
+- 验证：`tsc` 干净；`vitest` **667 passed / 31 文件**（新增 `tests/run.test.ts` 14 条 + `layout-classes` 1 条守卫限高/inert）；`audit-classes` 272/272；`build` + `install-plugin` 已装。
+- 真页面（**临时 HERMES_HOME + 回环 9123，用户的 9119 未启未停未改**；`HERMES_DASHBOARD_PUBLIC_URL` 必须 `unset` 才能起）：新写 `scripts/verify-activity.mjs`，真模型跑 14 条 terminal 调用，**16/16** —— 一个块、折叠 190px、17 行全在 DOM、`clipped=6`、`tabbable=0`、展开 272px 且 `tabbable=17`、再折叠回 190px、桌面与 390px 手机各一遍（手机上块占转写区 30%，无横向溢出）。`probe-furniture` **10/10**（顺带改成先展开区块再点行）；`verify-mobile` **25/25**；`verify-attachments` **15/15**；`verify.mjs` **92/95**（三条失败仍是临时实例只有「未归类」桶）。
+- 遗留：`AGENTS.md` 的钩子清单仍缺 `activity-block` / `activity-toggle`（保护文件，需用户批准）。README / DESIGN 已补 activity-block 段落。
+
+---
+
 ## 2026-10-28 19:35 · hermes · 抽屉改右侧、加关闭动效、文字居中、桌面统一控件与动效
 
 - 需求（用户第二轮反馈）：**移动端**① 抽屉弹出方向反了，应从右往左，弹出后不要背后阴影；② 抽屉收起没有动效，加上；③ 文本（输入框内、历史会话里）相对框体偏下，改居中。**桌面端**④ 把手机版那套按钮改动搬过来，但保留页签，刷新与更多按钮放在页签栏；⑤ 强化 hover / 点击的缓动，与移动端一致。

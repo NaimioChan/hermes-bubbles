@@ -124,6 +124,8 @@ There are no shadows and no elevation steps. Depth is carried by the two-tone su
 
 **tool-card** — collapsible. Expanded while running, collapsed once complete so a long chain stays scannable. Left status stripe; header shows the tool name plus a one-line summary and duration; body shows arguments and result in monospace.
 
+**activity-block** — everything between two messages that is not a message: thinking, tool calls, delegation batches, machinery notices. Consecutive such rows fold into ONE block; a lone row stays a plain row. Collapsed it is a header line (`▸ 3 thoughts · 8 calls 42s`, plus a live dot and elapsed time) over the run's own rows, capped at 190px and clipped at the bottom edge so the newest step is what stays visible. The clipped rows are `inert`: visible, not focusable, not clickable — the header is the only control. Expanded, the block lifts the cap, becomes scrollable (60vh ceiling), and puts every row back in reach. The cap is the point: capping individual rows does not bound the total, and a turn can produce twenty of them.
+
 **composer** — pinned to the bottom, no visible border until focused. Enter sends, Shift+Enter newlines. A stop button replaces send while a turn is live.
 
 ## Do's and Don'ts

@@ -7,7 +7,10 @@
  */
 
 import type { SessionMeta, TimelineItem, ToolItem } from "../core/types";
-import type { Messages } from "../core/i18n";
+import { isSubagentTerminal } from "../core/types";
+import type { Locale, Messages } from "../core/i18n";
+import type { RunCounts } from "../core/run";
+import { noticeText } from "../core/notice";
 import { MAX_ATTACHMENT_MIB, type Rejection } from "../core/attachments";
 
 /**
@@ -95,10 +98,71 @@ export function isToolItem(item: TimelineItem): item is ToolItem {
   return item.kind === "tool";
 }
 
-/**
- * A stable key for React. The id is generated once per item and never changes,
+/** A stable key for React. The id is generated once per item and never changes,
  * so it survives the item being patched in place.
  */
 export function itemKey(item: TimelineItem): string {
   return item.id;
 }
+
+/**
+ * The collapsed activity block's header text: one phrase per kind present, in
+ * the order a turn produces them (`2 thoughts · 3 calls`).
+ *
+ * Only kinds that are actually there get a phrase — an "0 delegations" column
+ * would be noise — and a block with nothing countable (two notices, say) falls
+ * back to the notice count so the header is never empty.
+ */
+export function activitySummary(counts: RunCounts, t: Messages): string {
+  const parts: string[] = [];
+  if (counts.thoughts) parts.push(t.activityThoughts(counts.thoughts));
+  if (counts.tools) parts.push(t.activityTools(counts.tools));
+  if (counts.subagents) parts.push(t.activitySubagents(counts.subagents));
+  if (counts.notices && !parts.length) parts.push(t.activityNotices(counts.notices));
+  return parts.join(" · ");
+}
+
+/**
+ * One plain-text line per row, for the collapsed block's peek.
+ *
+ * The newest `limit` rows are the ones shown: in a long run the early calls are
+ * history and the last few say what the turn is doing now. Each line is what the
+ * row's own collapsed header would say — the thinking tail, the tool verb and
+ * its one-line summary — so the peek and the expanded row never describe the
+ * same call two different ways.
+ */
+export function activityPeek(
+  items: readonly TimelineItem[],
+  t: Messages,
+  locale: Locale,
+  limit: number,
+): string[] {
+  const lines: string[] = [];
+  for (const item of items.slice(-limit)) {
+    const line = peekLine(item, t, locale);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+function peekLine(item: TimelineItem, t: Messages, locale: Locale): string {
+  switch (item.kind) {
+    case "reasoning": {
+      const text = item.text.trim();
+      if (!text) return "";
+      const last = text.split("\n").filter((line) => line.trim()).at(-1) ?? text;
+      return last.trim();
+    }
+    case "tool":
+      return [toolLabel(item.name, t), item.summary].filter(Boolean).join(" · ");
+    case "subagents": {
+      const done = item.children.filter((child) => isSubagentTerminal(child.status)).length;
+      return `${t.subagents} · ${t.subagentProgress(done, item.children.length)}`;
+    }
+    case "notice":
+      return noticeText(item, locale);
+    default:
+      return "";
+  }
+}
+

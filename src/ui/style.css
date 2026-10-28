@@ -547,6 +547,20 @@
   margin-top: 0.2rem;
 }
 
+/*
+ * A new row eases in once, 180ms.
+ *
+ * Only the arrival: a streaming reply replaces its own text many times a second
+ * and must NOT re-animate, which is why this sits on the row the transcript keys
+ * (`data-hb-item`) — a key is stable across a delta, so React repaints the text
+ * without remounting the element. Tool rows, notices and reasoning blocks arrive
+ * the same way, one animation each, so the transcript reads as things landing
+ * rather than as a repaint.
+ */
+.hb-bubble-gap {
+  animation: hb-bubble-in 0.18s ease-out;
+}
+
 .hb-think,
 .hb-tool {
   /* Hug the content: a block that fills the column leaves the duration stranded
@@ -622,12 +636,20 @@
 .hb-think-body {
   margin-top: 0.2rem;
   padding-left: 0.45rem;
-  max-height: 22rem;
+  /* Bounded on purpose. A long chain of thought used to be able to own most of
+   * the column — the reasoning block is transcript furniture, not the answer,
+   * and it should never push the reply out of view. ~7 lines is enough to skim
+   * while it streams; the rest scrolls inside the block, and the block scrolls
+   * with the transcript. */
+  max-height: 7.5rem;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 0.75rem;
   opacity: 0.9;
+  /* A soft bottom edge says "there is more inside" without a scrollbar shout. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2rem), transparent);
 }
 
 .hb-tool[data-status="running"] {
@@ -1672,6 +1694,654 @@ div:hover > .hb-row-tools,
   background: var(--color-muted);
 }
 
+/* ── icons, round buttons, floating chrome ────────────────────────────────── */
+
+/*
+ * Any button that renders an SVG glyph instead of a word.
+ *
+ * Sized in px and square, because these sit in a row of controls whose height is
+ * fixed by the 32px composer box: a rem-sized icon button would drift out of
+ * line the moment a theme changes the root font size.
+ */
+.hb-icon-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.5);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.hb-icon-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+.hb-icon-btn:active {
+  transform: scale(0.94);
+}
+
+/*
+ * Round action buttons in the composer (phone): stop, upload, send.
+ *
+ * The send button is the one accent-filled control on the page, so it carries
+ * the primary colour; the other two are ghosts on the composer's own surface.
+ * 38px is the compromise between the 44px touch minimum and the 36px row the
+ * desktop composer already uses — the visual box stays quiet while a ::after
+ * overlay widens the hit area to 44px (see the media block).
+ */
+.hb-round-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.1s ease;
+}
+
+.hb-round-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+.hb-round-btn:active {
+  transform: scale(0.92);
+}
+
+.hb-round-stop {
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+.hb-round-send {
+  /* The fill and the glyph colour are set inline (they depend on `running`);
+   * this only owns the motion, which the inline style must not reset. */
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-primary) 40%, transparent);
+}
+
+.hb-round-send:not(:disabled):hover {
+  transform: scale(1.05);
+}
+
+.hb-round-send:not(:disabled):active {
+  transform: scale(0.93);
+}
+
+/* ── floating chrome (phone) ──────────────────────────────────────────────── */
+
+/* The row the two floating buttons live in. Absolute over the transcript, so it
+ * costs no vertical space; `pointer-events` is off so taps pass through the gap
+ * between them to the scroll area underneath. */
+[data-layout="mobile"] {
+  position: relative;
+}
+
+.hb-fab-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.5rem 0.6rem;
+  pointer-events: none;
+}
+
+.hb-fab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-card) 88%, transparent);
+  color: var(--color-muted-foreground);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22), inset 0 0 0 1px var(--color-border);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.hb-fab:active {
+  transform: scale(0.9);
+}
+
+.hb-fab[data-open="true"] {
+  color: var(--color-card-foreground);
+  background: var(--color-muted);
+}
+
+/* A request is waiting on some session. With no tab strip there is nowhere else
+ * to say so, and a waiting clarify blocks that session for an hour. */
+.hb-fab-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-card);
+}
+
+/* Something is running: a quiet pulse, not a second badge. */
+.hb-fab-dot {
+  position: absolute;
+  bottom: 3px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  opacity: 0.9;
+  animation: hb-caret 1.1s steps(1, end) infinite;
+}
+
+/* ── drawer (phone history) ───────────────────────────────────────────────── */
+
+/*
+ * The backdrop and the sheet are ABSOLUTE, not fixed.
+ *
+ * `position: fixed` anchors to the VIEWPORT, and the dashboard's own top bar
+ * paints above it — so a fixed sheet's header (title, refresh, close) lands
+ * behind that navigation, above the visible screen. Both elements live inside
+ * `[data-layout]`, which is `position: relative`, so absolute anchoring covers
+ * exactly the chat area and starts under the host's bar.
+ */
+.hb-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.5);
+  animation: hb-fade-in 0.16s ease-out;
+}
+
+/*
+ * Slides in from the LEFT edge, 84% of the chat area's width.
+ *
+ * `transform` rather than `left` for the entrance: the panel is painted once and
+ * moved on the compositor, so it does not re-layout the transcript behind it on
+ * every frame of a 200ms slide.
+ */
+.hb-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  width: 84vw;
+  max-width: 22rem;
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  animation: hb-slide-in 0.2s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.hb-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.7rem 0.75rem 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.hb-drawer-new {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.5rem 0.6rem 0.25rem;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.7);
+  background: color-mix(in oklab, var(--color-primary) 16%, var(--color-card));
+  color: var(--color-card-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
+
+.hb-drawer-new:active {
+  transform: scale(0.98);
+  filter: brightness(1.1);
+}
+
+/* The scrolling list. `min-height:0` is what makes a flex child actually
+ * scroll instead of growing its parent past the viewport. */
+.hb-hist-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.4rem 0.75rem;
+}
+
+.hb-hist-row {
+  padding: 0.4rem 0.45rem;
+  border-radius: calc(var(--radius) * 0.6);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.hb-hist-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.hb-row-more {
+  opacity: 0.55;
+}
+
+.hb-hist-row[data-menu-open="true"] .hb-row-more {
+  opacity: 1;
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+}
+
+/* The per-row menu, in flow under its row (an absolute popover would be clipped
+ * by the scrolling list). */
+.hb-row-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 0.3rem 0 0.1rem 0.6rem;
+  padding: 0.2rem;
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) * 0.6);
+  background: color-mix(in oklab, var(--color-muted) 40%, var(--color-card));
+  animation: hb-rise 0.14s ease-out;
+}
+
+.hb-menu-item {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.45);
+  background: transparent;
+  color: var(--color-card-foreground);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hb-menu-item:hover {
+  background: var(--color-muted);
+}
+
+.hb-menu-item-danger {
+  color: var(--color-destructive);
+}
+
+/* ── composer tool menu (phone) ───────────────────────────────────────────── */
+
+.hb-composer-more {
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  padding: 0;
+  transition: background 0.14s ease, transform 0.1s ease;
+}
+
+.hb-composer-more:active {
+  transform: scale(0.92);
+}
+
+.hb-tools-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 0.4rem;
+  padding: 0.25rem;
+  background: var(--color-card);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 0 0 1px var(--color-border);
+  animation: hb-rise 0.16s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.hb-tools-head {
+  display: flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem 0.3rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+}
+
+.hb-tools-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+
+/* One option per line, full width (铁律 20): these are sentences, not pills. */
+.hb-tools-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.5rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.55);
+  background: transparent;
+  color: var(--color-card-foreground);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.hb-tools-row:hover,
+.hb-tools-row:active {
+  background: var(--color-muted);
+}
+
+.hb-tools-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--color-muted-foreground);
+}
+
+.hb-tools-label {
+  flex: 0 0 auto;
+}
+
+.hb-tools-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.hb-tools-chevron {
+  flex: 0 0 auto;
+  color: var(--color-muted-foreground);
+  opacity: 0.6;
+}
+
+/* ── attachments: staging tray and sent row ──────────────────────────────── */
+
+.hb-att-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+
+/*
+ * One staged file. The progress bar is a child rather than a pseudo-element
+ * because its `width` is driven by a real number (the read fraction), and a
+ * pseudo-element cannot carry that without a CSS variable per item.
+ */
+.hb-att-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: calc(var(--radius) * 0.6);
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+  font-size: 0.6875rem;
+  overflow: hidden;
+  animation: hb-rise 0.16s ease-out;
+}
+
+.hb-att-chip[data-status="error"] {
+  background: color-mix(in oklab, var(--color-destructive) 14%, var(--color-muted));
+}
+
+.hb-att-thumb {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: calc(var(--radius) * 0.4);
+  object-fit: cover;
+  background: var(--color-card);
+}
+
+.hb-att-glyph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: calc(var(--radius) * 0.4);
+  background: color-mix(in oklab, var(--color-card) 70%, transparent);
+  color: var(--color-muted-foreground);
+}
+
+.hb-att-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.hb-att-name {
+  font-size: 0.75rem;
+}
+
+.hb-att-sub {
+  font-size: 0.625rem;
+  color: var(--color-muted-foreground);
+}
+
+.hb-att-error {
+  color: var(--color-destructive);
+}
+
+/* A blinking dot after the phase word: the read fraction is real, the upload
+ * phase has no number to show. */
+.hb-att-phase::after {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-left: 3px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: hb-caret 1.1s steps(1, end) infinite;
+}
+
+.hb-att-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+
+.hb-att-remove:hover {
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+}
+
+/* The progress rail along the chip's bottom edge. */
+.hb-att-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in oklab, var(--color-primary) 22%, transparent);
+  overflow: hidden;
+}
+
+.hb-att-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.12s linear;
+}
+
+/* The upload phase: one frame on the wire, no fraction to draw. A travelling
+ * sweep says "moving" without claiming a number it does not have. */
+.hb-att-bar-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: hb-sweep 1.15s ease-in-out infinite;
+}
+
+/* ── attachments inside a sent message ───────────────────────────────────── */
+
+.hb-msg-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.3rem;
+  max-width: min(72ch, 82%);
+}
+
+.hb-msg-atts-end {
+  justify-content: flex-end;
+}
+
+/* A square thumbnail: the brief's "small square preview". 64px reads as a photo
+ * without taking the bubble over; `cover` keeps a panorama from squashing. */
+.hb-msg-att-tile {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: calc(var(--radius) * 0.6);
+  overflow: hidden;
+  background: var(--color-muted);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.hb-msg-att-image,
+.hb-msg-att-video video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hb-msg-att-video {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The play mark: `preload="metadata"` paints a frame but nothing says it moves;
+ * a video without a badge reads as a still photo. */
+.hb-msg-att-play {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
+/* Any other file: glyph plus name, one line. */
+.hb-msg-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 15rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.35rem;
+  border-radius: calc(var(--radius) * 0.6);
+  background: var(--color-muted);
+  color: var(--color-card-foreground);
+  font-size: 0.6875rem;
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.hb-msg-att-glyph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--color-muted-foreground);
+}
+
+.hb-msg-att-name {
+  min-width: 0;
+}
+
+/* ── motion ───────────────────────────────────────────────────────────────── */
+
+@keyframes hb-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hb-slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* Menus and chips arrive from 4px below their resting place rather than scaling
+ * from nothing: a popover that pops at full size reads as a repaint, while a
+ * short rise reads as "this was just opened". */
+@keyframes hb-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hb-sweep {
+  from { transform: translateX(-40%); }
+  to { transform: translateX(250%); }
+}
+
+/* A bubble that just arrived (a new user turn, a new reply) eases in once. */
+@keyframes hb-bubble-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ── responsive: phone / narrow viewports ─────────────────────────────────── */
 
 /* The history sheet's dimming layer. Invisible on desktop (the panel is an
@@ -1703,9 +2373,17 @@ div:hover > .hb-row-tools,
  * phone. Breakpoint 768px = phones + small tablets; above it nothing changes.
  */
 @media (max-width: 768px) {
-  /* Backdrop for the history sheet. Rendered only while the panel is open (the
-     panel itself returns null when closed) and transparent on desktop, where
-     the panel is a normal in-flow column. */
+  /* The tab strip is not rendered at this width at all (see ChatPage): its two
+     actions moved into the drawer and its notify switch into the composer's
+     "···" menu. These rules catch a stale element if one ever renders. */
+  [data-hb="tab"],
+  [data-hb="tab-new"],
+  [data-hb="history-toggle"] {
+    display: none;
+  }
+
+  /* A dimming layer for the desktop-style panel, if it ever lands here. The
+     drawer has its own backdrop (`.hb-drawer-backdrop`). */
   .hb-hist-backdrop {
     display: block;
     position: fixed;
@@ -1714,28 +2392,18 @@ div:hover > .hb-row-tools,
     background: rgba(0, 0, 0, 0.45);
   }
 
-  /* History becomes a bottom sheet: fixed (out of the row's flow, so it does
-     not squeeze the transcript), full width, most of the screen. */
-  [data-hb="history-panel"] {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: auto !important;
-    height: 72vh;
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-    border-top-left-radius: var(--radius);
-    border-top-right-radius: var(--radius);
-    background: var(--color-card);
-    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
-    z-index: 41;
-  }
-
   /* Hover-driven and redundant with normal scrolling on a phone; it also steals
      width from the bubbles. */
   .hb-rail {
     display: none;
+  }
+
+  /* The two floating buttons sit OVER the transcript (that is what makes them
+   * cost no vertical space), so the first bubble needs to start below them. The
+   * selector carries two attributes on purpose: it has to beat the `py-4` class
+   * the transcript already has. */
+  [data-layout="mobile"] [data-hb="transcript"] {
+    padding-top: 3.4rem;
   }
 
   /* Bubbles nearly fill a phone. The components set `max-width: min(72ch, 82%)`
@@ -1746,9 +2414,19 @@ div:hover > .hb-row-tools,
   .hb-think,
   .hb-tool,
   .hb-sub-card,
+  .hb-msg-atts,
   [data-hb="message-actions"],
   [data-hb="request-card"] {
     max-width: 100% !important;
+  }
+
+  /* Workspace chip + approval chip: they share one line on a desktop because
+   * there is room; at 390px a long path pushes the approval chip off the edge.
+   * Wrapping here is the right call — these are two inline pills, not the
+   * column-of-rows list 铁律 20 is about. */
+  .hb-composer-chips {
+    flex-wrap: wrap;
+    row-gap: 0.15rem;
   }
 
   /* Touch targets.
@@ -1844,23 +2522,51 @@ div:hover > .hb-row-tools,
     opacity: 1;
   }
 
-  /* Composer: the textarea takes the first line (next to `+`), the model /
-     reasoning / send cluster wraps to a second line instead of crushing it.
-     `flex-wrap` is right HERE — these are inline pills, not the column-of-rows
-     list options 铁律 20 is about. */
+  /* Composer, phone shape: `···` · textarea · upload · send on ONE row.
+   *
+   * The old block wrapped the tools onto a second line because it carried the
+   * model chip and the reasoning chip plus two word buttons; those are gone from
+   * the row now (the chips live in the "···" menu, the actions are icons), so a
+   * single line fits and the textarea keeps the rest of the width. */
   .hb-composer-row {
-    flex-wrap: wrap;
-    row-gap: 0.25rem;
-    padding-top: 0.25rem;
-    padding-bottom: 0.25rem;
+    flex-wrap: nowrap;
+    row-gap: 0;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    gap: 0.25rem;
   }
   .hb-composer-row .hb-composer-input {
     flex: 1 1 auto;
     min-width: 0;
+    font-size: 1rem; /* 16px: anything smaller makes iOS zoom on focus. */
   }
   .hb-composer-tools {
-    flex: 1 1 100%;
+    flex: 0 0 auto;
     justify-content: flex-end;
+    gap: 0.2rem;
+  }
+
+  /* The round buttons' visual box is 38px; the tap target has to reach 44px.
+     A ::after overlay widens the hit area without making the row taller. */
+  .hb-round-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .hb-round-btn::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+  }
+  .hb-composer-more {
+    width: 38px;
+    height: 38px;
+  }
+  .hb-composer-more::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
   }
 
   /* Popovers and modals: keep them inside a narrow screen. */
@@ -1880,7 +2586,45 @@ div:hover > .hb-row-tools,
 
 @media (prefers-reduced-motion: reduce) {
   .hb-caret,
-  .hb-todo-active {
+  .hb-todo-active,
+  .hb-fab-dot,
+  .hb-att-phase::after,
+  .hb-att-bar-indeterminate::after {
     animation: none;
+  }
+
+  /* Everything that exists only as an entrance or a press effect goes still.
+   * The states still change — the drawer is simply there instead of sliding in,
+   * and a pressed button does not shrink. */
+  .hb-drawer,
+  .hb-drawer-backdrop,
+  .hb-tools-menu,
+  .hb-row-menu,
+  .hb-att-chip,
+  .hb-bubble-gap {
+    animation: none;
+  }
+
+  .hb-icon-btn,
+  .hb-round-btn,
+  .hb-fab,
+  .hb-composer-more,
+  .hb-drawer-new,
+  .hb-tool-head,
+  .hb-think-head,
+  .hb-hist-row,
+  .hb-action-btn {
+    transition: none;
+  }
+
+  .hb-icon-btn:active,
+  .hb-round-btn:active,
+  .hb-round-send:not(:disabled):hover,
+  .hb-round-send:not(:disabled):active,
+  .hb-fab:active,
+  .hb-composer-more:active,
+  .hb-drawer-new:active,
+  .hb-action-btn:active {
+    transform: none;
   }
 }

@@ -8,6 +8,7 @@
  * Field semantics are documented in `docs/01-protocol-contract.md` §5.
  */
 
+import type { MessageAttachment } from "./attachments";
 import {
   findTool,
   isSubagentTerminal,
@@ -701,11 +702,22 @@ export function reduceEvent(timeline: Timeline, event: GatewayEvent): Timeline {
 }
 
 /** The user's own message, appended optimistically at submit time. */
-export function appendUser(timeline: Timeline, text: string): Timeline {
+export function appendUser(
+  timeline: Timeline,
+  text: string,
+  attachments: MessageAttachment[] = [],
+): Timeline {
   return {
     items: [
       ...timeline.items,
-      { kind: "user", id: nextId("user"), at: Date.now(), text, pending: true },
+      {
+        kind: "user",
+        id: nextId("user"),
+        at: Date.now(),
+        text,
+        pending: true,
+        ...(attachments.length ? { attachments } : {}),
+      },
     ],
     meta: { ...timeline.meta, running: true, status: "", statusKind: "" },
   };

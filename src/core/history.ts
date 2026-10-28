@@ -8,6 +8,7 @@
  * Row semantics: `docs/01-protocol-contract.md` §7.
  */
 
+import { splitAttachmentRefs } from "./attachments";
 import type { AssistantItem, NoticeKind, Timeline, TimelineItem, ToolItem, Usage } from "./types";
 import { reduceTodos } from "./reduce";
 
@@ -160,8 +161,18 @@ export function projectHistory(messages: readonly TranscriptMessage[], now = Dat
       // A `steer` row is a real thing the user typed mid-turn, wrapped in the
       // envelope the model needs; show the sentence, not the envelope.
       const spoken = row.display_kind === "steer" ? steerText(text) : text;
-      if (!spoken.trim()) continue;
-      items.push({ kind: "user", id: historyId("user"), at, text: spoken, rowId });
+      // Attachments ride the row as trailing `@file:` / `@image:` lines. They
+      // belong in the bubble's attachment row, not in its prose.
+      const split = splitAttachmentRefs(spoken);
+      if (!split.text.trim() && !split.refs.length) continue;
+      items.push({
+        kind: "user",
+        id: historyId("user"),
+        at,
+        text: split.text,
+        rowId,
+        ...(split.refs.length ? { attachments: split.refs } : {}),
+      });
       continue;
     }
 

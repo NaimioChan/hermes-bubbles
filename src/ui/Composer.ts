@@ -14,12 +14,13 @@
  * through `file.attach`, the same path the desktop app uses.
  */
 
-import type { Attachment, Rejection } from "../core/attachments";
-import { formatBytes, screenFiles } from "../core/attachments";
+import type { Attachment, MessageAttachment, Rejection } from "../core/attachments";
+import { messageAttachments, screenFiles } from "../core/attachments";
 import { fitComposerHeight } from "../core/autosize";
 import { SESSION_CONTEXT_MIME, insertContext } from "../core/context";
 import { metricChips, pressureTone } from "../core/metrics";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
+import type { NotifySwitch } from "../core/notify";
 import type { GitInfo } from "../core/gitinfo";
 import type { WorkspaceOption } from "../core/workspaces";
 import {
@@ -33,6 +34,8 @@ import type { Usage } from "../core/types";
 import type { HermesPluginSdk } from "./sdk";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { ApprovalModeChip } from "./ApprovalModeChip";
+import { AttachmentTray } from "./Attachments";
+import { Icon } from "./icons";
 
 export interface ModelChoice {
   model: string;
@@ -42,6 +45,15 @@ export interface ModelChoice {
 export interface ComposerProps {
   sdk: HermesPluginSdk;
   locale: Locale;
+  /**
+   * Phone-shaped layout: the two model/reasoning chips and the text actions are
+   * replaced by one "···" menu and three round icon buttons.
+   *
+   * It is a layout switch rather than a style, because the controls are not the
+   * same elements (see `useMobile`). Every difference it makes lives here and in
+   * one `@media` block, so the desktop path is untouched.
+   */
+  mobile: boolean;
   running: boolean;
   status: string;
   connected: boolean;
@@ -51,13 +63,21 @@ export interface ComposerProps {
   reasoning: string;
   attachments: readonly Attachment[];
   catalog: readonly CommandEntry[];
-  onSend: (text: string) => void;
+  /**
+   * Send the draft. `attachments` is the snapshot the bubble will show (the
+   * composer clears its tray right after), so a message keeps its files even
+   * though the staging queue is gone.
+   */
+  onSend: (text: string, attachments: readonly MessageAttachment[]) => void;
   onStop: () => void;
   onPickFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
   onOpenModelPicker: () => void;
   onPickReasoning: (level: string) => void;
   onError: (message: string) => void;
+  /** Desktop notifications: the switch and the permission state behind it. */
+  notifyState: NotifySwitch;
+  onToggleNotify: () => void;
   /** Workspace the NEXT new chat starts in, plus the open session's own cwd. */
   workspace: string;
   workspaceCurrent: string;
@@ -119,6 +139,15 @@ export function Composer(props: ComposerProps) {
   const [caret, setCaret] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuDismissed, setMenuDismissed] = useState(false);
+  /**
+   * The phone's "···" menu above the box (model / reasoning / notifications).
+   *
+   * It replaces the two chips the desktop shows inline: on a 390px row there is
+   * no width for a model name, and the chips were what squeezed the textarea to
+   * four characters. The reasoning row is a CYCLE here rather than a list — one
+   * tap moves to the next tier, the same thing the desktop chip does.
+   */
+  const [toolsOpen, setToolsOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   /** Highest `props.insertion.seq` already written into the draft. */
@@ -229,11 +258,14 @@ export function Composer(props: ComposerProps) {
 
   const submit = useCallback(() => {
     const value = text.trim();
-    if (!value) return;
+    // A photo with no caption is a legitimate turn; only refuse when there is
+    // nothing to say AND nothing to show.
+    const ready = messageAttachments(props.attachments);
+    if (!value && !ready.length) return;
     setText("");
     setCaret(0);
     setMenuDismissed(false);
-    props.onSend(value);
+    props.onSend(value, ready);
   }, [text, props]);
 
   const onKeyDown = useCallback(
@@ -298,7 +330,8 @@ export function Composer(props: ComposerProps) {
     [props],
   );
 
-  const canSend = Boolean(text.trim()) && props.connected;
+  const readyCount = props.attachments.filter((item) => item.status === "ready").length;
+  const canSend = (Boolean(text.trim()) || readyCount > 0) && props.connected;
   const chips = metricChips(props.usage, t);
   const tone = pressureTone(null);
   const contextChip = chips.find((c) => c.key === "context");
@@ -306,7 +339,11 @@ export function Composer(props: ComposerProps) {
   return React.createElement(
     "div",
     {
-      className: "px-4 pb-3",
+      // `hb-flex-none` (`flex: 0 0 auto`) is load-bearing: the composer is a
+      // flex item in the page's column, and without it a tall transcript
+      // squeezes this box below its own content — the metric line at the bottom
+      // was the part that got cut off.
+      className: "px-4 pb-3 hb-flex-none",
       onDrop,
       onDragOver: (event: { preventDefault: () => void }) => event.preventDefault(),
     },
@@ -345,55 +382,15 @@ export function Composer(props: ComposerProps) {
         : null,
 
       // ── attachment tray ──────────────────────────────────────────────────
-      props.attachments.length
-        ? React.createElement(
-            "div",
-            { className: "mb-1.5 flex flex-wrap gap-1.5" },
-            props.attachments.map((item) =>
-              React.createElement(
-                "span",
-                {
-                  key: item.id,
-                  className: "hb-text-micro inline-flex items-center gap-1.5 px-2 py-1",
-                  style: {
-                    background: "var(--color-muted)",
-                    color: "var(--color-card-foreground)",
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                  },
-                },
-                React.createElement(
-                  "span",
-                  null,
-                  item.kind === "image" ? "🖼" : item.kind === "pdf" ? "📄" : "📎",
-                ),
-                React.createElement("span", { className: "hb-truncate hb-max-w-16ch" }, item.name),
-                item.size
-                  ? React.createElement(
-                      "span",
-                      { style: { color: "var(--color-muted-foreground)" } },
-                      formatBytes(item.size),
-                    )
-                  : null,
-                item.status === "staging"
-                  ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "…")
-                  : null,
-                item.status === "error"
-                  ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, "!")
-                  : null,
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "cursor-pointer px-1",
-                    style: { color: "var(--color-muted-foreground)" },
-                    onClick: () => props.onRemoveAttachment(item.id),
-                  },
-                  "×",
-                ),
-              ),
-            ),
-          )
-        : null,
+      // Each entry reports where its staging is (reading off disk → uploading
+      // over the socket), which is the part that used to be a silent "…" over a
+      // remote dashboard.
+      React.createElement(AttachmentTray, {
+        sdk,
+        locale: props.locale,
+        items: props.attachments,
+        onRemove: props.onRemoveAttachment,
+      }),
 
       // ── slash popover ────────────────────────────────────────────────────
       menuVisible
@@ -450,6 +447,100 @@ export function Composer(props: ComposerProps) {
           )
         : null,
 
+      // ── phone tool menu ──────────────────────────────────────────────────
+      // What the desktop shows as two inline chips and a notification glyph in
+      // the tab strip: model, reasoning strength, notifications. One row each,
+      // because these are full-sentence options, not pills (铁律 20).
+      props.mobile && toolsOpen
+        ? React.createElement(
+            "div",
+            { className: "hb-tools-menu", "data-hb": "composer-menu" },
+            React.createElement(
+              "div",
+              { className: "hb-tools-head" },
+              React.createElement("span", null, t.composerMore),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "hb-tools-close",
+                  title: t.cancel,
+                  "aria-label": t.cancel,
+                  onClick: () => setToolsOpen(false),
+                },
+                Icon(sdk, { name: "close", size: 14 }),
+              ),
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "model-picker-open",
+                className: "hb-tools-row",
+                onClick: () => {
+                  setToolsOpen(false);
+                  props.onOpenModelPicker();
+                },
+              },
+              React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "model", size: 16 })),
+              React.createElement("span", { className: "hb-tools-label" }, t.pickModel),
+              React.createElement(
+                "span",
+                { className: "hb-tools-value hb-truncate" },
+                props.model || "default",
+              ),
+              Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" }),
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "reasoning-cycle",
+                "data-state": reasoningLabel(props.reasoning || "medium", props.locale),
+                className: "hb-tools-row",
+                onClick: () => {
+                  const current = props.reasoning || "medium";
+                  const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
+                  const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
+                  if (next) props.onPickReasoning(next);
+                },
+              },
+              React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
+              React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
+              React.createElement(
+                "span",
+                { className: "hb-tools-value" },
+                reasoningLabel(props.reasoning || "medium", props.locale),
+              ),
+              Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" }),
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "notify-toggle",
+                "data-on": props.notifyState === "on" ? "true" : "false",
+                "data-state": props.notifyState,
+                className: "hb-tools-row",
+                onClick: props.onToggleNotify,
+              },
+              React.createElement(
+                "span",
+                { className: "hb-tools-icon" },
+                Icon(sdk, { name: props.notifyState === "on" ? "bell" : "bellOff", size: 16 }),
+              ),
+              React.createElement("span", { className: "hb-tools-label" }, t.notifications),
+              React.createElement(
+                "span",
+                { className: "hb-tools-value" },
+                props.notifyState === "on" || props.notifyState === "needs-permission"
+                  ? t.notifyOnTitle
+                  : t.notifyOffTitle,
+              ),
+            ),
+          )
+        : null,
+
       // ── input row ────────────────────────────────────────────────────────
       React.createElement(
         "div",
@@ -462,18 +553,33 @@ export function Composer(props: ComposerProps) {
           },
         },
 
-        // left: attach
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            title: t.attachFiles,
-            "aria-label": t.attachFiles,
-            className: "hb-composer-btn hb-composer-attach",
-            onClick: () => fileRef.current?.click(),
-          },
-          "+",
-        ),
+        // ── left: the phone's tool menu, or the desktop's attach button ─────
+        props.mobile
+          ? React.createElement(
+              "button",
+              {
+                type: "button",
+                "data-hb": "composer-more",
+                "data-open": toolsOpen ? "true" : "false",
+                "aria-expanded": toolsOpen,
+                "aria-label": t.composerMore,
+                title: t.composerMore,
+                className: "hb-composer-btn hb-composer-more",
+                onClick: () => setToolsOpen((v: boolean) => !v),
+              },
+              Icon(sdk, { name: "dots", size: 18 }),
+            )
+          : React.createElement(
+              "button",
+              {
+                type: "button",
+                title: t.attachFiles,
+                "aria-label": t.attachFiles,
+                className: "hb-composer-btn hb-composer-attach",
+                onClick: () => fileRef.current?.click(),
+              },
+              "+",
+            ),
         React.createElement("input", {
           ref: fileRef,
           type: "file",
@@ -491,7 +597,11 @@ export function Composer(props: ComposerProps) {
           value: text,
           rows: 1,
           disabled: !props.connected,
-          placeholder: props.connected ? t.composerPlaceholder : "…",
+          placeholder: props.connected
+            ? props.mobile
+              ? t.composerPlaceholderShort
+              : t.composerPlaceholder
+            : "…",
           "aria-label": t.composerPlaceholder,
           className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent text-sm outline-none",
           // `--font-sans` is the host's display face ("Collapse", a narrow
@@ -514,36 +624,42 @@ export function Composer(props: ComposerProps) {
           onPaste,
         }),
 
-        // right: model + reasoning + send/stop
+        // right: model + reasoning + send/stop (desktop), or upload / stop / send
+        // as round icon buttons (phone — the model and reasoning chips moved into
+        // the "···" menu above).
         React.createElement(
           "div",
           { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-hb": "model-picker-open",
-              title: `${t.pickModel}: ${props.model || "default"}`,
-              className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
-              onClick: props.onOpenModelPicker,
-            },
-            props.model || "model",
-          ),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
-              className: "hb-composer-btn hb-text-micro",
-              onClick: () => {
-                const current = props.reasoning || "medium";
-                const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
-                const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
-                if (next) props.onPickReasoning(next);
-              },
-            },
-            reasoningLabel(props.reasoning || "medium", props.locale),
-          ),
+          props.mobile
+            ? null
+            : React.createElement(
+                "button",
+                {
+                  type: "button",
+                  "data-hb": "model-picker-open",
+                  title: `${t.pickModel}: ${props.model || "default"}`,
+                  className: "hb-composer-btn hb-text-micro hb-truncate hb-max-w-18ch",
+                  onClick: props.onOpenModelPicker,
+                },
+                props.model || "model",
+              ),
+          props.mobile
+            ? null
+            : React.createElement(
+                "button",
+                {
+                  type: "button",
+                  title: `${t.reasoning}: ${reasoningLabel(props.reasoning || "medium", props.locale)}`,
+                  className: "hb-composer-btn hb-text-micro",
+                  onClick: () => {
+                    const current = props.reasoning || "medium";
+                    const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
+                    const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
+                    if (next) props.onPickReasoning(next);
+                  },
+                },
+                reasoningLabel(props.reasoning || "medium", props.locale),
+              ),
           // While a turn runs the primary action becomes "insert": the message is
           // delivered mid-turn (queued / steered / redirected by the backend).
           // Stop is a separate control so correcting and cancelling do not
@@ -554,16 +670,35 @@ export function Composer(props: ComposerProps) {
                 {
                   type: "button",
                   title: t.stopReasoningTitle,
+                  "aria-label": t.stop,
                   "data-hb": "stop-action",
-                  className: "hb-composer-btn hb-composer-stop",
-                  style: {
-                    background: "var(--color-muted)",
-                    color: "var(--color-muted-foreground)",
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                  },
+                  className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-stop" : "hb-composer-btn hb-composer-stop",
+                  style: props.mobile
+                    ? undefined
+                    : {
+                        background: "var(--color-muted)",
+                        color: "var(--color-muted-foreground)",
+                        borderRadius: "calc(var(--radius) * 0.6)",
+                      },
                   onClick: props.onStop,
                 },
-                t.stop,
+                props.mobile ? Icon(sdk, { name: "stop", size: 15 }) : t.stop,
+              )
+            : null,
+          // The upload button only exists on a phone: the desktop keeps its `+`
+          // at the left edge of the row, which is where a mouse expects it.
+          props.mobile
+            ? React.createElement(
+                "button",
+                {
+                  type: "button",
+                  title: t.attachFiles,
+                  "aria-label": t.attachFiles,
+                  "data-hb": "composer-upload",
+                  className: "hb-composer-btn hb-round-btn",
+                  onClick: () => fileRef.current?.click(),
+                },
+                Icon(sdk, { name: "paperclip", size: 17 }),
               )
             : null,
           React.createElement(
@@ -572,12 +707,13 @@ export function Composer(props: ComposerProps) {
               type: "button",
               disabled: !canSend,
               title: props.running ? t.insert : t.send,
+              "aria-label": props.running ? t.insert : t.send,
               "data-hb": "primary-action",
-              className: "hb-composer-btn hb-composer-send",
+              className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-send" : "hb-composer-btn hb-composer-send",
               style: {
                 background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                 color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",
-                borderRadius: "calc(var(--radius) * 0.6)",
+                borderRadius: props.mobile ? "9999px" : "calc(var(--radius) * 0.6)",
                 // `disabled:opacity-40` is absent from the host bundle, so the
                 // dimming is done here rather than hoped for.
                 opacity: canSend ? 1 : 0.4,
@@ -585,7 +721,11 @@ export function Composer(props: ComposerProps) {
               },
               onClick: submit,
             },
-            props.running ? t.insert : t.send,
+            props.mobile
+              ? Icon(sdk, { name: props.running ? "insert" : "send", size: 18 })
+              : props.running
+                ? t.insert
+                : t.send,
           ),
         ),
       ),

@@ -45,6 +45,8 @@ export interface Messages {
   /** The empty-transcript hint. */
   empty: string;
   composerPlaceholder: string;
+  /** Phone placeholder: the full sentence wraps to two lines in a 198px box. */
+  composerPlaceholderShort: string;
   send: string;
   insert: string;
   stop: string;
@@ -127,6 +129,19 @@ export interface Messages {
   cancel: string;
   /** Composer affordances. */
   attachFiles: string;
+  /** Staging progress, shown on the attachment chip while the bytes travel. */
+  attachReading: string;
+  attachUploading: string;
+  /** The attachment row inside a sent message. */
+  attachmentsLabel: string;
+  imageAttachment: string;
+  videoAttachment: string;
+  /** Phone-only chrome: the drawer opens from a floating button. */
+  chatMenu: string;
+  refreshChat: string;
+  /** The composer's "···" menu on a phone (model / reasoning / notifications). */
+  composerMore: string;
+  notifications: string;
   pickModel: string;
   /** Workspace picker: the directory the NEXT new chat starts in. */
   workspace: string;
@@ -263,6 +278,7 @@ export interface Messages {
 const EN: Messages = {
   empty: "Start a conversation. Type / for commands.",
   composerPlaceholder: "Send a message, or type / for commands",
+  composerPlaceholderShort: "Message…",
   send: "Send",
   insert: "Insert",
   stop: "Stop",
@@ -328,6 +344,15 @@ const EN: Messages = {
   modelConfirmAccept: "Switch anyway",
   cancel: "Cancel",
   attachFiles: "Add files",
+  attachReading: "Reading",
+  attachUploading: "Uploading",
+  attachmentsLabel: "Attachments",
+  imageAttachment: "Image",
+  videoAttachment: "Video",
+  chatMenu: "Chats",
+  refreshChat: "Refresh this chat",
+  composerMore: "Model, reasoning, notifications",
+  notifications: "Notifications",
   pickModel: "Model and reasoning",
   workspace: "Workspace",
   workspaceForNewChat: "Directory the next new chat starts in",
@@ -459,6 +484,7 @@ const EN: Messages = {
 const ZH: Messages = {
   empty: "开始一段对话。输入 / 唤起命令。",
   composerPlaceholder: "发消息，或输入 / 唤起命令",
+  composerPlaceholderShort: "发消息…",
   send: "发送",
   insert: "插入",
   stop: "停止",
@@ -524,6 +550,15 @@ const ZH: Messages = {
   modelConfirmAccept: "仍然切换",
   cancel: "取消",
   attachFiles: "添加文件",
+  attachReading: "正在读取",
+  attachUploading: "正在上传",
+  attachmentsLabel: "附件",
+  imageAttachment: "图片",
+  videoAttachment: "视频",
+  chatMenu: "会话",
+  refreshChat: "刷新本对话",
+  composerMore: "模型、思考强度、通知",
+  notifications: "通知设置",
   pickModel: "模型与思考强度",
   workspace: "工作区",
   workspaceForNewChat: "下一个新对话的起始目录",

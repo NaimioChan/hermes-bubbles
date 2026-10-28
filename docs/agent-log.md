@@ -8,6 +8,24 @@ Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用
 
 ---
 
+## 2026-10-28 18:20 · hermes · 手机布局重做、附件进气泡、上传过程可见、动效
+
+- 需求（用户原话分两段）：**只在手机尺寸**① 去掉页签/历史那一横栏；② 右上浮动圆形「···」→ 左侧拉出二级菜单，顶部「新建会话」，下接最近/项目列表，每个会话项的操作收进该行自己的「···」；③ 左上浮动圆形按钮刷新**本 chat 页**（不是 dashboard）；④ 输入框去掉 `+`/模型/思考强度，左侧改成「···」二级菜单（模型、思考强度、通知设置），停止/发送/插入从文字改圆形图标，发送左侧加「上传文件」。**两种尺寸**：① 发出的消息要显示附件（图/视频小方形预览，其它文件名）；② 从 `hermes.naimio.online` 访问时上传过程要显式可见；③ 整体动效打磨（控件运动、触摸响应）。追加：思考流程默认限高，别占满聊天区。
+- 关键判断：**手机形态不是纯样式**。页签条被「替换」成抽屉（开关状态是 React state），输入框的两个 chip 被替换成菜单——这两处只能按宽度分支（`ui/useMobile.ts`，`matchMedia` 768px，与 `style.css` 的 media 块同数），其余全部留在 CSS。桌面路径一行未动，`verify.mjs` 92/95 → 95/95 里也证明了这一点。
+- 附件为什么会「发出去只剩文本」：`file.attach` 只把字节落进会话 `attachments/` 并回 `@file:<相对路径>`，**模型看不到它，除非这段 ref 出现在 `prompt.submit.text` 里**；而气泡原来只渲染 `text`。修法两半：`controller.send` 把 refs 追加进 `modelText`（只给模型），气泡拿 `messageAttachments()` 快照自己渲染。重开会话时网关把 `正文 + @file: + --- Attached Context ---（整份文件内容）` 全存进 `messages.content`，`splitAttachmentRefs` 还原成「附件行 + 正文」并丢掉页脚（桌面 `title_generator` 也丢它）。视频没有专门 RPC，同文件走 `file.attach`，所以重开后只有文件名没有缩略图。
+- 上传过程：attach 是单帧 JSON-RPC，**没有进度通道**，所以 `readAsDataUrl` 改成分片读（512 KiB）报真实百分比，RPC 阶段显示不确定扫光；两段分开写（`正在读取 42%` / `正在上传`），不给假数字。
+- 动效：新增 `hb-rise`（菜单/chip 从下方 4px 升入）、`hb-slide-in`（抽屉）、`hb-bubble-in`（气泡入场，挂在被 key 的行上，流式 delta 不会重播）、`hb-sweep`（不确定进度），全部圆钮/浮钮加 `:active` 缩放，`prefers-reduced-motion` 里逐条关掉。
+- 顺手修的两个真 bug（都是量出来的，不是看着不对）：① 抽屉用 `position: fixed` 锚到视口，而宿主的顶栏画在上层 → 抽屉标题/刷新/关闭整条跑到屏幕外（header 实测 y=-46）；改成 `absolute` + `[data-layout]{position:relative}`。② 输入框容器是 flex item，转录区一长就把它压到内容高度以下，底部 metrics 行被裁；加 `hb-flex-none`。三个守卫测试盯住这两条（`tests/layout-classes.test.ts` 新增 4 条）。
+- 契约：`docs/01-protocol-contract.md` §4 附件新增「附件如何进到模型，以及如何回到气泡」一段（图片由网关排队、文件靠 ref、页脚要丢、视频无 RPC、进度只有读文件那段可测）。
+- 验证：`tsc --noEmit` 干净；`vitest run` **648 passed / 30 文件**（附件 +8：视频分类、快照只取 ready、ref 还原/引号/去重/页脚剥离、进度百分比；controller +2：ref 只进 prompt、无正文也能发）；`audit-classes` 263/263；`npm run build` + `install-plugin` 已装。
+- 真页面验收（**临时 HERMES_HOME + 回环 9121，用户自己的 9119 未启未停未改**；临时实例 `config.yaml` 去掉 `dashboard.public_url`、并且要 `unset HERMES_DASHBOARD_PUBLIC_URL` 才起得来——环境变量会盖住 config）：
+  - 新写 `scripts/verify-mobile.mjs`（390×844 + 1440×900 同一次运行）：**20/20**。手机无页签、两个浮钮都是圆的且在左右边、抽屉从 chat 区左上角起、每行一个「···」且没有裸的改名/删除、输入行单行 47px、textarea 198px、`···` 菜单三行齐、真模型往返一轮成功；同一份产物切到 1440 仍是页签条 + 模型 chip + 文字 Send。
+  - 新写 `scripts/verify-attachments.mjs`（真 `DOM.setFileInputFiles` 走完整 pick→stage→send）：**15/15**。两个 chip 各带进度轨与阶段文字、图片有缩略图/文本文件有字形、settle 后进度轨消失、只有附件也能点发送、发出的气泡里图片是 64px 正方形 + 文件名 chip + 正文不变、重开会话后文件仍在附件行且正文里没有 `@file:`。
+  - `scripts/verify.mjs`（桌面回归）：**92/95**，三条失败全是「临时实例只有『未归类』桶」——按设计未归类不给「新建对话」与「⋯」菜单，不是回归（与上一轮同样三条）。其 cleanup 有一条 `session_busy` 没删掉（写栅栏重试跑完仍忙），那条留在临时库里、随临时 HERMES_HOME 一起删除；不是新增问题。
+- 遗留：① `AGENTS.md` 的钩子清单想补新钩子，写入被拦（保护文件需用户批准），**没改**；新钩子见本条与各组件。② 抽屉的关闭动画没做（只做了入场，`animation` 单向），要的话得引入卸载延迟或 `transition` 配合挂载状态。③ 触摸的滑动关闭（drawer swipe-to-dismiss）没做，只在背景点击关闭。④ 未在真手机上验过 iOS 输入框聚焦（`font-size: 1rem` 已按防缩放处理）。
+
+---
+
 ## 2026-10-27 11:35 · hermes · 审批/选择题按会话归属 + 会话写栅栏
 
 - 需求：同时开多个 sessions 时，一个 session 弹出的选择题/审批会在所有 session 里显示，并打断其他 session 的任务。

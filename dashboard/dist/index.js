@@ -15,11 +15,54 @@ var HermesBubbles = (() => {
     if (kind === "pdf") return "pdf.attach";
     return "file.attach";
   }
+  function isPreviewable(kind) {
+    return kind === "image" || kind === "video";
+  }
+  function messageAttachments(queue) {
+    return queue.filter((item) => item.status === "ready").map((item) => ({
+      kind: item.kind,
+      name: item.name,
+      size: item.size,
+      preview: item.previewUrl,
+      ref: item.refText
+    }));
+  }
+  function splitAttachmentRefs(text) {
+    const cut = text.search(/\n+--- (?:Attached Context|Context Warnings) ---/);
+    const body = cut >= 0 ? text.slice(0, cut) : text;
+    const refs = [];
+    const kept = [];
+    for (const line of body.split("\n")) {
+      const match = /^@(file|image):(.+)$/.exec(line.trim());
+      if (!match) {
+        kept.push(line);
+        continue;
+      }
+      const raw = (match[2] ?? "").trim();
+      const value = /^[`"']/.test(raw) && raw.length > 1 && raw.at(-1) === raw[0] ? raw.slice(1, -1) : raw;
+      const kind = match[1] === "image" ? "image" : "file";
+      if (!refs.some((ref) => ref.ref === `@${kind}:${value}`)) refs.push(refAttachment(kind, value));
+    }
+    const cleaned = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    return { text: cleaned, refs };
+  }
+  function refAttachment(kind, value) {
+    const name = value.split(/[\\/]/).pop() || value;
+    return { kind, name, ref: `@${kind === "image" ? "image" : "file"}:${value}` };
+  }
+  function attachmentPercent(item) {
+    if (item.status !== "staging" || item.phase !== "reading") return null;
+    const p = item.readProgress;
+    if (typeof p !== "number" || !Number.isFinite(p)) return null;
+    return Math.max(0, Math.min(100, Math.round(p * 100)));
+  }
   function classifyFile(name, mime) {
     const lower = name.toLowerCase();
     if (lower.endsWith(".pdf") || mime === "application/pdf") return "pdf";
     if (mime?.startsWith("image/")) return "image";
+    if (mime?.startsWith("video/")) return "video";
     if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(lower)) return "image";
+    if (/\.(mp4|webm|mov|m4v|ogv)$/.test(lower)) return "video";
     return "file";
   }
   var MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
@@ -119,6 +162,7 @@ var HermesBubbles = (() => {
   var EN = {
     empty: "Start a conversation. Type / for commands.",
     composerPlaceholder: "Send a message, or type / for commands",
+    composerPlaceholderShort: "Message\u2026",
     send: "Send",
     insert: "Insert",
     stop: "Stop",
@@ -184,6 +228,15 @@ var HermesBubbles = (() => {
     modelConfirmAccept: "Switch anyway",
     cancel: "Cancel",
     attachFiles: "Add files",
+    attachReading: "Reading",
+    attachUploading: "Uploading",
+    attachmentsLabel: "Attachments",
+    imageAttachment: "Image",
+    videoAttachment: "Video",
+    chatMenu: "Chats",
+    refreshChat: "Refresh this chat",
+    composerMore: "Model, reasoning, notifications",
+    notifications: "Notifications",
     pickModel: "Model and reasoning",
     workspace: "Workspace",
     workspaceForNewChat: "Directory the next new chat starts in",
@@ -310,6 +363,7 @@ var HermesBubbles = (() => {
   var ZH = {
     empty: "\u5F00\u59CB\u4E00\u6BB5\u5BF9\u8BDD\u3002\u8F93\u5165 / \u5524\u8D77\u547D\u4EE4\u3002",
     composerPlaceholder: "\u53D1\u6D88\u606F\uFF0C\u6216\u8F93\u5165 / \u5524\u8D77\u547D\u4EE4",
+    composerPlaceholderShort: "\u53D1\u6D88\u606F\u2026",
     send: "\u53D1\u9001",
     insert: "\u63D2\u5165",
     stop: "\u505C\u6B62",
@@ -375,6 +429,15 @@ var HermesBubbles = (() => {
     modelConfirmAccept: "\u4ECD\u7136\u5207\u6362",
     cancel: "\u53D6\u6D88",
     attachFiles: "\u6DFB\u52A0\u6587\u4EF6",
+    attachReading: "\u6B63\u5728\u8BFB\u53D6",
+    attachUploading: "\u6B63\u5728\u4E0A\u4F20",
+    attachmentsLabel: "\u9644\u4EF6",
+    imageAttachment: "\u56FE\u7247",
+    videoAttachment: "\u89C6\u9891",
+    chatMenu: "\u4F1A\u8BDD",
+    refreshChat: "\u5237\u65B0\u672C\u5BF9\u8BDD",
+    composerMore: "\u6A21\u578B\u3001\u601D\u8003\u5F3A\u5EA6\u3001\u901A\u77E5",
+    notifications: "\u901A\u77E5\u8BBE\u7F6E",
     pickModel: "\u6A21\u578B\u4E0E\u601D\u8003\u5F3A\u5EA6",
     workspace: "\u5DE5\u4F5C\u533A",
     workspaceForNewChat: "\u4E0B\u4E00\u4E2A\u65B0\u5BF9\u8BDD\u7684\u8D77\u59CB\u76EE\u5F55",
@@ -1461,11 +1524,18 @@ ${body}`;
         return timeline;
     }
   }
-  function appendUser(timeline, text) {
+  function appendUser(timeline, text, attachments = []) {
     return {
       items: [
         ...timeline.items,
-        { kind: "user", id: nextId("user"), at: Date.now(), text, pending: true }
+        {
+          kind: "user",
+          id: nextId("user"),
+          at: Date.now(),
+          text,
+          pending: true,
+          ...attachments.length ? { attachments } : {}
+        }
       ],
       meta: { ...timeline.meta, running: true, status: "", statusKind: "" }
     };
@@ -1576,8 +1646,16 @@ ${body}`;
       const text = rawText;
       if (role === "user") {
         const spoken = row.display_kind === "steer" ? steerText(text) : text;
-        if (!spoken.trim()) continue;
-        items.push({ kind: "user", id: historyId("user"), at, text: spoken, rowId });
+        const split = splitAttachmentRefs(spoken);
+        if (!split.text.trim() && !split.refs.length) continue;
+        items.push({
+          kind: "user",
+          id: historyId("user"),
+          at,
+          text: split.text,
+          rowId,
+          ...split.refs.length ? { attachments: split.refs } : {}
+        });
         continue;
       }
       if (role === "assistant") {
@@ -1750,10 +1828,10 @@ ${body}`;
     const withTimelineState = withTimeline(state, key, next);
     return { state: withTitleFromTimeline(withTimelineState, key, next), applied: true };
   }
-  function appendUserToActive(state, text) {
+  function appendUserToActive(state, text, attachments = []) {
     const key = state.activeKey;
     if (!key) return state;
-    return withTimeline(state, key, appendUser(timelineOf(state, key), text));
+    return withTimeline(state, key, appendUser(timelineOf(state, key), text, attachments));
   }
   function ackUserInActive(state, rowId) {
     const key = state.activeKey;
@@ -2775,16 +2853,20 @@ ${body}`;
      * A leading `/` is a command, not a message: it goes through
      * `command.dispatch` and the reply's `type` decides what happens next.
      */
-    async send(text) {
+    async send(text, attachments = []) {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (!trimmed && !attachments.length) return;
       if (!this.state.activeKey) await this.newSession();
-      const command = parseCommandInput(trimmed);
+      const command = trimmed ? parseCommandInput(trimmed) : null;
       if (command) {
         await this.dispatchCommand(command.name, command.arg);
         return;
       }
-      await this.submitMessage(trimmed, trimmed);
+      const refs = attachments.map((item) => item.ref).filter((ref) => Boolean(ref));
+      const modelText = refs.length ? `${trimmed}
+
+${refs.join("\n")}`.trim() : trimmed;
+      await this.submitMessage(modelText, trimmed, attachments);
     }
     /**
      * Run a slash command and apply its directive.
@@ -2843,12 +2925,12 @@ ${body}`;
      * used to disable itself instead, which is not how Hermes behaves elsewhere —
      * mid-turn input is a correction, not an error.
      */
-    async submitMessage(message, display) {
-      if (!message.trim()) return;
+    async submitMessage(message, display, attachments = []) {
+      if (!message.trim() && !attachments.length) return;
       const runtimeId = await this.ensureSession();
       if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
       const wasRunning = activeTimeline(this.state).meta.running;
-      this.setState(appendUserToActive(this.state, display || message));
+      this.setState(appendUserToActive(this.state, display || message, attachments.slice()));
       const result = await this.client.request("prompt.submit", {
         session_id: runtimeId,
         text: message
@@ -3197,13 +3279,15 @@ ${body}`;
      * `file.attach`'s `data_url`. The reply's `ref_text` is what the composer
      * inserts.
      */
-    async attachFile(file, id) {
-      const kind = file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? "pdf" : file.type.startsWith("image/") ? "image" : "file";
+    async attachFile(file, id, onProgress) {
+      const kind = file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? "pdf" : file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
       const runtimeId = await this.ensureSession();
       if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
-      const dataUrl = await file.dataUrl();
+      onProgress?.({ phase: "reading", readProgress: 0 });
+      const dataUrl = await file.dataUrl((fraction) => onProgress?.({ phase: "reading", readProgress: fraction }));
+      onProgress?.({ phase: "uploading" });
       const params = { session_id: runtimeId };
-      if (kind === "file") {
+      if (kind === "file" || kind === "video") {
         params.data_url = dataUrl;
         params.name = file.name;
       } else {
@@ -4182,6 +4266,203 @@ ${body}`;
     return React.createElement("div", { className: "hb-md" }, renderBlocks(ctx, blocks, "b", caret));
   }
 
+  // src/ui/icons.ts
+  var PATHS = {
+    // Circular arrow: the chat-page refresh (data only, not a browser reload).
+    refresh: ["M20 12a8 8 0 1 1-2.34-5.66", "M20 4v4h-4"],
+    // Three dots: the menu affordance ("···" as the brief calls it).
+    dots: ["M6 12h.01", "M12 12h.01", "M18 12h.01"],
+    send: ["M12 19V5", "M5.5 11.5 12 5l6.5 6.5"],
+    // A filled square is the universal stop; `fill` is set per icon below.
+    stop: ["M8 8h8v8H8z"],
+    // Arrow into a tray line: delivering the message into a running turn.
+    insert: ["M12 15V4", "M7 9l5-5 5 5", "M4 20h16"],
+    paperclip: [
+      "M20 11.5 12.2 19.3a4.2 4.2 0 0 1-6-6l8-8a3 3 0 0 1 4.2 4.2l-8 8a1.8 1.8 0 0 1-2.5-2.5l7.3-7.3"
+    ],
+    plus: ["M12 5v14", "M5 12h14"],
+    // Model: a chip.
+    model: ["M8 8h8v8H8z", "M12 3v5", "M12 16v5", "M3 12h5", "M16 12h5"],
+    // Reasoning effort: a dial.
+    reasoning: ["M12 20a8 8 0 1 1 8-8", "M12 12l4-4"],
+    bell: ["M18 16H6l1.4-2.1V10a4.6 4.6 0 0 1 9.2 0v3.9z", "M10 19a2 2 0 0 0 4 0"],
+    bellOff: ["M18 16H6l1.4-2.1V10a4.6 4.6 0 0 1 9.2 0v3.9z", "M10 19a2 2 0 0 0 4 0", "M4 4l16 16"],
+    close: ["M6 6l12 12", "M18 6 6 18"],
+    image: ["M4 5h16v14H4z", "M4 16l4.5-4.5 4 4", "M13 14l3-3 4 4", "M15.5 9h.01"],
+    video: ["M4 6h11v12H4z", "M15 10l5-3v10l-5-3"],
+    file: ["M6 3h7l5 5v13H6z", "M13 3v5h5"],
+    chevron: ["M9 6l6 6-6 6"]
+  };
+  var FILLED = /* @__PURE__ */ new Set(["stop"]);
+  var CIRCLES = {
+    dots: [
+      [6, 12, 1.55],
+      [12, 12, 1.55],
+      [18, 12, 1.55]
+    ]
+  };
+  var RECTS = {
+    stop: [[8, 8, 8, 8, 2]]
+  };
+  function Icon(sdk, props) {
+    const { React } = sdk;
+    const size = props.size ?? 18;
+    const filled = FILLED.has(props.name);
+    const circles = CIRCLES[props.name] ?? [];
+    const rects = RECTS[props.name] ?? [];
+    const paths = circles.length || rects.length ? [] : PATHS[props.name];
+    return React.createElement(
+      "svg",
+      {
+        className: props.className,
+        width: size,
+        height: size,
+        viewBox: "0 0 24 24",
+        fill: filled || circles.length || rects.length ? "currentColor" : "none",
+        stroke: filled || circles.length || rects.length ? "none" : "currentColor",
+        strokeWidth: 1.7,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        focusable: "false"
+      },
+      ...paths.map((d, index) => React.createElement("path", { key: `p${index}`, d })),
+      ...circles.map(
+        ([cx, cy, r], index) => React.createElement("circle", { key: `c${index}`, cx, cy, r })
+      ),
+      ...rects.map(
+        ([x, y, w, h, rx], index) => React.createElement("rect", { key: `r${index}`, x, y, width: w, height: h, rx })
+      )
+    );
+  }
+
+  // src/ui/Attachments.ts
+  function kindIcon(kind) {
+    if (kind === "image") return "image";
+    if (kind === "video") return "video";
+    return "file";
+  }
+  function kindLabel(item, t) {
+    if (item.kind === "image") return t.imageAttachment;
+    if (item.kind === "video") return t.videoAttachment;
+    return t.attachmentsLabel;
+  }
+  function AttachmentTray(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    const t = messagesFor(props.locale);
+    if (!props.items.length) return null;
+    return React.createElement(
+      "div",
+      { className: "hb-att-tray", "data-hb": "attachment-tray" },
+      ...props.items.map((item) => {
+        const percent = attachmentPercent(item);
+        const staging = item.status === "staging";
+        const phase = item.phase === "reading" ? t.attachReading : t.attachUploading;
+        const previewable = isPreviewable(item.kind) && Boolean(item.previewUrl);
+        return React.createElement(
+          "span",
+          {
+            key: item.id,
+            className: "hb-att-chip",
+            "data-hb": "attachment-chip",
+            "data-status": item.status,
+            "data-kind": item.kind,
+            title: item.error || `${item.name}${item.size ? ` \xB7 ${formatBytes(item.size)}` : ""}`
+          },
+          previewable ? React.createElement("img", { className: "hb-att-thumb", src: item.previewUrl, alt: "" }) : React.createElement(
+            "span",
+            { className: "hb-att-glyph" },
+            Icon(sdk, { name: kindIcon(item.kind), size: 16 })
+          ),
+          React.createElement(
+            "span",
+            { className: "hb-att-meta" },
+            React.createElement("span", { className: "hb-att-name hb-truncate" }, item.name),
+            React.createElement(
+              "span",
+              { className: "hb-att-sub" },
+              item.status === "error" ? React.createElement("span", { className: "hb-att-error" }, item.error || t.genericError) : staging ? React.createElement(
+                "span",
+                { className: "hb-att-phase" },
+                percent === null ? phase : `${phase} ${percent}%`
+              ) : formatBytes(item.size)
+            )
+          ),
+          // The progress bar sits under the chip's content, full width.
+          staging ? React.createElement(
+            "span",
+            {
+              className: percent === null ? "hb-att-bar hb-att-bar-indeterminate" : "hb-att-bar",
+              "data-hb": "attachment-progress",
+              "data-percent": percent === null ? "" : String(percent),
+              "aria-hidden": "true"
+            },
+            percent === null ? null : React.createElement("span", { className: "hb-att-bar-fill", style: { width: `${percent}%` } })
+          ) : null,
+          // Removing a file while its bytes are in flight would stage it anyway;
+          // the control stays enabled so a stuck upload can still be cleared.
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "hb-att-remove",
+              "data-hb": "attachment-remove",
+              title: t.delete,
+              "aria-label": `${t.delete}: ${item.name}`,
+              onClick: () => props.onRemove(item.id)
+            },
+            Icon(sdk, { name: "close", size: 13 })
+          )
+        );
+      })
+    );
+  }
+  function MessageAttachments(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    const t = messagesFor(props.locale);
+    if (!props.items.length) return null;
+    return React.createElement(
+      "div",
+      {
+        className: props.alignEnd ? "hb-msg-atts hb-msg-atts-end" : "hb-msg-atts",
+        "data-hb": "message-attachments"
+      },
+      ...props.items.map((item, index) => {
+        const tile = isPreviewable(item.kind);
+        const label = item.name || kindLabel(item, t);
+        return React.createElement(
+          "div",
+          {
+            key: `${item.name}-${index}`,
+            className: tile ? "hb-msg-att hb-msg-att-tile" : "hb-msg-att",
+            "data-hb": "message-attachment",
+            "data-kind": item.kind,
+            title: item.size ? `${label} \xB7 ${formatBytes(item.size)}` : label
+          },
+          item.preview && item.kind === "image" ? React.createElement("img", { className: "hb-msg-att-image", src: item.preview, alt: label }) : item.preview && item.kind === "video" ? React.createElement(
+            "span",
+            { className: "hb-msg-att-video" },
+            // `preload="metadata"` paints the first frame without pulling
+            // the whole clip; no controls — this is a thumbnail, not a player.
+            React.createElement("video", { src: item.preview, preload: "metadata", muted: true }),
+            React.createElement("span", { className: "hb-msg-att-play" }, Icon(sdk, { name: "video", size: 14 }))
+          ) : React.createElement(
+            "span",
+            { className: "hb-msg-att-glyph" },
+            Icon(sdk, { name: kindIcon(item.kind), size: 15 })
+          ),
+          tile ? null : React.createElement(
+            "span",
+            { className: "hb-msg-att-name hb-truncate" },
+            label
+          )
+        );
+      })
+    );
+  }
+
   // src/ui/format.ts
   var TOOL_LABEL_KEYS = {
     terminal: "toolTerminal",
@@ -4251,7 +4532,15 @@ ${body}`;
     return React.createElement(
       "div",
       { className: "flex flex-col items-end" },
-      React.createElement(
+      // Attachments sit above the text and right-aligned with it, so a photo-only
+      // turn reads as a picture, not as an empty bubble with a caption.
+      React.createElement(MessageAttachments, {
+        sdk,
+        locale,
+        items: item.attachments ?? [],
+        alignEnd: true
+      }),
+      item.text.trim() ? React.createElement(
         "div",
         {
           className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
@@ -4264,7 +4553,7 @@ ${body}`;
           }
         },
         item.text
-      ),
+      ) : null,
       // Edit is offered on a settled user turn only: while it is still in flight
       // there is no stored row to cut, and the affordance would fail on click.
       onEdit && !item.pending ? React.createElement(
@@ -5062,6 +5351,7 @@ ${body}`;
     const [caret, setCaret] = useState(0);
     const [menuIndex, setMenuIndex] = useState(0);
     const [menuDismissed, setMenuDismissed] = useState(false);
+    const [toolsOpen, setToolsOpen] = useState(false);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
     const appliedInsertion = useRef(0);
@@ -5139,11 +5429,12 @@ ${body}`;
     );
     const submit = useCallback(() => {
       const value = text.trim();
-      if (!value) return;
+      const ready = messageAttachments(props.attachments);
+      if (!value && !ready.length) return;
       setText("");
       setCaret(0);
       setMenuDismissed(false);
-      props.onSend(value);
+      props.onSend(value, ready);
     }, [text, props]);
     const onKeyDown = useCallback(
       (event) => {
@@ -5201,14 +5492,19 @@ ${body}`;
       },
       [props]
     );
-    const canSend = Boolean(text.trim()) && props.connected;
+    const readyCount = props.attachments.filter((item) => item.status === "ready").length;
+    const canSend = (Boolean(text.trim()) || readyCount > 0) && props.connected;
     const chips = metricChips(props.usage, t);
     const tone = pressureTone(null);
     const contextChip = chips.find((c) => c.key === "context");
     return React.createElement(
       "div",
       {
-        className: "px-4 pb-3",
+        // `hb-flex-none` (`flex: 0 0 auto`) is load-bearing: the composer is a
+        // flex item in the page's column, and without it a tall transcript
+        // squeezes this box below its own content — the metric line at the bottom
+        // was the part that got cut off.
+        className: "px-4 pb-3 hb-flex-none",
         onDrop,
         onDragOver: (event) => event.preventDefault()
       },
@@ -5243,47 +5539,15 @@ ${body}`;
           )
         ) : null,
         // ── attachment tray ──────────────────────────────────────────────────
-        props.attachments.length ? React.createElement(
-          "div",
-          { className: "mb-1.5 flex flex-wrap gap-1.5" },
-          props.attachments.map(
-            (item) => React.createElement(
-              "span",
-              {
-                key: item.id,
-                className: "hb-text-micro inline-flex items-center gap-1.5 px-2 py-1",
-                style: {
-                  background: "var(--color-muted)",
-                  color: "var(--color-card-foreground)",
-                  borderRadius: "calc(var(--radius) * 0.6)"
-                }
-              },
-              React.createElement(
-                "span",
-                null,
-                item.kind === "image" ? "\u{1F5BC}" : item.kind === "pdf" ? "\u{1F4C4}" : "\u{1F4CE}"
-              ),
-              React.createElement("span", { className: "hb-truncate hb-max-w-16ch" }, item.name),
-              item.size ? React.createElement(
-                "span",
-                { style: { color: "var(--color-muted-foreground)" } },
-                formatBytes(item.size)
-              ) : null,
-              item.status === "staging" ? React.createElement("span", { style: { color: "var(--color-muted-foreground)" } }, "\u2026") : null,
-              item.status === "error" ? React.createElement("span", { style: { color: "var(--color-destructive)" } }, "!") : null,
-              React.createElement(
-                "button",
-                {
-                  type: "button",
-                  className: "cursor-pointer px-1",
-                  style: { color: "var(--color-muted-foreground)" },
-                  onClick: () => props.onRemoveAttachment(item.id)
-                },
-                "\xD7"
-              )
-            )
-          )
-        ) : null,
+        // Each entry reports where its staging is (reading off disk → uploading
+        // over the socket), which is the part that used to be a silent "…" over a
+        // remote dashboard.
+        React.createElement(AttachmentTray, {
+          sdk,
+          locale: props.locale,
+          items: props.attachments,
+          onRemove: props.onRemoveAttachment
+        }),
         // ── slash popover ────────────────────────────────────────────────────
         menuVisible ? React.createElement(
           "div",
@@ -5330,6 +5594,95 @@ ${body}`;
             )
           )
         ) : null,
+        // ── phone tool menu ──────────────────────────────────────────────────
+        // What the desktop shows as two inline chips and a notification glyph in
+        // the tab strip: model, reasoning strength, notifications. One row each,
+        // because these are full-sentence options, not pills (铁律 20).
+        props.mobile && toolsOpen ? React.createElement(
+          "div",
+          { className: "hb-tools-menu", "data-hb": "composer-menu" },
+          React.createElement(
+            "div",
+            { className: "hb-tools-head" },
+            React.createElement("span", null, t.composerMore),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "hb-tools-close",
+                title: t.cancel,
+                "aria-label": t.cancel,
+                onClick: () => setToolsOpen(false)
+              },
+              Icon(sdk, { name: "close", size: 14 })
+            )
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "model-picker-open",
+              className: "hb-tools-row",
+              onClick: () => {
+                setToolsOpen(false);
+                props.onOpenModelPicker();
+              }
+            },
+            React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "model", size: 16 })),
+            React.createElement("span", { className: "hb-tools-label" }, t.pickModel),
+            React.createElement(
+              "span",
+              { className: "hb-tools-value hb-truncate" },
+              props.model || "default"
+            ),
+            Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" })
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "reasoning-cycle",
+              "data-state": reasoningLabel(props.reasoning || "medium", props.locale),
+              className: "hb-tools-row",
+              onClick: () => {
+                const current = props.reasoning || "medium";
+                const index = REASONING_LEVELS.indexOf(current);
+                const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
+                if (next) props.onPickReasoning(next);
+              }
+            },
+            React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
+            React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
+            React.createElement(
+              "span",
+              { className: "hb-tools-value" },
+              reasoningLabel(props.reasoning || "medium", props.locale)
+            ),
+            Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" })
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "notify-toggle",
+              "data-on": props.notifyState === "on" ? "true" : "false",
+              "data-state": props.notifyState,
+              className: "hb-tools-row",
+              onClick: props.onToggleNotify
+            },
+            React.createElement(
+              "span",
+              { className: "hb-tools-icon" },
+              Icon(sdk, { name: props.notifyState === "on" ? "bell" : "bellOff", size: 16 })
+            ),
+            React.createElement("span", { className: "hb-tools-label" }, t.notifications),
+            React.createElement(
+              "span",
+              { className: "hb-tools-value" },
+              props.notifyState === "on" || props.notifyState === "needs-permission" ? t.notifyOnTitle : t.notifyOffTitle
+            )
+          )
+        ) : null,
         // ── input row ────────────────────────────────────────────────────────
         React.createElement(
           "div",
@@ -5341,8 +5694,21 @@ ${body}`;
               boxShadow: "inset 0 0 0 1px var(--color-border)"
             }
           },
-          // left: attach
-          React.createElement(
+          // ── left: the phone's tool menu, or the desktop's attach button ─────
+          props.mobile ? React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "composer-more",
+              "data-open": toolsOpen ? "true" : "false",
+              "aria-expanded": toolsOpen,
+              "aria-label": t.composerMore,
+              title: t.composerMore,
+              className: "hb-composer-btn hb-composer-more",
+              onClick: () => setToolsOpen((v) => !v)
+            },
+            Icon(sdk, { name: "dots", size: 18 })
+          ) : React.createElement(
             "button",
             {
               type: "button",
@@ -5369,7 +5735,7 @@ ${body}`;
             value: text,
             rows: 1,
             disabled: !props.connected,
-            placeholder: props.connected ? t.composerPlaceholder : "\u2026",
+            placeholder: props.connected ? props.mobile ? t.composerPlaceholderShort : t.composerPlaceholder : "\u2026",
             "aria-label": t.composerPlaceholder,
             className: "hb-resize-none hb-min-h-input hb-composer-input flex-1 bg-transparent text-sm outline-none",
             // `--font-sans` is the host's display face ("Collapse", a narrow
@@ -5391,11 +5757,13 @@ ${body}`;
             onKeyDown,
             onPaste
           }),
-          // right: model + reasoning + send/stop
+          // right: model + reasoning + send/stop (desktop), or upload / stop / send
+          // as round icon buttons (phone — the model and reasoning chips moved into
+          // the "···" menu above).
           React.createElement(
             "div",
             { className: "hb-composer-tools flex shrink-0 items-center gap-1" },
-            React.createElement(
+            props.mobile ? null : React.createElement(
               "button",
               {
                 type: "button",
@@ -5406,7 +5774,7 @@ ${body}`;
               },
               props.model || "model"
             ),
-            React.createElement(
+            props.mobile ? null : React.createElement(
               "button",
               {
                 type: "button",
@@ -5430,16 +5798,31 @@ ${body}`;
               {
                 type: "button",
                 title: t.stopReasoningTitle,
+                "aria-label": t.stop,
                 "data-hb": "stop-action",
-                className: "hb-composer-btn hb-composer-stop",
-                style: {
+                className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-stop" : "hb-composer-btn hb-composer-stop",
+                style: props.mobile ? void 0 : {
                   background: "var(--color-muted)",
                   color: "var(--color-muted-foreground)",
                   borderRadius: "calc(var(--radius) * 0.6)"
                 },
                 onClick: props.onStop
               },
-              t.stop
+              props.mobile ? Icon(sdk, { name: "stop", size: 15 }) : t.stop
+            ) : null,
+            // The upload button only exists on a phone: the desktop keeps its `+`
+            // at the left edge of the row, which is where a mouse expects it.
+            props.mobile ? React.createElement(
+              "button",
+              {
+                type: "button",
+                title: t.attachFiles,
+                "aria-label": t.attachFiles,
+                "data-hb": "composer-upload",
+                className: "hb-composer-btn hb-round-btn",
+                onClick: () => fileRef.current?.click()
+              },
+              Icon(sdk, { name: "paperclip", size: 17 })
             ) : null,
             React.createElement(
               "button",
@@ -5447,12 +5830,13 @@ ${body}`;
                 type: "button",
                 disabled: !canSend,
                 title: props.running ? t.insert : t.send,
+                "aria-label": props.running ? t.insert : t.send,
                 "data-hb": "primary-action",
-                className: "hb-composer-btn hb-composer-send",
+                className: props.mobile ? "hb-composer-btn hb-round-btn hb-round-send" : "hb-composer-btn hb-composer-send",
                 style: {
                   background: props.running ? "var(--color-muted)" : "var(--color-primary)",
                   color: props.running ? "var(--color-card-foreground)" : "var(--color-primary-foreground)",
-                  borderRadius: "calc(var(--radius) * 0.6)",
+                  borderRadius: props.mobile ? "9999px" : "calc(var(--radius) * 0.6)",
                   // `disabled:opacity-40` is absent from the host bundle, so the
                   // dimming is done here rather than hoped for.
                   opacity: canSend ? 1 : 0.4,
@@ -5460,7 +5844,7 @@ ${body}`;
                 },
                 onClick: submit
               },
-              props.running ? t.insert : t.send
+              props.mobile ? Icon(sdk, { name: props.running ? "insert" : "send", size: 18 }) : props.running ? t.insert : t.send
             )
           )
         ),
@@ -5929,28 +6313,47 @@ ${body}`;
     const t = messagesFor(props.locale);
     const [renamingId, setRenamingId] = useState(null);
     const [draft, setDraft] = useState("");
+    const [menuId, setMenuId] = useState(null);
+    const drawer = props.variant === "drawer";
     if (!props.open) return null;
+    const menuItem = (key, hook, label, run, danger = false) => React.createElement(
+      "button",
+      {
+        key,
+        type: "button",
+        "data-hb": hook,
+        role: "menuitem",
+        className: danger ? "hb-menu-item hb-menu-item-danger" : "hb-menu-item",
+        onClick: (event) => {
+          event.stopPropagation();
+          setMenuId(null);
+          run();
+        }
+      },
+      label
+    );
     return React.createElement(
       React.Fragment,
       null,
-      // Backdrop for the phone bottom-sheet (see `.hb-hist-backdrop` in style.css):
-      // `display:none` on desktop, a dimming layer under 768px. Tapping it closes
-      // the panel, which becomes an overlay there instead of a squeezed column.
+      // Backdrop. The desktop class is `display:none` above the breakpoint (it
+      // exists for the old phone bottom-sheet); the drawer always has one, because
+      // it covers the chat it belongs to.
       React.createElement("div", {
-        className: "hb-hist-backdrop",
+        className: drawer ? "hb-drawer-backdrop" : "hb-hist-backdrop",
         "data-hb": "history-backdrop",
         onClick: props.onClose
       }),
       React.createElement(
         "div",
         {
-          className: "flex h-full min-h-0 flex-col",
+          className: drawer ? "hb-drawer" : "flex h-full min-h-0 flex-col",
           "data-hb": "history-panel",
-          style: { width: "17rem", borderLeft: "1px solid var(--color-border)" }
+          "data-variant": props.variant,
+          style: drawer ? void 0 : { width: "17rem", borderLeft: "1px solid var(--color-border)" }
         },
         React.createElement(
           "div",
-          { className: "flex shrink-0 items-center gap-1 px-3 py-2" },
+          { className: drawer ? "hb-drawer-head" : "flex shrink-0 items-center gap-1 px-3 py-2" },
           React.createElement(
             "span",
             {
@@ -5967,25 +6370,40 @@ ${body}`;
               {
                 type: "button",
                 title: t.refreshTitle,
-                className: "cursor-pointer px-1.5 text-xs",
-                style: { color: "var(--color-muted-foreground)" },
+                "data-hb": "history-refresh",
+                className: "hb-icon-btn",
                 onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh
               },
-              "\u27F3"
+              Icon(sdk, { name: "refresh", size: 15 })
             ),
             React.createElement(
               "button",
               {
                 type: "button",
                 title: t.collapse,
-                className: "cursor-pointer px-1.5 text-xs",
-                style: { color: "var(--color-muted-foreground)" },
+                "data-hb": "history-close",
+                className: "hb-icon-btn",
                 onClick: props.onClose
               },
-              "\xBB"
+              Icon(sdk, { name: "close", size: 15 })
             )
           )
         ),
+        // The drawer's first row: on a phone this is the only "new chat" there is.
+        drawer ? React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "drawer-new",
+            className: "hb-drawer-new",
+            onClick: () => {
+              props.onClose();
+              props.onNew();
+            }
+          },
+          Icon(sdk, { name: "plus", size: 16 }),
+          React.createElement("span", null, t.newChat)
+        ) : null,
         // Recent vs Projects. Two words, not icons: the difference is a grouping
         // rule, and a glyph pair would need a legend.
         React.createElement(
@@ -6020,7 +6438,7 @@ ${body}`;
           ...props.projectView
         }) : React.createElement(
           "div",
-          { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
+          { className: "hb-hist-list hb-scroll" },
           props.loading ? React.createElement(
             "div",
             { className: "hb-text-micro px-2 py-1", style: { color: "var(--color-muted-foreground)" } },
@@ -6031,14 +6449,19 @@ ${body}`;
             t.historyEmpty
           ) : props.sessions.map((session) => {
             const isActive = session.id === props.activeStoredId;
+            const menuOpen = menuId === session.id;
             return React.createElement(
               "div",
               {
                 key: session.id,
-                className: "cursor-pointer px-2 py-1.5 text-xs",
+                className: "hb-hist-row",
+                "data-hb": "history-row",
+                "data-active": isActive ? "true" : "false",
                 // The row is also a drag source: dropping it on the composer
                 // attaches its transcript as context (see `core/context.ts`).
-                draggable: true,
+                // Not in the drawer: a phone has no drag, and a long-press drag
+                // would fight the scroll.
+                draggable: !drawer,
                 onDragStart: (event) => {
                   event.stopPropagation();
                   const payload = sessionDragPayload({ id: session.id, title: session.title });
@@ -6049,9 +6472,8 @@ ${body}`;
                   }
                 },
                 style: {
-                  borderRadius: "calc(var(--radius) * 0.6)",
-                  color: "var(--color-card-foreground)",
-                  background: isActive ? "var(--color-muted)" : "transparent"
+                  background: isActive ? "var(--color-muted)" : "transparent",
+                  color: "var(--color-card-foreground)"
                 },
                 title: session.preview || session.title,
                 onClick: () => props.onOpen(session.id, session.title || session.id.slice(0, 8)),
@@ -6064,7 +6486,7 @@ ${body}`;
               },
               React.createElement(
                 "div",
-                { className: "flex items-baseline gap-1.5" },
+                { className: "hb-hist-main" },
                 renamingId === session.id ? React.createElement("input", {
                   autoFocus: true,
                   value: draft,
@@ -6117,8 +6539,26 @@ ${body}`;
                   },
                   relativeTime(session.started_at, sdk, props.locale)
                 ),
-                // Hidden until the row is hovered, so the list stays quiet.
-                React.createElement(
+                // Desktop shows the three glyphs, revealed on hover; the
+                // drawer shows one "···" that owns the same three actions.
+                drawer ? React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    "data-hb": "session-menu",
+                    "data-hb-id": session.id,
+                    "data-open": menuOpen ? "true" : "false",
+                    "aria-expanded": menuOpen,
+                    className: "hb-icon-btn hb-row-more",
+                    title: t.projectMenu,
+                    "aria-label": t.projectMenu,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      setMenuId((current) => current === session.id ? null : session.id);
+                    }
+                  },
+                  Icon(sdk, { name: "dots", size: 16 })
+                ) : React.createElement(
                   "span",
                   { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
                   React.createElement(
@@ -6169,13 +6609,39 @@ ${body}`;
                   )
                 )
               ),
-              session.preview ? React.createElement(
+              session.preview && !drawer ? React.createElement(
                 "div",
                 {
                   className: "hb-text-tiny hb-truncate",
                   style: { color: "var(--color-muted-foreground)" }
                 },
                 session.preview
+              ) : null,
+              // In flow, not absolutely positioned: this list is a scrolling
+              // column and an absolute popover inside it is clipped by the
+              // scroll box (and can land off-screen).
+              menuOpen ? React.createElement(
+                "div",
+                { className: "hb-row-menu", "data-hb": "session-menu-panel", role: "menu" },
+                menuItem(
+                  "ctx",
+                  "session-to-context",
+                  t.useAsContext,
+                  () => props.onUseAsContext(session.id, session.title)
+                ),
+                menuItem("ren", "rename-session", t.rename, () => {
+                  setDraft(session.title || "");
+                  setRenamingId(session.id);
+                }),
+                menuItem(
+                  "del",
+                  "delete-session",
+                  t.delete,
+                  () => {
+                    if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
+                  },
+                  true
+                )
               ) : null
             );
           })
@@ -6956,6 +7422,33 @@ ${body}`;
     );
   }
 
+  // src/ui/useMobile.ts
+  var MOBILE_MAX_PX = 768;
+  function useMobile(sdk) {
+    const { useState, useEffect } = sdk.hooks;
+    const query = `(max-width: ${MOBILE_MAX_PX}px)`;
+    const [mobile, setMobile] = useState(() => {
+      try {
+        return window.matchMedia(query).matches;
+      } catch {
+        return false;
+      }
+    });
+    useEffect(() => {
+      let media;
+      try {
+        media = window.matchMedia(query);
+      } catch {
+        return;
+      }
+      const sync = () => setMobile(media.matches);
+      sync();
+      media.addEventListener("change", sync);
+      return () => media.removeEventListener("change", sync);
+    }, [query]);
+    return mobile;
+  }
+
   // src/core/notify.ts
   function shouldNotify(gate) {
     return gate.enabled && gate.permission === "granted" && gate.background;
@@ -7200,6 +7693,7 @@ ${body}`;
     const useSyncExternalStore = React.useSyncExternalStore;
     const locale = useLocale(sdk);
     const t = messagesFor(locale);
+    const mobile = useMobile(sdk);
     const controller = useMemo(() => acquireController(sdk), [sdk]);
     const [cards, setCards] = useState([]);
     const [error, setError] = useState(null);
@@ -7384,6 +7878,10 @@ ${body}`;
       if (historyMode !== "projects" || projectTree !== null) return;
       void loadProjects();
     }, [historyMode, projectTree, loadProjects]);
+    useEffect(() => {
+      if (!historyOpen) return;
+      void refreshStored();
+    }, [historyOpen, refreshStored]);
     const loadProjectSessions = useCallback(
       (projectId) => {
         setLoadingProjectId(projectId);
@@ -7462,7 +7960,7 @@ ${body}`;
       setCards((prev) => prev.filter((card) => card.id !== id));
     }, []);
     const onSend = useCallback(
-      (text) => {
+      (text, attachments2 = []) => {
         setError(null);
         if (notifyState === "needs-permission") {
           void requestNotificationPermission().then((permission) => {
@@ -7473,8 +7971,10 @@ ${body}`;
         const target = editing;
         setEditing(null);
         stickToBottom();
-        const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
-        run.then(() => setAttachments([])).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text, attachments2);
+        run.then(() => {
+          setAttachments([]);
+        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
       },
       [controller, editing, notifyState, stickToBottom]
     );
@@ -7498,26 +7998,43 @@ ${body}`;
     const onStop = useCallback(() => {
       controller.interrupt().catch(() => void 0);
     }, [controller]);
+    const refreshChat = useCallback(
+      () => controller.resync().then(() => {
+        refreshStored();
+        refreshGit();
+      }).catch((err) => setError(err instanceof Error ? err.message : String(err))),
+      [controller, refreshStored, refreshGit]
+    );
     const onPickFiles = useCallback(
       (files) => {
         const { accepted, rejected } = screenDroppedFiles(files);
         for (const item of rejected) controller.notice(`${item.name}: ${rejectionLabel(item, t)}`, "error");
         for (const { file, id } of accepted) {
-          const pending = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
+          const previewUrl = file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : void 0;
+          const pending = {
+            id,
+            kind: classifyFile(file.name, file.type),
+            name: file.name,
+            size: file.size,
+            status: "staging",
+            phase: "reading",
+            readProgress: 0,
+            previewUrl
+          };
           setAttachments((prev) => addAttachment(prev, pending));
           controller.attachFile(
             {
               name: file.name,
               type: file.type,
               size: file.size,
-              dataUrl: () => new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result));
-                reader.onerror = () => reject(new Error(t.fileReadFailed));
-                reader.readAsDataURL(file);
-              })
+              // `readAsDataURL` reports no progress, so the read is chunked into
+              // the same base64 shape by hand — over a remote dashboard this is
+              // where the seconds go for a large file, and a spinner with no
+              // number reads as "stuck".
+              dataUrl: (onRead) => readAsDataUrl(file, onRead)
             },
-            id
+            id,
+            (patch) => setAttachments((prev) => updateAttachment(prev, id, patch))
           ).then((done) => setAttachments((prev) => updateAttachment(prev, id, done))).catch(
             (err) => setAttachments(
               (prev) => updateAttachment(prev, id, {
@@ -7643,9 +8160,52 @@ ${body}`;
     const status = runningLabel(timeline.meta, t);
     return React.createElement(
       "div",
-      { className: "flex h-full min-h-0 flex-col" },
-      // ── tabs ────────────────────────────────────────────────────────────
-      React.createElement(TabStrip, {
+      { className: "flex h-full min-h-0 flex-col", "data-layout": mobile ? "mobile" : "desktop" },
+      // ── tabs, or the phone's two floating buttons ───────────────────────
+      // The strip is not restyled on a phone, it is REPLACED: one horizontal bar
+      // of tabs plus a history toggle costs ~40px of a 640px viewport and has no
+      // room for the two actions that matter there. Instead two 40px round
+      // buttons float over the transcript — refresh on the left (the chat's data,
+      // not the browser page), the drawer handle on the right.
+      mobile ? React.createElement(
+        "div",
+        { className: "hb-fab-row", "data-hb": "fab-row" },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "refresh-chat",
+            className: "hb-fab",
+            title: t.refreshChat,
+            "aria-label": t.refreshChat,
+            onClick: () => void refreshChat()
+          },
+          Icon(sdk, { name: "refresh", size: 17 })
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "drawer-toggle",
+            "data-open": historyOpen ? "true" : "false",
+            className: "hb-fab",
+            title: t.chatMenu,
+            "aria-label": t.chatMenu,
+            "aria-expanded": historyOpen,
+            onClick: () => setHistoryOpen((v) => !v)
+          },
+          Icon(sdk, { name: "dots", size: 18 }),
+          // A waiting request on a background session must still be visible
+          // with no tab strip to mark it.
+          waiting.length ? React.createElement("span", {
+            className: "hb-fab-badge",
+            "data-hb": "tab-waiting",
+            title: t.waitingForAnswer,
+            "aria-label": t.waitingForAnswer
+          }) : null,
+          running.length ? React.createElement("span", { className: "hb-fab-dot", "aria-hidden": "true" }) : null
+        )
+      ) : React.createElement(TabStrip, {
         sdk,
         locale,
         tabs,
@@ -7774,6 +8334,7 @@ ${body}`;
           React.createElement(Composer, {
             sdk,
             locale,
+            mobile,
             editingText: editing?.text ?? null,
             onCancelEdit: () => setEditing(null),
             running: timeline.meta.running,
@@ -7785,6 +8346,8 @@ ${body}`;
             reasoning,
             attachments,
             catalog,
+            notifyState,
+            onToggleNotify,
             onSend,
             onStop,
             onPickFiles,
@@ -7813,6 +8376,7 @@ ${body}`;
           sdk,
           locale,
           open: historyOpen,
+          variant: mobile ? "drawer" : "panel",
           mode: historyMode,
           onModeChange: setHistoryMode,
           onRefreshProjects: () => {
@@ -7846,7 +8410,8 @@ ${body}`;
           onRename,
           onDelete,
           onUseAsContext,
-          onClose: () => setHistoryOpen(false)
+          onClose: () => setHistoryOpen(false),
+          onNew
         })
       ),
       React.createElement(ModelPicker, {
@@ -7872,6 +8437,44 @@ ${body}`;
         onCancel: () => setPendingSwitch(null)
       }) : null
     );
+  }
+  function readAsDataUrl(file, onProgress) {
+    const CHUNK = 512 * 1024;
+    const total = file.size || 1;
+    if (file.size <= CHUNK) {
+      return file.arrayBuffer().then((buffer) => {
+        onProgress?.(1);
+        return dataUrlOf(buffer, file.type);
+      });
+    }
+    const chunks = [];
+    let offset = 0;
+    const next = () => {
+      const end = Math.min(offset + CHUNK, file.size);
+      return file.slice(offset, end).arrayBuffer().then((buffer) => {
+        chunks.push(new Uint8Array(buffer));
+        offset = end;
+        onProgress?.(Math.min(1, offset / total));
+        if (offset < file.size) return next();
+        const joined = new Uint8Array(file.size);
+        let at = 0;
+        for (const chunk of chunks) {
+          joined.set(chunk, at);
+          at += chunk.byteLength;
+        }
+        return dataUrlOf(joined.buffer, file.type);
+      });
+    };
+    return next();
+  }
+  function dataUrlOf(buffer, type) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const STEP = 32768;
+    for (let i = 0; i < bytes.length; i += STEP) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + STEP));
+    }
+    return `data:${type || "application/octet-stream"};base64,${btoa(binary)}`;
   }
   function fallbackCopy2(text) {
     try {

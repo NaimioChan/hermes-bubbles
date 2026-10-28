@@ -15,6 +15,7 @@ import { formatElapsed, messageStamp, messagesFor, type Locale } from "../core/i
 import { noticeText } from "../core/notice";
 import type { HermesPluginSdk } from "./sdk";
 import { Markdown } from "./Markdown";
+import { MessageAttachments } from "./Attachments";
 import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
 
 interface BubbleProps {
@@ -48,20 +49,30 @@ function UserBubble({
   return React.createElement(
     "div",
     { className: "flex flex-col items-end" },
-    React.createElement(
-      "div",
-      {
-        className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
-        style: {
-          maxWidth: "min(72ch, 82%)",
-          background: "color-mix(in oklab, var(--color-primary) 16%, var(--color-card))",
-          color: "var(--color-card-foreground)",
-          borderRadius: USER_RADIUS,
-          opacity: item.pending ? 0.75 : 1,
-        },
-      },
-      item.text,
-    ),
+    // Attachments sit above the text and right-aligned with it, so a photo-only
+    // turn reads as a picture, not as an empty bubble with a caption.
+    React.createElement(MessageAttachments, {
+      sdk,
+      locale,
+      items: item.attachments ?? [],
+      alignEnd: true,
+    }),
+    item.text.trim()
+      ? React.createElement(
+          "div",
+          {
+            className: "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-relaxed hb-bubble-text",
+            style: {
+              maxWidth: "min(72ch, 82%)",
+              background: "color-mix(in oklab, var(--color-primary) 16%, var(--color-card))",
+              color: "var(--color-card-foreground)",
+              borderRadius: USER_RADIUS,
+              opacity: item.pending ? 0.75 : 1,
+            },
+          },
+          item.text,
+        )
+      : null,
     // Edit is offered on a settled user turn only: while it is still in flight
     // there is no stored row to cut, and the affordance would fail on click.
     onEdit && !item.pending

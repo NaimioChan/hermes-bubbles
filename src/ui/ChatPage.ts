@@ -11,7 +11,7 @@
  * the model picker's open flag, the history panel's collapsed state).
  */
 
-import { addAttachment, removeAttachment, updateAttachment, type Attachment } from "../core/attachments";
+import { addAttachment, classifyFile, removeAttachment, updateAttachment, type Attachment, type MessageAttachment } from "../core/attachments";
 import { cardsForTab, waitingKeys, withoutWithdrawn } from "../core/cards";
 import { parseSessionDrop } from "../core/context";
 import { messagesFor, type Locale } from "../core/i18n";
@@ -49,6 +49,8 @@ import { ModelPicker } from "./ModelPicker";
 import { ApprovalCard, ClarifyCard, approvalResult } from "./RequestCards";
 import { TabStrip } from "./TabStrip";
 import { TodoPanel } from "./TodoPanel";
+import { Icon } from "./icons";
+import { useMobile } from "./useMobile";
 import {
   maybeNotify,
   notificationPermission,
@@ -125,6 +127,10 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
   const locale: Locale = useLocale(sdk);
   const t = messagesFor(locale);
+  // Phone vs desktop. Two things below are not styles and cannot be CSS: the tab
+  // strip is REPLACED by a drawer (its state is React state), and the composer
+  // swaps its chips for a menu. Everything else stays in the media block.
+  const mobile = useMobile(sdk);
 
   // Module-level so a route change (which unmounts this page) does not tear down
   // the socket and the open tabs. See `app/persistent.ts`.
@@ -471,6 +477,16 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
     void loadProjects();
   }, [historyMode, projectTree, loadProjects]);
 
+  // Opening the list is the moment it has to be current: a session created (or
+  // turned) since the last read is exactly what the user opened the drawer to
+  // find, and the boot-time read is minutes old by then. Desktop gets this for
+  // free because its panel is narrower than the eye's patience; the phone's
+  // drawer is the only way to see the list at all.
+  useEffect(() => {
+    if (!historyOpen) return;
+    void refreshStored();
+  }, [historyOpen, refreshStored]);
+
   const loadProjectSessions = useCallback(
     (projectId: string) => {
       setLoadingProjectId(projectId);
@@ -609,7 +625,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   }, []);
 
   const onSend = useCallback(
-    (text: string) => {
+    (text: string, attachments: readonly MessageAttachment[] = []) => {
       setError(null);
       // A send is a user gesture — a legitimate moment to ask the browser for
       // notification permission, for a user who has the switch on and never
@@ -626,13 +642,20 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       // Sending is a deliberate "show me the answer": re-arm the follow even if
       // the reader had scrolled up into the history first.
       stickToBottom();
-      const run = target ? controller.editAndResend(target.itemId, text) : controller.send(text);
+      const run = target
+        ? controller.editAndResend(target.itemId, text)
+        : controller.send(text, attachments);
       run
-        .then(() => setAttachments([]))
+        .then(() => {
+          // The bubble already holds its own snapshot of these, so the object
+          // URLs are not revoked here: revoking would blank the thumbnails the
+          // transcript is still drawing.
+          setAttachments([]);
+        })
         .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-        },
-        [controller, editing, notifyState, stickToBottom],
-        );
+    },
+    [controller, editing, notifyState, stickToBottom],
+  );
 
   /**
    * The switch, per state.
@@ -668,6 +691,29 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
   }, [controller]);
 
   /**
+   * Refresh THIS chat, not the browser page.
+   *
+   * Re-reads the focused session's durable transcript (`session.history`) and
+   * the stored-session list, which is what repairs a transcript that drifted —
+   * a missed event, a phone that slept through the stream, or a turn that
+   * finished in another window. `location.reload()` would work too but throws
+   * away every other open tab and the socket. The phone has this as a floating
+   * button because mobile browsers hide the real refresh control, and the
+   * dashboard's own chrome is a hamburger away.
+   */
+  const refreshChat = useCallback(
+    () =>
+      controller
+        .resync()
+        .then(() => {
+          refreshStored();
+          refreshGit();
+        })
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))),
+    [controller, refreshStored, refreshGit],
+  );
+
+  /**
    * Stage picked/dropped files.
    *
    * Each file is read to a data URL and pushed to the backend, which queues it
@@ -679,7 +725,23 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
       const { accepted, rejected } = screenDroppedFiles(files);
       for (const item of rejected) controller.notice(`${item.name}: ${rejectionLabel(item, t)}`, "error");
       for (const { file, id } of accepted) {
-        const pending: Attachment = { id, kind: "file", name: file.name, size: file.size, status: "staging" };
+        // A local object URL for the thumbnail. It lives as long as the page
+        // does: the staging tray and the sent bubble both point at it, and a
+        // long conversation would have to reclaim it explicitly to be worth the
+        // bookkeeping.
+        const previewUrl = file.type.startsWith("image/") || file.type.startsWith("video/")
+          ? URL.createObjectURL(file)
+          : undefined;
+        const pending: Attachment = {
+          id,
+          kind: classifyFile(file.name, file.type),
+          name: file.name,
+          size: file.size,
+          status: "staging",
+          phase: "reading",
+          readProgress: 0,
+          previewUrl,
+        };
         setAttachments((prev) => addAttachment(prev, pending));
         controller
           .attachFile(
@@ -687,15 +749,14 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
               name: file.name,
               type: file.type,
               size: file.size,
-              dataUrl: () =>
-                new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(String(reader.result));
-                  reader.onerror = () => reject(new Error(t.fileReadFailed));
-                  reader.readAsDataURL(file);
-                }),
+              // `readAsDataURL` reports no progress, so the read is chunked into
+              // the same base64 shape by hand — over a remote dashboard this is
+              // where the seconds go for a large file, and a spinner with no
+              // number reads as "stuck".
+              dataUrl: (onRead) => readAsDataUrl(file, onRead),
             },
             id,
+            (patch) => setAttachments((prev) => updateAttachment(prev, id, patch)),
           )
           .then((done) => setAttachments((prev) => updateAttachment(prev, id, done)))
           .catch((err: unknown) =>
@@ -892,24 +953,73 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
 
   return React.createElement(
     "div",
-    { className: "flex h-full min-h-0 flex-col" },
+    { className: "flex h-full min-h-0 flex-col", "data-layout": mobile ? "mobile" : "desktop" },
 
-    // ── tabs ────────────────────────────────────────────────────────────
-    React.createElement(TabStrip, {
-      sdk,
-      locale,
-      tabs,
-      activeKey: state.activeKey,
-      runningKeys: running,
-      waitingKeys: waiting,
-      historyOpen,
-      notifyState,
-      onToggleNotify,
-      onFocus: (key: string) => controller.focusSession(key),
-      onClose: (key: string) => controller.closeSession(key),
-      onNew,
-      onToggleHistory: () => setHistoryOpen((v: boolean) => !v),
-    }),
+    // ── tabs, or the phone's two floating buttons ───────────────────────
+    // The strip is not restyled on a phone, it is REPLACED: one horizontal bar
+    // of tabs plus a history toggle costs ~40px of a 640px viewport and has no
+    // room for the two actions that matter there. Instead two 40px round
+    // buttons float over the transcript — refresh on the left (the chat's data,
+    // not the browser page), the drawer handle on the right.
+    mobile
+      ? React.createElement(
+          "div",
+          { className: "hb-fab-row", "data-hb": "fab-row" },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "refresh-chat",
+              className: "hb-fab",
+              title: t.refreshChat,
+              "aria-label": t.refreshChat,
+              onClick: () => void refreshChat(),
+            },
+            Icon(sdk, { name: "refresh", size: 17 }),
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-hb": "drawer-toggle",
+              "data-open": historyOpen ? "true" : "false",
+              className: "hb-fab",
+              title: t.chatMenu,
+              "aria-label": t.chatMenu,
+              "aria-expanded": historyOpen,
+              onClick: () => setHistoryOpen((v: boolean) => !v),
+            },
+            Icon(sdk, { name: "dots", size: 18 }),
+            // A waiting request on a background session must still be visible
+            // with no tab strip to mark it.
+            waiting.length
+              ? React.createElement("span", {
+                  className: "hb-fab-badge",
+                  "data-hb": "tab-waiting",
+                  title: t.waitingForAnswer,
+                  "aria-label": t.waitingForAnswer,
+                })
+              : null,
+            running.length
+              ? React.createElement("span", { className: "hb-fab-dot", "aria-hidden": "true" })
+              : null,
+          ),
+        )
+      : React.createElement(TabStrip, {
+          sdk,
+          locale,
+          tabs,
+          activeKey: state.activeKey,
+          runningKeys: running,
+          waitingKeys: waiting,
+          historyOpen,
+          notifyState,
+          onToggleNotify,
+          onFocus: (key: string) => controller.focusSession(key),
+          onClose: (key: string) => controller.closeSession(key),
+          onNew,
+          onToggleHistory: () => setHistoryOpen((v: boolean) => !v),
+        }),
 
     // ── transcript + history ────────────────────────────────────────────
     // `min-w-0` on every flex item in this chain: a flex item defaults to
@@ -1036,6 +1146,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         React.createElement(Composer, {
           sdk,
           locale,
+          mobile,
           editingText: editing?.text ?? null,
           onCancelEdit: () => setEditing(null),
           running: timeline.meta.running,
@@ -1047,6 +1158,8 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
           reasoning,
           attachments,
           catalog,
+          notifyState,
+          onToggleNotify,
           onSend,
           onStop,
           onPickFiles,
@@ -1076,6 +1189,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         sdk,
         locale,
         open: historyOpen,
+        variant: mobile ? "drawer" : "panel",
         mode: historyMode,
         onModeChange: setHistoryMode,
         onRefreshProjects: () => {
@@ -1116,6 +1230,7 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         onDelete,
         onUseAsContext,
         onClose: () => setHistoryOpen(false),
+        onNew,
       }),
     ),
 
@@ -1145,6 +1260,57 @@ export function ChatPage({ sdk }: { sdk: HermesPluginSdk }) {
         })
       : null,
   );
+}
+
+/**
+ * Read a File into a base64 data URL, reporting progress.
+ *
+ * `FileReader.readAsDataURL` is the obvious call, but it only fires `progress`
+ * for some backings and never tells you the final size on a blob URL. Reading
+ * in slices through `arrayBuffer()` is a few lines, works everywhere, and gives
+ * a real fraction — which is the difference between "uploading…" and an
+ * apparently frozen chip on a phone over a slow link.
+ */
+function readAsDataUrl(file: File, onProgress?: (fraction: number) => void): Promise<string> {
+  const CHUNK = 512 * 1024;
+  const total = file.size || 1;
+  if (file.size <= CHUNK) {
+    return file.arrayBuffer().then((buffer) => {
+      onProgress?.(1);
+      return dataUrlOf(buffer, file.type);
+    });
+  }
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  const next = (): Promise<string> => {
+    const end = Math.min(offset + CHUNK, file.size);
+    return file.slice(offset, end).arrayBuffer().then((buffer) => {
+      chunks.push(new Uint8Array(buffer));
+      offset = end;
+      onProgress?.(Math.min(1, offset / total));
+      if (offset < file.size) return next();
+      const joined = new Uint8Array(file.size);
+      let at = 0;
+      for (const chunk of chunks) {
+        joined.set(chunk, at);
+        at += chunk.byteLength;
+      }
+      return dataUrlOf(joined.buffer, file.type);
+    });
+  };
+  return next();
+}
+
+function dataUrlOf(buffer: ArrayBuffer, type: string): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  // Chunked so `String.fromCharCode` never sees an argument list long enough to
+  // overflow the stack on a multi-megabyte file.
+  const STEP = 0x8000;
+  for (let i = 0; i < bytes.length; i += STEP) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + STEP));
+  }
+  return `data:${type || "application/octet-stream"};base64,${btoa(binary)}`;
 }
 
 /**

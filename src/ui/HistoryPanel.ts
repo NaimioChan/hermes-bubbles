@@ -1,14 +1,25 @@
 /**
- * The history panel on the right: stored sessions you can open.
+ * The history panel: stored sessions you can open.
  *
- * Collapsible, because it competes with the transcript for horizontal space and
- * most of a session is spent not looking at it.
+ * Two presentations, one component:
+ *
+ *   - `panel` — the desktop's right-hand column: collapsible, in flow, sized for
+ *     a mouse.
+ *   - `drawer` — the phone's left sheet, opened from the floating "···" button
+ *     in the top-right corner. The tab strip (which owns "new chat" and
+ *     "history" on a desktop) does not exist on a phone, so both actions live
+ *     here: a "new chat" row at the top, then the same recent / projects lists.
+ *
+ * In the drawer each row's three tools collapse into one "···" menu. A 390px
+ * row has no width for three 28px glyphs beside a title and a timestamp, and
+ * Delete sitting a thumb-width from Rename is how conversations get lost.
  */
 
 import { messagesFor, type Locale } from "../core/i18n";
 import { SESSION_CONTEXT_MIME, sessionDragPayload } from "../core/context";
 import type { HermesPluginSdk } from "./sdk";
 import { ProjectList, type ProjectListProps } from "./ProjectList";
+import { Icon } from "./icons";
 
 export interface StoredSession {
   id: string;
@@ -25,6 +36,8 @@ export interface HistoryPanelProps {
   sdk: HermesPluginSdk;
   locale: Locale;
   open: boolean;
+  /** How the panel is presented. See the file header. */
+  variant: "panel" | "drawer";
   mode: HistoryMode;
   onModeChange: (mode: HistoryMode) => void;
   /** Everything the project view needs, minus sdk/locale (this component adds those). */
@@ -50,6 +63,8 @@ export interface HistoryPanelProps {
   onUseAsContext: (id: string, title: string) => void;
   onRefresh: () => void;
   onClose: () => void;
+  /** Start a fresh chat. The drawer's top row; the desktop gets it from the tab strip. */
+  onNew: () => void;
 }
 
 export function relativeTime(seconds: number, sdk: HermesPluginSdk, locale: Locale): string {
@@ -78,31 +93,55 @@ export function HistoryPanel(props: HistoryPanelProps) {
   // Which row is being renamed, and the draft. Null means no row is editing.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  // Which row's "···" menu is open (drawer only). Opening another row closes the
+  // previous one: two open menus in a scrolling sheet is a state nobody means.
+  const [menuId, setMenuId] = useState<string | null>(null);
+
+  const drawer = props.variant === "drawer";
 
   if (!props.open) return null;
+
+  const menuItem = (key: string, hook: string, label: string, run: () => void, danger = false) =>
+    React.createElement(
+      "button",
+      {
+        key,
+        type: "button",
+        "data-hb": hook,
+        role: "menuitem",
+        className: danger ? "hb-menu-item hb-menu-item-danger" : "hb-menu-item",
+        onClick: (event: { stopPropagation: () => void }) => {
+          event.stopPropagation();
+          setMenuId(null);
+          run();
+        },
+      },
+      label,
+    );
 
   return React.createElement(
     React.Fragment,
     null,
-    // Backdrop for the phone bottom-sheet (see `.hb-hist-backdrop` in style.css):
-    // `display:none` on desktop, a dimming layer under 768px. Tapping it closes
-    // the panel, which becomes an overlay there instead of a squeezed column.
+    // Backdrop. The desktop class is `display:none` above the breakpoint (it
+    // exists for the old phone bottom-sheet); the drawer always has one, because
+    // it covers the chat it belongs to.
     React.createElement("div", {
-      className: "hb-hist-backdrop",
+      className: drawer ? "hb-drawer-backdrop" : "hb-hist-backdrop",
       "data-hb": "history-backdrop",
       onClick: props.onClose,
     }),
     React.createElement(
       "div",
       {
-        className: "flex h-full min-h-0 flex-col",
+        className: drawer ? "hb-drawer" : "flex h-full min-h-0 flex-col",
         "data-hb": "history-panel",
-        style: { width: "17rem", borderLeft: "1px solid var(--color-border)" },
+        "data-variant": props.variant,
+        style: drawer ? undefined : { width: "17rem", borderLeft: "1px solid var(--color-border)" },
       },
 
     React.createElement(
       "div",
-      { className: "flex shrink-0 items-center gap-1 px-3 py-2" },
+      { className: drawer ? "hb-drawer-head" : "flex shrink-0 items-center gap-1 px-3 py-2" },
       React.createElement(
         "span",
         {
@@ -119,25 +158,43 @@ export function HistoryPanel(props: HistoryPanelProps) {
           {
             type: "button",
             title: t.refreshTitle,
-            className: "cursor-pointer px-1.5 text-xs",
-            style: { color: "var(--color-muted-foreground)" },
+            "data-hb": "history-refresh",
+            className: "hb-icon-btn",
             onClick: props.mode === "projects" ? props.onRefreshProjects : props.onRefresh,
           },
-          "⟳",
+          Icon(sdk, { name: "refresh", size: 15 }),
         ),
         React.createElement(
           "button",
           {
             type: "button",
             title: t.collapse,
-            className: "cursor-pointer px-1.5 text-xs",
-            style: { color: "var(--color-muted-foreground)" },
+            "data-hb": "history-close",
+            className: "hb-icon-btn",
             onClick: props.onClose,
           },
-          "»",
+          Icon(sdk, { name: "close", size: 15 }),
         ),
       ),
     ),
+
+    // The drawer's first row: on a phone this is the only "new chat" there is.
+    drawer
+      ? React.createElement(
+          "button",
+          {
+            type: "button",
+            "data-hb": "drawer-new",
+            className: "hb-drawer-new",
+            onClick: () => {
+              props.onClose();
+              props.onNew();
+            },
+          },
+          Icon(sdk, { name: "plus", size: 16 }),
+          React.createElement("span", null, t.newChat),
+        )
+      : null,
 
     // Recent vs Projects. Two words, not icons: the difference is a grouping
     // rule, and a glyph pair would need a legend.
@@ -176,7 +233,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
         })
       : React.createElement(
       "div",
-      { className: "min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 hb-scroll" },
+      { className: "hb-hist-list hb-scroll" },
       props.loading
         ? React.createElement(
             "div",
@@ -191,14 +248,19 @@ export function HistoryPanel(props: HistoryPanelProps) {
             )
           : props.sessions.map((session) => {
               const isActive = session.id === props.activeStoredId;
+              const menuOpen = menuId === session.id;
               return React.createElement(
                 "div",
                 {
                   key: session.id,
-                  className: "cursor-pointer px-2 py-1.5 text-xs",
+                  className: "hb-hist-row",
+                  "data-hb": "history-row",
+                  "data-active": isActive ? "true" : "false",
                   // The row is also a drag source: dropping it on the composer
                   // attaches its transcript as context (see `core/context.ts`).
-                  draggable: true,
+                  // Not in the drawer: a phone has no drag, and a long-press drag
+                  // would fight the scroll.
+                  draggable: !drawer,
                   onDragStart: (event: {
                     dataTransfer?: DataTransfer;
                     stopPropagation: () => void;
@@ -213,9 +275,8 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     }
                   },
                   style: {
-                    borderRadius: "calc(var(--radius) * 0.6)",
-                    color: "var(--color-card-foreground)",
                     background: isActive ? "var(--color-muted)" : "transparent",
+                    color: "var(--color-card-foreground)",
                   },
                   title: session.preview || session.title,
                   onClick: () => props.onOpen(session.id, session.title || session.id.slice(0, 8)),
@@ -228,7 +289,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                 },
                 React.createElement(
                   "div",
-                  { className: "flex items-baseline gap-1.5" },
+                  { className: "hb-hist-main" },
                   renamingId === session.id
                     ? React.createElement("input", {
                         autoFocus: true,
@@ -290,61 +351,81 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     },
                     relativeTime(session.started_at, sdk, props.locale),
                   ),
-                  // Hidden until the row is hovered, so the list stays quiet.
-                  React.createElement(
-                    "span",
-                    { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
-                    React.createElement(
-                      "button",
-                      {
-                        type: "button",
-                        title: t.useAsContext,
-                        "aria-label": t.useAsContext,
-                        "data-hb": "session-to-context",
-                        className: "hb-action-btn",
-                        onClick: (event: { stopPropagation: () => void }) => {
-                          event.stopPropagation();
-                          props.onUseAsContext(session.id, session.title);
+                  // Desktop shows the three glyphs, revealed on hover; the
+                  // drawer shows one "···" that owns the same three actions.
+                  drawer
+                    ? React.createElement(
+                        "button",
+                        {
+                          type: "button",
+                          "data-hb": "session-menu",
+                          "data-hb-id": session.id,
+                          "data-open": menuOpen ? "true" : "false",
+                          "aria-expanded": menuOpen,
+                          className: "hb-icon-btn hb-row-more",
+                          title: t.projectMenu,
+                          "aria-label": t.projectMenu,
+                          onClick: (event: { stopPropagation: () => void }) => {
+                            event.stopPropagation();
+                            setMenuId((current: string | null) => (current === session.id ? null : session.id));
+                          },
                         },
-                      },
-                      "⇩",
-                    ),
-                    React.createElement(
-                      "button",
-                      {
-                        type: "button",
-                        title: t.rename,
-                        "aria-label": t.rename,
-                        "data-hb": "rename-session",
-                        className: "hb-action-btn",
-                        onClick: (event: { stopPropagation: () => void }) => {
-                          event.stopPropagation();
-                          setDraft(session.title || "");
-                          setRenamingId(session.id);
-                        },
-                      },
-                      "✎",
-                    ),
-                    React.createElement(
-                      "button",
-                      {
-                        type: "button",
-                        title: t.delete,
-                        "aria-label": t.delete,
-                        "data-hb": "delete-session",
-                        className: "hb-action-btn",
-                        onClick: (event: { stopPropagation: () => void }) => {
-                          event.stopPropagation();
-                          // Destructive and irreversible: confirm in the host's
-                          // own dialog rather than acting on a stray click.
-                          if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
-                        },
-                      },
-                      "🗑",
-                    ),
-                  ),
+                        Icon(sdk, { name: "dots", size: 16 }),
+                      )
+                    : React.createElement(
+                        "span",
+                        { className: "hb-row-tools shrink-0 flex items-center gap-0.5" },
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            title: t.useAsContext,
+                            "aria-label": t.useAsContext,
+                            "data-hb": "session-to-context",
+                            className: "hb-action-btn",
+                            onClick: (event: { stopPropagation: () => void }) => {
+                              event.stopPropagation();
+                              props.onUseAsContext(session.id, session.title);
+                            },
+                          },
+                          "⇩",
+                        ),
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            title: t.rename,
+                            "aria-label": t.rename,
+                            "data-hb": "rename-session",
+                            className: "hb-action-btn",
+                            onClick: (event: { stopPropagation: () => void }) => {
+                              event.stopPropagation();
+                              setDraft(session.title || "");
+                              setRenamingId(session.id);
+                            },
+                          },
+                          "✎",
+                        ),
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            title: t.delete,
+                            "aria-label": t.delete,
+                            "data-hb": "delete-session",
+                            className: "hb-action-btn",
+                            onClick: (event: { stopPropagation: () => void }) => {
+                              event.stopPropagation();
+                              // Destructive and irreversible: confirm in the host's
+                              // own dialog rather than acting on a stray click.
+                              if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
+                            },
+                          },
+                          "🗑",
+                        ),
+                      ),
                 ),
-                session.preview
+                session.preview && !drawer
                   ? React.createElement(
                       "div",
                       {
@@ -354,9 +435,34 @@ export function HistoryPanel(props: HistoryPanelProps) {
                       session.preview,
                     )
                   : null,
+                // In flow, not absolutely positioned: this list is a scrolling
+                // column and an absolute popover inside it is clipped by the
+                // scroll box (and can land off-screen).
+                menuOpen
+                  ? React.createElement(
+                      "div",
+                      { className: "hb-row-menu", "data-hb": "session-menu-panel", role: "menu" },
+                      menuItem("ctx", "session-to-context", t.useAsContext, () =>
+                        props.onUseAsContext(session.id, session.title),
+                      ),
+                      menuItem("ren", "rename-session", t.rename, () => {
+                        setDraft(session.title || "");
+                        setRenamingId(session.id);
+                      }),
+                      menuItem(
+                        "del",
+                        "delete-session",
+                        t.delete,
+                        () => {
+                          if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
+                        },
+                        true,
+                      ),
+                    )
+                  : null,
               );
             }),
-        ),
-      ),
+    ),
+  ),
   );
 }

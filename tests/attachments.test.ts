@@ -4,14 +4,18 @@ import {
   addAttachment,
   allSettled,
   attachMethodFor,
+  attachmentPercent,
   classifyFile,
   formatBytes,
   hasFailed,
+  isPreviewable,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_MIB,
+  messageAttachments,
   readyAttachments,
   removeAttachment,
   screenFiles,
+  splitAttachmentRefs,
   updateAttachment,
   type Attachment,
 } from "../src/core/attachments";
@@ -24,16 +28,31 @@ describe("classifyFile", () => {
   it("classifies by MIME first", () => {
     expect(classifyFile("whatever", "image/png")).toBe("image");
     expect(classifyFile("whatever", "application/pdf")).toBe("pdf");
+    expect(classifyFile("whatever", "video/mp4")).toBe("video");
   });
 
   it("falls back to the extension", () => {
     expect(classifyFile("shot.PNG")).toBe("image");
     expect(classifyFile("doc.pdf")).toBe("pdf");
+    expect(classifyFile("clip.MOV")).toBe("video");
     expect(classifyFile("main.ts")).toBe("file");
   });
 
   it("treats an unknown type as a plain file", () => {
     expect(classifyFile("archive.zip")).toBe("file");
+  });
+});
+
+describe("classifyFile video", () => {
+  it("sends a video down file.attach — there is no video RPC", () => {
+    expect(attachMethodFor("video")).toBe("file.attach");
+  });
+
+  it("previews images and videos, not documents", () => {
+    expect(isPreviewable("image")).toBe(true);
+    expect(isPreviewable("video")).toBe(true);
+    expect(isPreviewable("pdf")).toBe(false);
+    expect(isPreviewable("file")).toBe(false);
   });
 });
 
@@ -132,5 +151,85 @@ describe("formatBytes", () => {
   it("is empty for a missing or invalid size", () => {
     expect(formatBytes(undefined)).toBe("");
     expect(formatBytes(-1)).toBe("");
+  });
+});
+
+describe("a sent message carries its attachments", () => {
+  it("snapshots only what the backend accepted", () => {
+    const queue: Attachment[] = [
+      make("a", { kind: "image", name: "shot.png", previewUrl: "blob:1", size: 2048 }),
+      make("b", { status: "error" }),
+      make("c", { status: "staging" }),
+      make("d", { kind: "file", name: "notes.txt", refText: "@file:notes.txt" }),
+    ];
+    expect(messageAttachments(queue)).toEqual([
+      { kind: "image", name: "shot.png", size: 2048, preview: "blob:1", ref: undefined },
+      { kind: "file", name: "notes.txt", size: undefined, preview: undefined, ref: "@file:notes.txt" },
+    ]);
+  });
+
+  it("reads trailing refs back off a stored row", () => {
+    // The gateway projects an attached image onto the row as a ref line; a
+    // reopen must show it as an attachment, not as a path in the prose.
+    const split = splitAttachmentRefs("what is this\n\n@image:/home/u/.hermes/images/upload_ab12.png");
+    expect(split.text).toBe("what is this");
+    expect(split.refs).toEqual([
+      { kind: "image", name: "upload_ab12.png", ref: "@image:/home/u/.hermes/images/upload_ab12.png" },
+    ]);
+  });
+
+  it("strips the model-facing attached-context footer", () => {
+    // A real stored row: the gateway keeps the ref AND appends the expanded
+    // file for the model. Neither belongs in the bubble.
+    const stored =
+      "what colour is this\n\n@file:notes.txt\n\n--- Attached Context ---\n\n" +
+      "📄 @file:notes.txt (5 tokens)\n```\nhello\n```";
+    const split = splitAttachmentRefs(stored);
+    expect(split.text).toBe("what colour is this");
+    expect(split.refs).toHaveLength(1);
+    expect(split.refs[0]).toMatchObject({ kind: "file", name: "notes.txt" });
+  });
+
+  it("collapses a duplicated reference to one attachment", () => {
+    const split = splitAttachmentRefs("look\n@image:/a/b.png\n@image:/a/b.png");
+    expect(split.refs).toHaveLength(1);
+    expect(split.text).toBe("look");
+  });
+
+  it("keeps a ref in the middle of a message out of the prose", () => {
+    const split = splitAttachmentRefs("before\n@file:notes.txt\nafter");
+    expect(split.text).toBe("before\nafter");
+    expect(split.refs).toHaveLength(1);
+  });
+
+  it("unquotes a ref value that needed quoting", () => {
+    const split = splitAttachmentRefs('look\n@file:"my notes/todo.md"');
+    expect(split.text).toBe("look");
+    expect(split.refs[0]).toMatchObject({ kind: "file", name: "todo.md", ref: "@file:my notes/todo.md" });
+  });
+
+  it("leaves a message with no refs exactly as it was", () => {
+    expect(splitAttachmentRefs("plain text\nwith two lines")).toEqual({
+      text: "plain text\nwith two lines",
+      refs: [],
+    });
+  });
+
+  it("keeps a bare attachment-only turn as an attachment row", () => {
+    const split = splitAttachmentRefs("@file:notes.txt");
+    expect(split.text).toBe("");
+    expect(split.refs).toHaveLength(1);
+  });
+});
+
+describe("staging progress", () => {
+  it("reports a percentage while the file is being read", () => {
+    const item = make("a", { status: "staging", phase: "reading", readProgress: 0.42 });
+    expect(attachmentPercent(item)).toBe(42);
+  });
+
+  it("has no number once the upload frame is on the wire", () => {
+    expect(attachmentPercent(make("a", { status: "staging", phase: "uploading" }))).toBeNull();
+    expect(attachmentPercent(make("a"))).toBeNull();
   });
 });

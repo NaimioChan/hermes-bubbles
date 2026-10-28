@@ -197,6 +197,38 @@ describe("sending", () => {
     expect(socket.frames().some((f) => f.method === "prompt.submit")).toBe(false);
   });
 
+  it("carries the attachment into the bubble and its file ref into the prompt", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const sending = controller.send("看这个", [
+      { kind: "file", name: "notes.txt", size: 12, ref: "@file:notes.txt" },
+      { kind: "image", name: "shot.png", preview: "blob:1" },
+    ]);
+    await tick();
+    const frame = socket.frames().find((f) => f.method === "prompt.submit");
+    // The ref goes to the MODEL only; the bubble keeps the sentence.
+    expect(frame?.params).toMatchObject({ text: "看这个\n\n@file:notes.txt" });
+    socket.replyTo("prompt.submit", { status: "streaming" });
+    await sending;
+
+    expect(activeTimeline(controller.getSnapshot()).items[0]).toMatchObject({
+      kind: "user",
+      text: "看这个",
+      attachments: [
+        { kind: "file", name: "notes.txt", ref: "@file:notes.txt" },
+        { kind: "image", name: "shot.png", preview: "blob:1" },
+      ],
+    });
+  });
+
+  it("sends an attachment with no caption", async () => {
+    const { controller, socket } = await connectAndOpen();
+    const sending = controller.send("", [{ kind: "image", name: "shot.png", preview: "blob:1" }]);
+    await tick();
+    socket.replyTo("prompt.submit", { status: "streaming" });
+    await sending;
+    expect(activeTimeline(controller.getSnapshot()).items[0]).toMatchObject({ kind: "user", text: "" });
+  });
+
   it("settles the timeline when interrupted even if the RPC fails", async () => {
     const { controller, socket } = await connectAndOpen();
     const sending = controller.send("跑个长任务");

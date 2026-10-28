@@ -8,6 +8,8 @@
  * Pure data. No DOM, no React, no transport. See AGENTS.md 铁律 1.
  */
 
+import type { MessageAttachment } from "./attachments";
+
 export interface Usage {
   model?: string;
   input?: number;
@@ -54,6 +56,16 @@ export interface UserItem {
   id: string;
   at: Millis;
   text: string;
+  /**
+   * Files this turn carried, drawn above the text.
+   *
+   * The gateway stages attachments on the session and mentions them inside the
+   * prompt; nothing in the wire says "this row had a photo". So the send path
+   * snapshots the composer's ready queue here, and a reopened session recovers
+   * what it can from the row's trailing `@file:` / `@image:` references
+   * (`core/attachments.ts::splitAttachmentRefs`).
+   */
+  attachments?: MessageAttachment[];
   /** Durable row id, when the backend has told us one. */
   rowId?: number;
   /**

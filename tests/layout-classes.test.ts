@@ -132,6 +132,43 @@ describe("layout classes", () => {
     expect(composer).toContain("hb-composer-tools");
   });
 
+  it("keeps the phone drawer anchored to the chat area, not the viewport", () => {
+    // `position: fixed` anchors to the viewport, and the dashboard's own top bar
+    // paints over it — the sheet's header lands above the visible screen and the
+    // drawer loses its title and close button. Measured at 390×844: `fixed` put
+    // the header at y=-46. Absolute inside `[data-layout]` (position:relative)
+    // starts it under that bar.
+    expect(ownCss).toMatch(/\.hb-drawer\s*\{[^}]*position:\s*absolute/);
+    expect(ownCss).toMatch(/\.hb-drawer-backdrop\s*\{[^}]*position:\s*absolute/);
+    expect(ownCss).toMatch(/\[data-layout="mobile"\]\s*\{[^}]*position:\s*relative/);
+  });
+
+  it("caps the reasoning block so it cannot own the transcript", () => {
+    // A chain of thought is furniture; unbounded (22rem) it pushed the answer
+    // off screen. 7.5rem ≈ 7 lines, and the block scrolls inside itself.
+    const think = /\.hb-think-body\s*\{([^}]*)\}/.exec(ownCss)?.[1] ?? "";
+    const max = /max-height:\s*([\d.]+)rem/.exec(think)?.[1];
+    expect(max).toBeDefined();
+    expect(Number(max)).toBeLessThanOrEqual(8);
+    expect(think).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("gives the phone's round buttons a 44px tap target", () => {
+    // The visual box is 38px; a ::after overlay carries the rest, vertically and
+    // horizontally, without making the composer row taller.
+    const block = ownCss.slice(ownCss.indexOf("@media (max-width: 768px)"));
+    expect(block).toMatch(/\.hb-round-btn::after\s*\{[^}]*inset:\s*-3px/);
+    expect(block).toMatch(/\.hb-composer-more::after\s*\{[^}]*inset:\s*-3px/);
+  });
+
+  it("never re-animates a streaming bubble", () => {
+    // The entrance animation sits on the transcript ROW, which React keys — a
+    // delta repaints the text without remounting, so nothing re-runs. Putting it
+    // on the bubble's inner text would animate on every token.
+    expect(ownCss).toMatch(/\.hb-bubble-gap\s*\{[^}]*animation:\s*hb-bubble-in/);
+    expect(ownCss).not.toMatch(/\.hb-bubble-text\s*\{[^}]*animation:/);
+  });
+
   it("lets the chat column shrink so a long line cannot overflow the page", () => {
     // A flex item defaults to min-width:auto and refuses to shrink below its
     // content's min-content width. One long code line then blew the transcript

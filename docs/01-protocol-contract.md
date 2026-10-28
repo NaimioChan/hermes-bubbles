@@ -316,7 +316,13 @@
 
 `FileAttachResult`: `{attached, name, path, ref_path, ref_text, uploaded}` —— `ref_text` 是插进输入框的那段 `@file:` 文本。
 
-**浏览器侧的重要限制**：`file.attach` 的 `path` 形式要求文件在网关可见的主机上。网页只能读用户通过 `<input type=file>` / 拖放给的文件内容，所以必须走 `data_url` / `content_base64` 那条。`file.attach` 走的是 JSON-RPC，桌面端按 384 MiB 上限放行单帧，网页侧要自己设更小的上限。
+**附件如何进到模型，以及如何回到气泡**（0.22.5 实测）：
+
+- **图片**（`image.attach_bytes`）由网关自己排队（`session["attached_images"]`），下一轮自动折进 prompt，客户端**不需要**把引用写进文本。`image.detach` 按主机路径撤销排队。
+- **其它文件**（`file.attach`）只是把字节落进 `<session home>/attachments/` 并回一个 `@file:<workspace 相对路径>`。**模型看不到它，除非这段 `@file:` 出现在 `prompt.submit` 的 `text` 里**——所以插件把它追加在正文之后发送（`controller.send` 的 `modelText`），气泡上仍只显示用户写的句子。
+- 发送后 `messages.content` 里会留下三段东西：`正文` + `@file:…` + `--- Attached Context ---` 页脚（`agent/context_references.py` 展开引用时写入，含整份文件内容与 token 计数）。页脚是给模型看的，桌面端 `title_generator` 也把它切掉。重开会话时 `core/attachments.ts::splitAttachmentRefs` 把前两段还原成「附件行 + 正文」，页脚丢弃——**不要**把它当聊天内容渲染。
+- **视频没有专门的 RPC**：`video/*` 与普通文件一样走 `file.attach`，因此重开会话只能拿回文件名，没有缩略图（本地刚发的那一版有 object URL）。
+- **上传进度**：attach 走 JSON-RPC，单帧、**没有进度通道**。能测的只有「把 File 读成 base64」这一段（插件按 512 KiB 分片读并上报百分比），之后的 RPC 阶段只能说「正在上传」。远端仪表盘上耗时的正是后者，所以两段要分开显示，不要给一个假百分比。
 
 ### 多会话
 

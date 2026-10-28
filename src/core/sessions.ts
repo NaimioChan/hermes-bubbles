@@ -10,6 +10,7 @@
  * into this.
  */
 
+import type { MessageAttachment } from "./attachments";
 import { EventDedupe } from "./dedupe";
 import { projectHistory, timelineFromSnapshot, type LiveSessionSnapshot } from "./history";
 import { ackUser, appendUser, reduceEvent, settleTimeline, type GatewayEvent } from "./reduce";
@@ -251,10 +252,14 @@ export function routeEvent(
 }
 
 /** Optimistically append the user's message to the active tab. */
-export function appendUserToActive(state: MultiState, text: string): MultiState {
+export function appendUserToActive(
+  state: MultiState,
+  text: string,
+  attachments: MessageAttachment[] = [],
+): MultiState {
   const key = state.activeKey;
   if (!key) return state;
-  return withTimeline(state, key, appendUser(timelineOf(state, key), text));
+  return withTimeline(state, key, appendUser(timelineOf(state, key), text, attachments));
 }
 
 export function ackUserInActive(state: MultiState, rowId: number | undefined): MultiState {

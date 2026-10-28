@@ -9,7 +9,7 @@
  * See AGENTS.md 铁律 1–2.
  */
 
-import { attachMethodFor, type Attachment, type AttachmentKind } from "../core/attachments";
+import { attachMethodFor, type Attachment, type AttachmentKind, type MessageAttachment } from "../core/attachments";
 import {
   isWithdrawalEvent,
   withdrawalsFrom,
@@ -541,22 +541,31 @@ export class ChatController {
    * A leading `/` is a command, not a message: it goes through
    * `command.dispatch` and the reply's `type` decides what happens next.
    */
-  async send(text: string): Promise<void> {
+  async send(text: string, attachments: readonly MessageAttachment[] = []): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // A photo with no caption is a normal thing to send: the turn is the
+    // attachment. Text-only sends keep their old guard.
+    if (!trimmed && !attachments.length) return;
 
     // With every tab closed there is no session to attach to. The composer stays
     // live in that state (a dashboard with no chat open is not a dead input box),
     // so sending mints a session first.
     if (!this.state.activeKey) await this.newSession();
 
-    const command = parseCommandInput(trimmed);
+    const command = trimmed ? parseCommandInput(trimmed) : null;
     if (command) {
       await this.dispatchCommand(command.name, command.arg);
       return;
     }
 
-    await this.submitMessage(trimmed, trimmed);
+    // `file.attach` stages the bytes in the session workspace and hands back an
+    // `@file:` reference; the model only ever sees that reference if it is in
+    // the prompt. Images are different — the gateway queues them on the session
+    // and folds them in itself — so only file refs are appended here, and only
+    // to the MODEL text, never to what the bubble shows.
+    const refs = attachments.map((item) => item.ref).filter((ref): ref is string => Boolean(ref));
+    const modelText = refs.length ? `${trimmed}\n\n${refs.join("\n")}`.trim() : trimmed;
+    await this.submitMessage(modelText, trimmed, attachments);
   }
 
   /**
@@ -622,13 +631,17 @@ export class ChatController {
    * used to disable itself instead, which is not how Hermes behaves elsewhere —
    * mid-turn input is a correction, not an error.
    */
-  private async submitMessage(message: string, display: string): Promise<void> {
-    if (!message.trim()) return;
+  private async submitMessage(
+    message: string,
+    display: string,
+    attachments: readonly MessageAttachment[] = [],
+  ): Promise<void> {
+    if (!message.trim() && !attachments.length) return;
     const runtimeId = await this.ensureSession();
     if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
     const wasRunning = activeTimeline(this.state).meta.running;
 
-    this.setState(appendUserToActive(this.state, display || message));
+    this.setState(appendUserToActive(this.state, display || message, attachments.slice()));
     const result = await this.client.request<{ status?: string; user_row_id?: number }>("prompt.submit", {
       session_id: runtimeId,
       text: message,
@@ -1074,22 +1087,30 @@ export class ChatController {
    * inserts.
    */
   async attachFile(
-    file: { name: string; type: string; size: number; dataUrl: () => Promise<string> },
+    file: { name: string; type: string; size: number; dataUrl: (onRead?: (fraction: number) => void) => Promise<string> },
     id: string,
+    onProgress?: (patch: { phase?: Attachment["phase"]; readProgress?: number }) => void,
   ): Promise<Attachment> {
     const kind: AttachmentKind =
       file.type === "application/pdf" || /\.pdf$/i.test(file.name)
         ? "pdf"
         : file.type.startsWith("image/")
           ? "image"
-          : "file";
+          : file.type.startsWith("video/")
+            ? "video"
+            : "file";
 
     const runtimeId = await this.ensureSession();
     if (!runtimeId) throw new Error(messagesFor(this.locale).sessionNotReady);
 
-    const dataUrl = await file.dataUrl();
+    // Reading the file off disk is the only part of staging that can report
+    // progress; the RPC itself is a single frame with no progress channel, so
+    // that phase is announced as started and nothing more.
+    onProgress?.({ phase: "reading", readProgress: 0 });
+    const dataUrl = await file.dataUrl((fraction) => onProgress?.({ phase: "reading", readProgress: fraction }));
+    onProgress?.({ phase: "uploading" });
     const params: Record<string, unknown> = { session_id: runtimeId };
-    if (kind === "file") {
+    if (kind === "file" || kind === "video") {
       params.data_url = dataUrl;
       params.name = file.name;
     } else {

@@ -1032,8 +1032,7 @@ async function main() {
       if (!victim) return { error: 'scratch session did not persist' };
 
       // Drive the real UI: refresh the panel, find the row, click delete.
-      const refreshBtn = [...document.querySelectorAll('[data-hb="history-panel"] button')]
-        .find((b) => /refresh/i.test(b.getAttribute('title') || ''));
+      const refreshBtn = document.querySelector('[data-hb="history-refresh"]');
       refreshBtn?.click();
       await new Promise((r) => setTimeout(r, 2000));
 

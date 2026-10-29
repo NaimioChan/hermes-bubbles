@@ -17,6 +17,7 @@ import type { HermesPluginSdk } from "./sdk";
 import { Markdown } from "./Markdown";
 import { MessageAttachments } from "./Attachments";
 import { formatCount, formatDuration, toolLabel, toolPreview } from "./format";
+import { Icon, type IconName } from "./icons";
 
 interface BubbleProps {
   sdk: HermesPluginSdk;
@@ -95,7 +96,7 @@ function UserBubble({
                   onEdit(item.id, item.text);
                 },
               },
-              "✎",
+              Icon(sdk, { name: "pencil", size: 15 }),
             ),
           ),
         )
@@ -186,7 +187,7 @@ function ReasoningRow({
         "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
-      React.createElement("span", { className: "hb-think-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-think-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
       React.createElement("span", { className: "hb-think-label" }, t.thought),
       item.streaming
         ? React.createElement(
@@ -239,7 +240,7 @@ function MessageActions({
 
   const stamp = messageStamp(item.completedAt ?? item.at, locale);
 
-  const iconButton = (key: string, title: string, glyph: string, action: () => void) =>
+  const iconButton = (key: string, name: IconName, title: string, action: () => void) =>
     React.createElement(
       "button",
       {
@@ -247,13 +248,14 @@ function MessageActions({
         type: "button",
         title,
         "aria-label": title,
+        "data-hb": `msg-${key}`,
         className: "hb-action-btn",
         onClick: (event: { stopPropagation: () => void }) => {
           event.stopPropagation();
           action();
         },
       },
-      glyph,
+      Icon(sdk, { name, size: 15 }),
     );
 
   return React.createElement(
@@ -278,15 +280,15 @@ function MessageActions({
     React.createElement(
       "div",
       { className: "hb-actions-tools ml-auto flex items-center gap-1" },
-      onBranch ? iconButton("branch", t.branchNewChat, "⑂", () => onBranch(item.id)) : null,
+      onBranch ? iconButton("branch", "branch", t.branchNewChat, () => onBranch(item.id)) : null,
       onCopy
-        ? iconButton("copy", copied ? t.copied : t.copy, copied ? "✓" : "⧉", () => {
+        ? iconButton("copy", copied ? "check" : "copy", copied ? t.copied : t.copy, () => {
             onCopy(item.text);
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
           })
         : null,
-      onRegenerate ? iconButton("regen", t.refresh, "↻", () => onRegenerate(item.id)) : null,
+      onRegenerate ? iconButton("regen", "redo", t.refresh, () => onRegenerate(item.id)) : null,
     ),
   );
 }
@@ -409,7 +411,7 @@ function ToolRow({ sdk, item, locale }: { sdk: HermesPluginSdk; item: ToolItem; 
         "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
-      React.createElement("span", { className: "hb-tool-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-tool-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
       React.createElement("span", { className: "hb-tool-name" }, toolLabel(item.name, t)),
       item.status === "running"
         ? React.createElement(
@@ -555,7 +557,7 @@ function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: Suba
           "aria-expanded": isOpen ? "true" : "false",
           onClick: () => setExpanded((prev) => ({ ...prev, [child.key]: !prev[child.key] })),
         },
-        React.createElement("span", { className: "hb-sub-caret" }, isOpen ? "▾" : "▸"),
+        React.createElement("span", { className: "hb-sub-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
         React.createElement("span", { className: "hb-sub-index" }, `${child.taskIndex + 1}`),
         React.createElement(
           "span",
@@ -590,7 +592,7 @@ function SubagentsCard({ sdk, item, locale }: { sdk: HermesPluginSdk; item: Suba
         "aria-expanded": open ? "true" : "false",
         onClick: () => setOpen((v: boolean) => !v),
       },
-      React.createElement("span", { className: "hb-sub-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-sub-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
       React.createElement("span", { className: "hb-sub-title" }, t.subagents),
       running
         ? React.createElement("span", { className: "hb-caret hb-sub-live", style: { color: "var(--color-primary)" } }, "●")

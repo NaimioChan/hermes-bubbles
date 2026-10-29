@@ -351,6 +351,10 @@
 }
 
 .hb-code-copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
   margin-left: auto;
   padding: 0 0.35rem;
   border: 0;
@@ -847,7 +851,74 @@
   border-radius: calc(var(--radius) * 0.5);
 }
 
-/* ── per-message actions ──────────────────────────────────────────────────── */
+/* ── icons ────────────────────────────────────────────────────────────────── */
+
+/*
+ * One box for every glyph in the page (`src/ui/icons.ts`).
+ *
+ * `display: block` matters more than it looks: an inline SVG is a
+ * baseline-aligned inline box, so it leaves the font's descender space beneath
+ * it and sits a couple of px high inside a flex-centred button. That is the
+ * "the three buttons don't line up" complaint this set replaced text glyphs to
+ * fix — the fix is not the drawing, it is that every icon is the same block.
+ */
+.hb-icon {
+  display: block;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+/*
+ * Carets: ONE chevron, rotated, instead of swapping `▸` for `▾`.
+ *
+ * A glyph swap re-flows the row and cannot animate. A 90° rotation on the same
+ * element crosses over in 160ms and reads as the panel opening rather than as a
+ * new character arriving. `transform-origin: center` is the default, but the
+ * inline box's own off-centre geometry is why it is stated.
+ */
+.hb-act-caret,
+.hb-think-caret,
+.hb-tool-caret,
+.hb-sub-caret,
+.hb-todo-caret,
+.hb-proj-caret,
+.hb-workspace-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  transition: transform var(--hb-move) var(--hb-ease);
+}
+
+[data-open="true"] > .hb-act-caret,
+[data-open="true"] > .hb-think-caret,
+[data-open="true"] > .hb-tool-caret,
+[data-open="true"] > .hb-sub-caret,
+[data-open="true"] > .hb-todo-caret,
+[data-open="true"] > .hb-proj-caret,
+[data-open="true"] > .hb-workspace-caret {
+  transform: rotate(90deg);
+}
+
+/* Two of the carets are not direct children of the toggle button. */
+.hb-sub-head[data-open="true"] .hb-sub-caret,
+.hb-sub-row[data-open="true"] .hb-sub-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hb-act-caret,
+  .hb-think-caret,
+  .hb-tool-caret,
+  .hb-sub-caret,
+  .hb-todo-caret,
+  .hb-proj-caret,
+  .hb-workspace-caret {
+    transition: none;
+  }
+}
+
+
 
 /* Transparent until the message is hovered, and always occupying its height so
  * revealing it cannot shift the conversation below. Mirrors the desktop app's
@@ -879,14 +950,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 1.5rem;
+  height: 1.5rem;
   padding: 0;
   border: 0;
   border-radius: calc(var(--radius) * 0.5);
   background: transparent;
   color: var(--color-muted-foreground);
-  font-size: 0.8125rem;
   line-height: 1;
   cursor: pointer;
   transition:
@@ -1371,7 +1441,6 @@ div:hover > .hb-row-tools,
 
 .hb-workspace-caret {
   opacity: 0.6;
-  font-size: 0.5625rem;
 }
 
 .hb-workspace-chip-label {
@@ -1511,9 +1580,23 @@ div:hover > .hb-row-tools,
 }
 
 .hb-workspace-check {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
   color: var(--color-primary);
-  font-size: 0.625rem;
+}
+
+/* The model picker's "current" tick. Same reason as the workspace check: an
+ * inline-flex box on a 14px icon, not a text glyph at an inherited size. */
+.hb-picker-check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--color-primary);
+}
+
+.hb-workspace-rescan-busy {
+  opacity: 0.7;
 }
 
 .hb-workspace-custom {
@@ -1734,7 +1817,6 @@ div:hover > .hb-row-tools,
 .hb-proj-caret {
   flex: 0 0 auto;
   color: var(--color-muted-foreground);
-  font-size: 0.5625rem;
 }
 
 .hb-proj-name {
@@ -2092,8 +2174,46 @@ div:hover > .hb-row-tools,
   animation: hb-caret 1.1s steps(1, end) infinite;
 }
 
-/* ── drawer (history) ─────────────────────────────────────────────────────── */
+/* ── history panel (desktop column) ───────────────────────────────────────── */
 
+/*
+ * The desktop presentation: a 17rem column docked to the right of the chat.
+ *
+ * It opens and closes with motion like everything else in this page. The width
+ * is what animates (0 → 17rem), because a docked panel's "opening" IS the
+ * transcript losing that width — sliding the sheet over the conversation would
+ * be the phone's gesture, not a column's. Each child holds `min-width: 17rem`
+ * so nothing squashes on the way in: the content is revealed by the growing box
+ * rather than being re-laid-out narrower on every frame.
+ *
+ * 190ms is deliberately longer than the 160ms `--hb-move`: this is the one
+ * animation that reflows the transcript, and at 160 it reads as a jump.
+ */
+.hb-hist-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  /* The resting width. It has to be stated: as a `flex: 0 0 auto` item the
+   * column otherwise sizes to its content (338px with a long session title),
+   * and the keyframes below have nothing to animate to. */
+  width: 17rem;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border);
+  animation: hb-panel-in 0.19s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.hb-hist-panel > * {
+  min-width: 17rem;
+}
+
+.hb-hist-panel[data-state="closing"] {
+  animation: hb-panel-out 0.16s cubic-bezier(0.4, 0, 0.7, 0.2) forwards;
+  pointer-events: none;
+}
+
+/* ── drawer (history) ─────────────────────────────────────────────────────── */
 /*
  * The panel and its click-catcher are ABSOLUTE, not fixed.
  *
@@ -2632,6 +2752,19 @@ div:hover > .hb-row-tools,
   to { transform: translateX(100%); }
 }
 
+/* The desktop history column. Width, not translation: the panel is docked, so
+ * "open" means the transcript gave up 17rem of width. `min-width` on its
+ * children keeps the content itself from re-flowing narrower on every frame. */
+@keyframes hb-panel-in {
+  from { width: 0; opacity: 0; }
+  to { width: 17rem; opacity: 1; }
+}
+
+@keyframes hb-panel-out {
+  from { width: 17rem; opacity: 1; }
+  to { width: 0; opacity: 0; }
+}
+
 /* Menus and chips arrive from 4px below their resting place rather than scaling
  * from nothing: a popover that pops at full size reads as a repaint, while a
  * short rise reads as "this was just opened". */
@@ -2763,7 +2896,6 @@ div:hover > .hb-row-tools,
     position: relative;
     width: 28px;
     height: 28px;
-    font-size: 1.0625rem;
   }
   .hb-action-btn::after {
     content: "";
@@ -2907,6 +3039,8 @@ div:hover > .hb-row-tools,
   .hb-drawer,
   .hb-drawer[data-state="closing"],
   .hb-drawer-backdrop,
+  .hb-hist-panel,
+  .hb-hist-panel[data-state="closing"],
   .hb-tools-menu,
   .hb-row-menu,
   .hb-att-chip,

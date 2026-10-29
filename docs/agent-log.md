@@ -2,6 +2,19 @@
 
 Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用」下方追加一条。
 
+## 2026-10-29 22:00 · hermes · 图标统一成 Lucide 几何、桌面历史面板加缓动、README 截图与 v0.2.0
+
+- 需求（用户三条 + 一个问题）：① 回复气泡下三个小按钮图标大小不一，找更好的图标资源；② 桌面端历史记录打开也做成缓动动效；③ 完成后更新 README 截图并创建 release 标签；④ 顺带问能不能发 npm。追加：其他图标也可以换。
+- **图标的病根不是画法，是字形。** 那三个按钮原来是文字字符 `⑂ ⧉ ↻`——不同字体的字形，字号/字宽/基线各不相同，实测渲染 13/15/11px 且垂直偏 1px，CSS 调不平。改法：`ui/icons.ts` 换成 Lucide（ISC）几何，全页一套 24 网格、`strokeWidth: 1.75`、统一 `data-icon` 属性。同时把散落各处的字形一并收编：历史行 `⇩ ✎ 🗑`、用户气泡 `✎`、代码块复制 `⧉`、模型选择 `✓`、工作区 `✓ ⟳`、待办状态 `○ ◐ ✓ ✕`。展开箭头不再 `open ? "▾" : "▸"` 换字符，改成**同一个 chevron 旋转 90°**（`[data-open="true"] > .hb-*-caret`，`transition: transform var(--hb-move)`），换字符会重排且无法过渡。
+- 关键实现细节：`Icon` 加 `hb-icon` 类（`display: block`）——inline SVG 是基线对齐的 inline 盒，底部会留字体下伸空间，这正是「不齐」的另一半；`.hb-action-btn` 去掉 `font-size`（原来 1.4rem 盒 + 13px 字形），尺寸全部由 `size` 显式给。**`data-icon` 是给验收用的**：SVG 读不出 `textContent`，旧断言按 `✓` 判断复制反馈会失效。
+- 桌面历史面板原来直接切（`requestClose` 对非 drawer 立即 `onClose`）。改成与抽屉共用两段式 `closing`：`hb-panel-in` 动画 `width 0→17rem` + `hb-panel-out` 反向 `forwards`，`animationend` 才卸载，`prefers-reduced-motion` 跳过。**踩了一次**：把内联 `width: 17rem` 移进 CSS 时漏写宽度，`flex: 0 0 auto` 的列按内容撑到 338px，关键帧没有终点可插值（动画等于没播）。另：headless Edge 默认 `prefers-reduced-motion: reduce`，会把动画全部关掉，验收脚本必须 `Emulation.setEmulatedMedia` 显式打开 `no-preference`。
+- 验收：`tsc` 干净；`vitest` **669 passed / 31 文件**（layout-classes 新增 2 条：源码级扫字形 + 旋转箭头守卫）；`audit-classes` 274/274；`hermes plugins validate .` 通过（一条既有告警：`plugin_api.py` 引了 `tui_gateway.contracts.registry` 私有面，catalog rule 9，本轮未动）。
+- 真页面（临时 HERMES_HOME + 回环 9124/9125，用户自己的 9119 未启未停未改）：`scripts/verify.mjs` **93/96**，失败三条仍是「临时实例只有未归类桶」的老问题；新增两条断言全过——三颗图标同 `viewBox` 同 15×15、复制反馈 `data-icon=check`。新写 `scripts/verify-panel.mjs` **10/10**（面板 1…255px 共 39 帧、`hb-panel-in` 在播、落定 17rem、关闭 `hb-panel-out` 8 帧、4 帧收缩后卸载、历史行三颗 15px、按钮内光学居中 dy=0）。新写 `scripts/shots.mjs` 出 README 三张图（hero / markdown-reply / session-lamp），跑真模型一轮再拍。
+- 发布：版本三处对齐 `0.2.0`（package.json / manifest.json / dashboard/manifest.json / plugin.yaml，此前 plugin.yaml 写 1.0.0、其余 0.1.0），打 `v0.2.0` 标签 + GitHub Release。
+- 遗留：① npm 注册被 WAF 拦（用户侧，见对话里的说明），发布渠道仍是 `hermes plugins install owner/repo`；② `plugin_api.py` 的私有 core import 未改（需要 `ctx.*` 公开面替代，属上游契约问题）。
+
+---
+
 ## 当前占用
 
 （空）

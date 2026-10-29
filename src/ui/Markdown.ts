@@ -18,6 +18,7 @@ import { messagesFor, type Locale } from "../core/i18n";
 import type { MdBlock, MdInline } from "../core/markdown";
 import { parseMarkdown } from "../core/markdown";
 import type * as ReactNS from "react";
+import { Icon } from "./icons";
 import type { HermesPluginSdk } from "./sdk";
 
 /** How much of a long code block to show before capping its height. */
@@ -33,6 +34,8 @@ const HEADING_SIZE: Record<number, string> = {
 };
 
 interface Ctx {
+  /** The SDK instance itself — `Icon` needs it to get the host's React. */
+  sdk: HermesPluginSdk;
   React: HermesPluginSdk["React"];
   /** Hooks come from the SDK — the bundle ships without React (AGENTS.md 铁律 3). */
   hooks: HermesPluginSdk["hooks"];
@@ -199,10 +202,11 @@ function CodeBlock({
           "aria-label": ctx.copyCodeLabel,
           "data-hb": "copy-code",
           "data-copied": copied ? "true" : "false",
+          "data-failed": failed ? "true" : "false",
           className: "hb-code-copy",
           onClick: copy,
         },
-        copied ? ctx.copiedLabel : failed ? "!" : "⧉",
+        Icon(ctx.sdk, { name: copied ? "check" : failed ? "alert" : "copy", size: 14 }),
       ),
     ),
     React.createElement(
@@ -398,6 +402,7 @@ export function Markdown({
   if (!blocks.length) return null;
 
   const ctx: Ctx = {
+    sdk,
     React,
     hooks: sdk.hooks,
     fallbackCopy,

@@ -14,16 +14,21 @@
 import type { Messages, Locale } from "../core/i18n";
 import { messagesFor } from "../core/i18n";
 import type { TodoEntry, TodoState } from "../core/types";
+import { Icon, type IconName } from "./icons";
 import type { HermesPluginSdk } from "./sdk";
 
 const OPEN_STORAGE_KEY = "hb-todo-open";
 
-/** Status glyphs. `in_progress` is the only animated one (see `.hb-todo-active`). */
-function glyphFor(status: string): string {
-  if (status === "completed") return "✓";
-  if (status === "cancelled") return "✕";
-  if (status === "in_progress") return "◐";
-  return "○";
+/**
+ * Status icon per todo. Drawn on the same 24 grid as everything else — the
+ * font's `○ / ◐ / ✓ / ✕` quartet never shares a size or a baseline, which is
+ * visible as a ragged left edge down the list.
+ */
+function glyphFor(status: string): IconName {
+  if (status === "completed") return "check";
+  if (status === "cancelled") return "close";
+  if (status === "in_progress") return "circleDot";
+  return "circle";
 }
 
 function countDone(todos: readonly TodoEntry[]): number {
@@ -104,7 +109,7 @@ export function TodoPanel({ sdk, locale, todo }: TodoPanelProps) {
           className: status === "in_progress" ? "hb-todo-glyph hb-todo-active shrink-0" : "hb-todo-glyph shrink-0",
           "aria-hidden": "true",
         },
-        glyphFor(status),
+        Icon(sdk, { name: glyphFor(status), size: 13 }),
       ),
       React.createElement("span", { className: "hb-todo-text" }, entry.content),
     );
@@ -132,7 +137,7 @@ export function TodoPanel({ sdk, locale, todo }: TodoPanelProps) {
         "aria-expanded": open ? "true" : "false",
         onClick: toggle,
       },
-      React.createElement("span", { className: "hb-todo-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-todo-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
       React.createElement("span", { className: "hb-todo-title" }, t.todos),
       React.createElement("span", { className: "hb-todo-count" }, t.todoProgress(done, total)),
     ),

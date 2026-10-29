@@ -9,6 +9,7 @@
 import { REASONING_LEVELS } from "../core/slash";
 import { messagesFor, reasoningLabel, type Locale } from "../core/i18n";
 import type { ModelOptionProvider } from "../app/controller";
+import { Icon } from "./icons";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface ModelPickerProps {
@@ -168,7 +169,13 @@ export function ModelPicker(props: ModelPickerProps) {
                         onClick: () => props.onPick(model, group.provider.slug),
                       },
                       React.createElement("span", { className: "hb-mono min-w-0 flex-1 truncate" }, model),
-                      isCurrent ? React.createElement("span", { style: { color: "var(--color-primary)" } }, "✓") : null,
+                      isCurrent
+                        ? React.createElement(
+                            "span",
+                            { className: "hb-picker-check" },
+                            Icon(sdk, { name: "check", size: 14 }),
+                          )
+                        : null,
                     );
                   }),
                 ),

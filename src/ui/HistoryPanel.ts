@@ -100,7 +100,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
   const drawer = props.variant === "drawer";
   /**
    * Closing is a two-step state, because the panel has to stay mounted while it
-   * slides out.
+   * animates out.
    *
    * `requestClose` tells the parent immediately (its `open` flag is the truth:
    * "closed") and keeps this panel mounted for the length of the exit animation.
@@ -108,13 +108,13 @@ export function HistoryPanel(props: HistoryPanelProps) {
    * the animation itself rather than a timer, so a slow frame stretches the exit
    * instead of cutting it, and a fast one cannot leave a ghost panel behind.
    * Reduced motion skips the whole thing.
+   *
+   * Both presentations animate: the phone's drawer slides, the desktop's column
+   * unclips. A desktop panel that appeared and vanished by cutting was the last
+   * surface in this page with no motion vocabulary.
    */
   const [closing, setClosing] = useState(false);
   const requestClose = () => {
-    if (!drawer) {
-      props.onClose();
-      return;
-    }
     try {
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         props.onClose();
@@ -167,17 +167,26 @@ export function HistoryPanel(props: HistoryPanelProps) {
     React.createElement(
       "div",
       {
-        className: drawer ? "hb-drawer" : "flex h-full min-h-0 flex-col",
+        // One class per presentation, so the stylesheet owns both entries and
+        // both exits instead of the component swapping a Tailwind string for a
+        // class (the panel's own keyframe has to run on the same element that
+        // carries `data-state`).
+        className: drawer ? "hb-drawer" : "hb-hist-panel",
         "data-hb": "history-panel",
         "data-variant": props.variant,
         "data-state": closing ? "closing" : "open",
         // The exit ends the animation; `closing` is what keeps the panel mounted
-        // until then, so clearing it here is the unmount.
+        // until then, so clearing it here is the unmount. The event does not
+        // bubble from the panel's children by default — `stopPropagation` is
+        // defensive, and `closing` is only cleared for the two exit animations
+        // this panel actually plays.
         onAnimationEnd: (event: { animationName?: string; stopPropagation?: () => void }) => {
+          if (event.animationName !== "hb-slide-out-right" && event.animationName !== "hb-panel-out") {
+            return;
+          }
           event.stopPropagation?.();
-          if (event.animationName === "hb-slide-out-right") setClosing(false);
+          setClosing(false);
         },
-        style: drawer ? undefined : { width: "17rem", borderLeft: "1px solid var(--color-border)" },
       },
 
     React.createElement(
@@ -429,7 +438,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                               props.onUseAsContext(session.id, session.title);
                             },
                           },
-                          "⇩",
+                          Icon(sdk, { name: "download", size: 15 }),
                         ),
                         React.createElement(
                           "button",
@@ -445,7 +454,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                               setRenamingId(session.id);
                             },
                           },
-                          "✎",
+                          Icon(sdk, { name: "pencil", size: 15 }),
                         ),
                         React.createElement(
                           "button",
@@ -462,7 +471,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                               if (window.confirm(t.deleteConfirm)) props.onDelete(session.id);
                             },
                           },
-                          "🗑",
+                          Icon(sdk, { name: "trash", size: 15 }),
                         ),
                       ),
                 ),

@@ -21,6 +21,7 @@ import {
   type ProjectSessionRow,
 } from "../core/projects";
 import type { HermesPluginSdk } from "./sdk";
+import { Icon } from "./icons";
 import { relativeTime } from "./HistoryPanel";
 
 export interface ProjectListProps {
@@ -249,7 +250,7 @@ export function ProjectList(props: ProjectListProps) {
                   title: label,
                   onClick: () => toggle(row),
                 },
-                React.createElement("span", { className: "hb-proj-caret" }, isOpen ? "▾" : "▸"),
+                React.createElement("span", { className: "hb-proj-caret" }, Icon(sdk, { name: "chevron", size: 12 })),
                 React.createElement(
                   "span",
                   {

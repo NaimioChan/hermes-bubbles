@@ -1269,6 +1269,33 @@ async function main() {
         && /refresh|regenerate/i.test(actions.buttons.join(" ")),
       JSON.stringify(actions?.buttons),
     );
+    // The three glyphs are one icon set now, so they must also be one SIZE. A
+    // text-glyph row measured 13/15/11px across three buttons and that is what
+    // read as "uneven"; this asserts the drawing grid, not the drawings.
+    const actionIcons = await session.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('[data-hb="message-actions"]')];
+      const row = rows[rows.length - 1];
+      if (!row) return null;
+      return [...row.querySelectorAll('button')].map((b) => {
+        const svg = b.querySelector('svg');
+        const r = svg ? svg.getBoundingClientRect() : null;
+        return {
+          icon: svg ? svg.getAttribute('data-icon') : null,
+          w: r ? Math.round(r.width) : 0,
+          h: r ? Math.round(r.height) : 0,
+          viewBox: svg ? svg.getAttribute('viewBox') : null,
+        };
+      });
+    })()`);
+    check(
+      "the three action icons share one grid and one rendered size",
+      Array.isArray(actionIcons)
+        && actionIcons.length === 3
+        && actionIcons.every((i) => i.icon && i.viewBox === "0 0 24 24")
+        && new Set(actionIcons.map((i) => `${i.w}x${i.h}`)).size === 1
+        && actionIcons.every((i) => i.w === 15 && i.h === 15),
+      JSON.stringify(actionIcons),
+    );
     check(
       "the action row shows a timestamp",
       actions !== null && actions.hasTime === true,
@@ -1317,12 +1344,12 @@ async function main() {
       if (!btn) return { error: 'no copy button' };
       btn.click();
       await new Promise(r => setTimeout(r, 500));
-      return { titleAfter: btn.getAttribute('title'), glyph: btn.textContent };
+      return { titleAfter: btn.getAttribute('title'), icon: btn.querySelector('svg')?.getAttribute('data-icon') };
     })()`, { awaitPromise: true });
-    // The glyph flipping is the user-visible confirmation the handler ran.
+    // The icon flipping is the user-visible confirmation the handler ran.
     check(
       "copy gives feedback on click",
-      copyResult !== null && (copyResult.titleAfter === "Copied" || copyResult.glyph === "✓"),
+      copyResult !== null && (copyResult.titleAfter === "Copied" || copyResult.icon === "check"),
       JSON.stringify(copyResult),
     );
 

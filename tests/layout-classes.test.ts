@@ -191,6 +191,50 @@ describe("layout classes", () => {
     expect(ownCss).toMatch(/\[data-layout="mobile"\]\s*\{[^}]*position:\s*relative/);
   });
 
+  it("draws every UI glyph from one icon set, never from text characters", () => {
+    // The reply footer used to be three TEXT glyphs — `⑂`, `⧉`, `↻` — which are
+    // three fonts' idea of a symbol with three bounding boxes. Measured on a live
+    // page they rendered at 13/15/11px and sat a pixel off each other vertically;
+    // no CSS could reconcile that, which is what "the three buttons look uneven"
+    // actually was. A text glyph in a button is the regression; an `Icon()` is
+    // the fix, and it brings one 24-grid, one stroke and one `data-icon` with it.
+    const files = readdirSync(UI_DIR).filter((f) => /\.(ts|tsx)$/.test(f));
+    const offenders: string[] = [];
+    // Arrows, checks, crosses, pens, bins, dots, carets — everything that used to
+    // be typed into a button or a status cell. `▌` is NOT in the list: the
+    // streaming cursor in a reply is a text character on purpose (it sits inside
+    // the last paragraph and blinks as a block, not as an icon in a button).
+    const GLYPHS = /["'][▸▾◂◃→←↑↓✓✔✕✖⧉⑂↻⟳◐○●⇩⊕✎✏🗑▲▼◀▶⏎↵⌘]/u;
+    for (const file of files) {
+      const source = readFileSync(join(UI_DIR, file), "utf8");
+      source.split("\n").forEach((line, index) => {
+        // The blinking caret block in `Markdown.ts` is a text cursor, not an icon.
+        if (/hb-caret/.test(line)) return;
+        if (GLYPHS.test(line)) offenders.push(`${file}:${index + 1}: ${line.trim().slice(0, 70)}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+    // And the set itself stays on one grid with one stroke.
+    const icons = readFileSync(join(UI_DIR, "icons.ts"), "utf8");
+    expect(icons).toMatch(/viewBox: "0 0 24 24"/);
+    expect(icons).toMatch(/strokeWidth: 1\.75/);
+    expect(icons).toMatch(/"data-icon": props\.name/);
+  });
+
+  it("rotates one chevron for disclosure instead of swapping two carets", () => {
+    // `open ? "▾" : "▸"` re-flows the row and cannot animate. The replacement is
+    // a single chevron rotated 90° through the shared motion token, driven by the
+    // toggle's own `data-open` — which every toggle already carried for the tests.
+    expect(ownCss).toMatch(/\[data-open="true"\]\s*>\s*\.hb-act-caret/);
+    expect(ownCss).toMatch(/\.hb-sub-head\[data-open="true"\]\s+\.hb-sub-caret/);
+    const rotated = /\.hb-act-caret,\s*\n\.hb-think-caret,[\s\S]*?\{([^}]*)\}/.exec(ownCss)?.[1] ?? "";
+    expect(rotated).toMatch(/transition:\s*transform var\(--hb-move\) var\(--hb-ease\)/);
+    // Every caret class shares the rule, or one of them snaps while the rest glide.
+    for (const cls of ["hb-think-caret", "hb-tool-caret", "hb-act-caret", "hb-sub-caret", "hb-todo-caret", "hb-proj-caret", "hb-workspace-caret"]) {
+      expect(ownCss).toContain(`.${cls}`);
+    }
+  });
+
   it("caps the run of machinery between two messages, not just each row", () => {
     // The user's actual complaint, twice: thinking and tool calls fill the chat
     // area. Capping a single reasoning block did not fix it — fifteen capped

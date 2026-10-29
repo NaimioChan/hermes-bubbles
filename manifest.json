@@ -3,7 +3,7 @@
   "label": "Chat",
   "description": "气泡式聊天页：用 tui_gateway 的结构化事件流替换内置的终端聊天。",
   "icon": "MessageSquare",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "tab": {
     "path": "/bubbles",
     "override": "/chat",

@@ -30,6 +30,7 @@ import type { TimelineItem } from "../core/types";
 import { runCounts, runElapsedMs, runIsLive } from "../core/run";
 import { formatElapsed, messagesFor, type Locale } from "../core/i18n";
 import type { HermesPluginSdk } from "./sdk";
+import { Icon } from "./icons";
 import { Bubble } from "./Bubble";
 import { activitySummary } from "./format";
 
@@ -112,7 +113,7 @@ export function ActivityBlock({ sdk, items, locale }: ActivityBlockProps) {
         title: open ? t.activityCollapse : t.activityExpand,
         onClick: () => setOpen((value: boolean) => !value),
       },
-      React.createElement("span", { className: "hb-act-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-act-caret" }, Icon(sdk, { name: "chevron", size: 13 })),
       live
         ? React.createElement(
             "span",

@@ -18,6 +18,7 @@ import { abbreviateHomePath, workspaceLabel, type WorkspaceOption } from "../cor
 import type { GitInfo } from "../core/gitinfo";
 import { messagesFor, type Locale } from "../core/i18n";
 import { GitBadge } from "./GitBadge";
+import { Icon } from "./icons";
 import type { HermesPluginSdk } from "./sdk";
 
 export interface WorkspacePickerProps {
@@ -96,7 +97,13 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
       },
       React.createElement("span", { className: "hb-workspace-name" }, text),
       hint ? React.createElement("span", { className: "hb-workspace-hint" }, hint) : null,
-      active ? React.createElement("span", { className: "hb-workspace-check" }, "✓") : null,
+      active
+        ? React.createElement(
+            "span",
+            { className: "hb-workspace-check" },
+            Icon(props.sdk, { name: "check", size: 13 }),
+          )
+        : null,
     );
 
   return React.createElement(
@@ -112,6 +119,7 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
         "aria-label": title,
         "aria-expanded": open,
         className: "hb-workspace-chip",
+        "data-open": open ? "true" : "false",
         style: { color: "var(--color-muted-foreground)" },
         onClick: () => {
           setOpen((prev) => !prev);
@@ -119,7 +127,7 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
           setDraft(props.value);
         },
       },
-      React.createElement("span", { className: "hb-workspace-caret" }, open ? "▾" : "▸"),
+      React.createElement("span", { className: "hb-workspace-caret" }, Icon(sdk, { name: "chevron", size: 12 })),
       React.createElement("span", { className: "hb-workspace-chip-label" }, label),
     ),
 
@@ -163,7 +171,9 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
                 title: t.workspaceRescan,
                 onClick: props.onRescan,
               },
-              props.loading ? "…" : "⟳",
+              props.loading
+                ? React.createElement("span", { className: "hb-workspace-rescan-busy" }, "…")
+                : Icon(sdk, { name: "refresh", size: 14 }),
             ),
           ),
 

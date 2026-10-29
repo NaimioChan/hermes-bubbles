@@ -60,6 +60,10 @@ Hermes 网页仪表盘（`hermes dashboard`）的气泡聊天页插件。改这�
 
 30. **两条消息之间所有非文本内容合并成一块，折叠时限高。** 思考段、工具调用、子代理批次、机器事件都是 transcript furniture，一回合能有二十条；**逐行限高不算限高**（`ReasoningRow` 早就有 7.5rem 上限，二十个被压扁的行照样占满一屏）。所以连续家具（≥2 条）归成一段渲染成一块（`core/run.ts::groupTranscript`，纯函数、有 `tests/run.test.ts`），折叠时整块 `max-height` 190px（`ui/Activity.ts` 的 `ACTIVITY_MAX_PX`，内联挂在 `.hb-act` 外层，不是 body——表头 15px + body 190px 会变成 205）。三条实现细节不能改：① run 段的 key 取**首行 id**，否则流式 delta 每帧重挂、入场动画重播；② 裁剪区锚底（`justify-content: flex-end`）让溢出去上方，留下的是最新一步，fade 也在上边缘；③ 折叠时 body 必须 `inert` + `aria-hidden`——行留在 DOM 里（工具输出仍是一次点击之遥）但不能被 Tab 到、不能误点 clip 下的卡片。块内部的行**不再带** `data-hb-kind`：块本身就是转写行，内部行带 kind 会让 `querySelectorAll('[data-hb-kind]')` 把段内容当成顶层条目。展开态 `max-height: 60vh` 内滚，行要 `flex: 0 0 auto`（否则被封顶压成一坨）。单行家具仍是普通行，不套块。
 
+31. **图标一律画出来，不许打字形。** `src/ui/icons.ts` 是唯一来源（几何取自 Lucide / ISC，24 网格、`strokeWidth: 1.75`、统一 `data-icon`）。按钮、状态格、展开箭头里出现 `▸ ▾ ✓ ✕ ✎ 🗑 ⧉ ⑂ ↻` 这类文字字符即视为回退：它们是**不同字体**的字形，各自有不同字号、字宽与基线，并排就是「大小不一」，CSS 调不平。展开箭头用**同一个 chevron 旋转 90°**（`[data-open="true"] > .hb-*-caret`），不要换字符——换字符会重排且无法过渡。图标组件带 `hb-icon` 类（`display: block`，去掉 inline SVG 的基线空隙），所以渲染尺寸必须由 `size` 显式给。`tests/layout-classes.test.ts` 在源码层扫字形并断言这套网格；`scripts/verify-panel.mjs` 在真页面上量渲染尺寸与按钮内的光学居中。
+
+32. **桌面历史面板的动效是宽度，不是位移。** 面板是**停靠**的，打开＝转写区让出 17rem，所以 `hb-panel-in` 动画 `width: 0 → 17rem`（子元素 `min-width: 17rem` 防止逐帧重排内容），关闭 `hb-panel-out` 反向、`forwards`，`animationend` 才卸载。它和抽屉共用同一套两段式 `closing` 状态，所以 `requestClose` 对两种形态都走动画（`prefers-reduced-motion` 直接跳过）。**面板的 `width` 必须在 CSS 里写死**：`flex: 0 0 auto` 的列会按内容撑开（长标题撑到 338px），关键帧就没有终点可插值。真页面验收看 `scripts/verify-panel.mjs`（headless 默认 `reduce`，脚本里要 `Emulation.setEmulatedMedia` 显式打开 `no-preference` 才量得到动画）。
+
 ## 禁区
 
 - 不许改 `%LOCALAPPDATA%\hermes\hermes-agent\` 下的任何文件。要提需求就去上游开 issue。
@@ -82,6 +86,10 @@ npm run install-plugin
 **它必须收拾现场。** 验收跑在真网关上，每次都会真的建会话、真的改标题：改名那条断言先记下编进输入框的原标题、断完用 REST PATCH 写回去（历史第一行就是最新那个会话，很可能是用户自己的对话）；跑完用 `session.close` + `DELETE /api/sessions/{id}` 删掉本次新建的会话，判据是「空会话，或首条消息是本套件的探针文案」，绝不能按「列表差分」——页面加载时先冒出来的那个会话正是差分看不见的那个。以前没做这两件事，跑十几次之后历史里堆了 137 个「回复收到」和 15 个被改成 `verify-renamed-…` 的真对话。
 
 另有 `node scripts/verify-clarify.mjs`：审批/选择题卡片只在**模型主动调用 clarify** 时才出现，所以它单独放，不进主验收（依赖模型行为的断言会随机失败）。卡片逻辑的单测在 `tests/requests.test.ts`。
+
+另有 `node scripts/verify-panel.mjs`：桌面历史面板的开合动效（宽度 0→17rem、`hb-panel-out` 播完才卸载）与图标一致性（三颗 15px、24 网格、按钮内居中）。headless 默认 `prefers-reduced-motion: reduce`，脚本里用 `Emulation.setEmulatedMedia` 显式打开 `no-preference` 才量得到动画。
+
+`node scripts/shots.mjs` 出 README 截图（`docs/assets/hero.png` 等三张），跑真模型一轮再拍，视觉改动后重跑它。
 
 还有 `node scripts/verify-confirm.mjs`：模型切换被网关拦下时的确认对话框。大上下文守卫只在会话已测上下文 ≥ `model.switch_context_confirm_tokens` 时触发，测试机上达不到，所以默认不改配置、只报「守卫没触发」；要断言整条链路就加 `--edit-config`，它先把 `config.yaml` 备份、临时把阈值设成 1，`finally` 里逐字节还原。跑完照同样规则删掉自己建的会话。
 

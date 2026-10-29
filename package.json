@@ -1,6 +1,6 @@
 {
   "name": "hermes-bubbles",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Bubble-style chat page for the Hermes web dashboard — replaces /chat with a native streaming message stream over the tui_gateway JSON-RPC socket.",
   "type": "module",

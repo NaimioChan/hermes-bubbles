@@ -2520,9 +2520,14 @@ div:hover > .hb-row-tools,
 
 /* ── reasoning strength slider ──────────────────────────────────────────────
  * One line, the same shape as the rows above it: icon + label on the left, the
- * setting on the right. The slider is short on purpose — it is a five-stop-ish
- * scale next to a two-character value, not a full-width scrubber, and keeping
- * it on the row means the menu does not grow a second line per setting.
+ * setting on the right. The control is short on purpose — eight tiers on a
+ * 6.5rem track, next to a two-character value.
+ *
+ * The visual language is the one shadcn/Radix ship for sliders (rounded track,
+ * filled range, circular bordered thumb, ring on hover/focus), reimplemented
+ * here because the host exposes no Slider primitive and the native
+ * `<input type="range">` cannot be dressed into this shape. See
+ * `ui/StepSlider.ts` for the travel math.
  */
 .hb-tools-slider {
   display: flex;
@@ -2533,85 +2538,74 @@ div:hover > .hb-row-tools,
   color: var(--color-card-foreground);
 }
 
-/* The filled portion of the track is an inline gradient on the input itself
- * (it is the only element an inline style can reach — Chromium's
- * `::-webkit-slider-runnable-track` cannot read an inline custom property), so
- * here the track pseudo-element only has to be transparent and the right
- * thickness, and the thumb only has to sit on it.
- */
-.hb-reason-slider {
-  -webkit-appearance: none;
-  appearance: none;
+.hb-slider {
+  position: relative;
   flex: 0 0 auto;
   /* Pushes the slider and its value to the right edge, like `.hb-tools-value`
    * does for the rows above. */
-  margin: 0 0 0 auto;
-  width: 6rem;
-  height: 18px;
-  padding: 0;
-  background-color: transparent;
-  background-repeat: no-repeat;
-  /* Inset by half a knob on both ends: the thumb's CENTRE travels that band,
-   * so a fill that stopped at 100% would overshoot the knob by half its width
-   * at the top of the scale (and undershoot at the bottom). */
-  background-position: 9px center;
-  background-size: calc(100% - 18px) 4px;
-  border: 0;
-  border-radius: 9999px;
+  margin-left: auto;
+  width: 6.5rem;
+  /* Taller than the 8px track so the control is comfortable to grab; the track
+   * is centred inside it. */
+  height: 20px;
   cursor: pointer;
+  /* Pointer drags must not scroll the menu on touch. */
+  touch-action: none;
 }
 
-.hb-reason-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  background: transparent;
+.hb-slider-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 8px;
+  transform: translateY(-50%);
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-muted-foreground) 24%, transparent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
-.hb-reason-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  /* Full height of the control: the knob covers the track end to end instead of
-   * floating as a small dot on a line. */
-  width: 18px;
-  height: 18px;
-  margin-top: -7px;
-  border: 2px solid var(--color-card);
+.hb-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 8px;
+  transform: translateY(-50%);
   border-radius: 9999px;
   background: var(--color-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  cursor: grab;
 }
 
-.hb-reason-slider:active::-webkit-slider-thumb {
-  cursor: grabbing;
+/* The knob fills the control's height, and its CENTRE is what the fill ends on
+ * (the component sets `left` from the same 18px constant the fill uses). */
+.hb-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  border: 2px solid var(--color-primary);
+  border-radius: 9999px;
+  background: var(--color-card);
+  transition:
+    transform var(--hb-press) var(--hb-ease),
+    box-shadow var(--hb-move) var(--hb-ease);
 }
 
-.hb-reason-slider:focus-visible {
+.hb-slider[data-dragging="true"] .hb-slider-thumb {
+  transform: translateY(-50%) scale(1.1);
+}
+
+.hb-slider-thumb:focus-visible {
   outline: none;
-}
-
-.hb-reason-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--color-ring, var(--color-primary));
-}
-
-.hb-reason-slider::-moz-range-track {
-  height: 4px;
-  background: transparent;
-}
-
-.hb-reason-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-card);
-  border-radius: 9999px;
-  background: var(--color-primary);
 }
 
 /* Fixed width so the slider does not shift as the label goes 低 → 很高. */
 .hb-tools-slider-value {
   flex: 0 0 auto;
-  width: 2.5rem;
+  width: 2.75rem;
   text-align: right;
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   color: var(--color-muted-foreground);
 }
 

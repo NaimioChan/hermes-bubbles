@@ -36,6 +36,7 @@ import { WorkspacePicker } from "./WorkspacePicker";
 import { ApprovalModeChip } from "./ApprovalModeChip";
 import { AttachmentTray } from "./Attachments";
 import { Icon } from "./icons";
+import { StepSlider } from "./StepSlider";
 
 export interface ModelChoice {
   model: string;
@@ -150,13 +151,11 @@ export function Composer(props: ComposerProps) {
    */
   const [toolsOpen, setToolsOpen] = useState(false);
   /**
-   * Reasoning tier while the thumb is being dragged.
-   *
-   * The slider is controlled by this, not by `props.reasoning`, because the
-   * value only leaves the composer on release: `config.set` is a write, and a
-   * drag across the track would otherwise fire one per tier crossed.
+   * Reasoning tier under the thumb mid-drag, so the label beside the track
+   * follows it. `null` when nothing is being dragged; the committed value
+   * (`props.reasoning`) is the other half of the pair.
    */
-  const [reasonDraft, setReasonDraft] = useState<string | null>(null);
+  const [reasonPreview, setReasonPreview] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   /** Highest `props.insertion.seq` already written into the draft. */
@@ -257,20 +256,17 @@ export function Composer(props: ComposerProps) {
       : props.model
     : "default";
 
-  const reasonValue = reasonDraft ?? (props.reasoning || "medium");
-  const reasonIndex = Math.max(0, (REASONING_VALUES as readonly string[]).indexOf(reasonValue));
-  const reasonPct = (reasonIndex / (REASONING_VALUES.length - 1)) * 100;
+  const committedReason = props.reasoning || "medium";
+  const reasonIndex = Math.max(0, (REASONING_VALUES as readonly string[]).indexOf(committedReason));
+  const reasonShown = reasonPreview ?? reasonIndex;
 
-  /**
-   * Hand the picked tier to the controller. Only called on release (pointer up,
-   * key up) — see `reasonDraft`.
-   */
+  /** Only reached on release — the slider calls it from pointer/key up. */
   const commitReason = useCallback(
-    (level: string) => {
-      setReasonDraft(null);
-      if (level !== (props.reasoning || "medium")) props.onPickReasoning(level);
+    (levelIndex: number) => {
+      const level = REASONING_VALUES[levelIndex];
+      if (level && level !== committedReason) props.onPickReasoning(level);
     },
-    [props.reasoning, props.onPickReasoning],
+    [committedReason, props.onPickReasoning],
   );
 
   const acceptCommand = useCallback(
@@ -537,46 +533,20 @@ export function Composer(props: ComposerProps) {
               { className: "hb-tools-slider", "data-hb": "reasoning-slider" },
               React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
               React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
-              React.createElement("input", {
-                type: "range",
-                "data-hb": "reasoning-range",
-                "data-state": reasonValue,
-                className: "hb-reason-slider",
-                min: 0,
-                max: REASONING_VALUES.length - 1,
-                step: 1,
-                value: reasonIndex,
-                "aria-label": t.reasoning,
-                "aria-valuetext": reasoningLabel(reasonValue, props.locale),
-                style: {
-                  // The filled part of the track. Drawn on the input itself
-                  // (thin, inset by half a knob, vertically centred) so the
-                  // pseudo-elements only have to place the thumb — Chromium
-                  // will not let a pseudo-element read an inline custom
-                  // property. `backgroundImage`, not the `background`
-                  // shorthand: the shorthand would reset the inset size and
-                  // position set in the stylesheet, and the fill would then run
-                  // the full width of the control instead of knob-centre to
-                  // knob-centre.
-                  backgroundImage: `linear-gradient(to right, var(--color-primary) 0 ${reasonPct}%, var(--color-muted) ${reasonPct}% 100%)`,
-                },
-                onChange: (event: { target: { value: string } }) => {
-                  const level = REASONING_VALUES[Number(event.target.value)];
-                  if (level) setReasonDraft(level);
-                },
-                onPointerUp: (event: { currentTarget: { value: string } }) => {
-                  const level = REASONING_VALUES[Number(event.currentTarget.value)];
-                  if (level) commitReason(level);
-                },
-                onKeyUp: (event: { currentTarget: { value: string } }) => {
-                  const level = REASONING_VALUES[Number(event.currentTarget.value)];
-                  if (level) commitReason(level);
-                },
+              React.createElement(StepSlider, {
+                sdk,
+                levels: REASONING_VALUES,
+                index: reasonIndex,
+                preview: reasonPreview,
+                label: t.reasoning,
+                valueText: reasoningLabel(REASONING_VALUES[reasonShown] ?? committedReason, props.locale),
+                onPreview: setReasonPreview,
+                onCommit: commitReason,
               }),
               React.createElement(
                 "span",
                 { className: "hb-tools-slider-value" },
-                reasoningLabel(reasonValue, props.locale),
+                reasoningLabel(REASONING_VALUES[reasonShown] ?? committedReason, props.locale),
               ),
             ),
             React.createElement(

@@ -2,6 +2,18 @@
 
 Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用」下方追加一条。
 
+## 2026-11-03 18:40 · hermes · 思考强度滑杆重做成 shadcn/Radix 那一套
+
+- 起因：上一版是原生 `<input type="range">` + 内联渐变填充。用户先要求手柄填满高度，再报「填充右端没对准手柄圆心，随滑动有偏移」，并要求换个观感更好的方案、可以找现成 widget。
+- 调研结论：宿主没有 Slider 原语（`web_dist` 里 `Slider*` 全是 xterm 的滚动条滑块，CSS 里没有一条 `::-webkit-slider-*`），所以只能自己画；观感参照 shadcn/Radix 的 Slider（圆角轨道 + 填充段 + 带边框的圆形手柄 + hover/focus 外环），交互也照它（轨道任意点按下即跳转并跟手拖动、方向键/PageUp/PageDown/Home/End、`touch-action: none`）。
+- 新增 `ui/StepSlider.ts`：轨道 + 填充 + 手柄三层 div，手柄盒从 `0` 到 `100% - 18px` 移动，填充宽度 = `9px + (100% - 18px) * pct`，**两端对齐是构造出来的**，不是两套百分比碰巧对上。手柄 18px（= 控件高度）带 `2px var(--color-primary)` 边框 + `var(--color-card)` 底，hover/focus 用 `color-mix` 出 4px 外环（环用内联 boxShadow，因为它跟着 focus/hover 状态走）。
+- 原生 range 的两个死结（写进文件注释，别再回头）：① 手柄是伪元素，填充/边框/外环要三套浏览器私有规则；② 手柄**圆心**只在 `[半径, 宽度-半径]` 之间移动，把轨道画在 input 自身背景上永远对不齐两端——这是上一版偏移的根因，调参数解决不了。
+- 交互仍是**松手才提交**（`config.set key=reasoning` 是写操作），拖动中的档位由 `Composer` 的 `reasonPreview` 持有（`StepSlider` 的 `preview` prop），所以右侧档位文字跟着手柄走。
+- **踩了一次**：第一版把 preview 只传给文字、没传给 `index`，结果拖动时文字在变、手柄不动（截图量到 fillRight/thumbRight 完全没变才发现）。修法是把 `preview` 一起传进组件，渲染用 `preview ?? index`。
+- 验收：`tsc` 干净；`vitest` 669 passed；`audit-classes` 280/280；临时实例真页面（900×800）量到 `deltaPx = 0`（填充右端 − 手柄圆心，初始/拖动中/落定三处都是 0）、`thumbH = 18`、同排对齐 `sameLineAsLabel: true`；CDP 真实鼠标拖拽：按下 → 移动（`dragging=true`，文字 `very high`，填充与手柄同步移动）→ 松开（`data-state=ultra`）→ 拖回左端（`none`）。
+
+---
+
 ## 2026-11-03 17:45 · hermes · 输入框 ··· 菜单：模型行带提供商、思考强度改横滑杆
 
 - 需求（用户两条 + 两次现场修正）：① 菜单第一项「模型与思考强度」改成「模型」，显示模型名时前面带提供商；② 第二项「思考」改成「思考强度」，点选改成横向滑杆。修正一：滑杆不占第二行，跟「思考强度」文本同一行、右对齐、短一点。修正二：手柄圆填满整个高度，且进度条右端要正对手柄圆心（原来随滑动有偏移）。

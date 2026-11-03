@@ -318,10 +318,10 @@ try {
       open: true,
       rows,
       // Reasoning is a horizontal slider now, not a cycling row: check the
-      // control is there and spans the menu's width.
+      // control is there and its thumb advertises itself as a slider.
       slider:
         Boolean(m.querySelector('[data-hb="reasoning-slider"]')) &&
-        Boolean(m.querySelector('[data-hb="reasoning-range"][type="range"]')),
+        Boolean(m.querySelector('[data-hb="reasoning-thumb"][role="slider"]')),
       notify: Boolean(m.querySelector('[data-hb="notify-toggle"]')),
     };
   })()`);

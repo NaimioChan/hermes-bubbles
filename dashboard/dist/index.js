@@ -5596,6 +5596,138 @@ ${refs.join("\n")}`.trim() : trimmed;
     );
   }
 
+  // src/ui/StepSlider.ts
+  var SLIDER_THUMB_PX = 18;
+  function StepSlider(props) {
+    const { sdk } = props;
+    const { React } = sdk;
+    const { useCallback, useRef, useState } = React;
+    const trackRef = useRef(null);
+    const [dragging, setDragging] = useState(false);
+    const [hovering, setHovering] = useState(false);
+    const [focused, setFocused] = useState(false);
+    const last = Math.max(0, props.levels.length - 1);
+    const committed = Math.min(last, Math.max(0, props.index));
+    const index = props.preview == null ? committed : Math.min(last, Math.max(0, props.preview));
+    const pct = last === 0 ? 0 : index / last;
+    const indexAt = useCallback(
+      (clientX) => {
+        const el = trackRef.current;
+        if (!el) return committed;
+        const rect = el.getBoundingClientRect();
+        const usable2 = Math.max(1, rect.width - SLIDER_THUMB_PX);
+        const t = (clientX - rect.left - SLIDER_THUMB_PX / 2) / usable2;
+        return Math.min(last, Math.max(0, Math.round(t * last)));
+      },
+      [committed, last]
+    );
+    const commit = useCallback(
+      (next) => {
+        props.onPreview(null);
+        if (next !== committed) props.onCommit(next);
+      },
+      [committed, props.onPreview, props.onCommit]
+    );
+    const onPointerDown = (event) => {
+      if (event.pointerType === "mouse" && typeof event.button === "number" && event.button !== 0) return;
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+      }
+      setDragging(true);
+      const next = indexAt(event.clientX);
+      props.onPreview(next);
+    };
+    const onPointerMove = (event) => {
+      if (!dragging) return;
+      props.onPreview(indexAt(event.clientX));
+    };
+    const onPointerUp = (event) => {
+      if (!dragging) return;
+      setDragging(false);
+      commit(indexAt(event.clientX));
+    };
+    const onPointerCancel = () => {
+      if (!dragging) return;
+      setDragging(false);
+      commit(committed);
+    };
+    const onKeyDown = (event) => {
+      const step = (delta) => {
+        event.preventDefault();
+        commit(Math.min(last, Math.max(0, index + delta)));
+      };
+      switch (event.key) {
+        case "ArrowRight":
+        case "ArrowUp":
+          step(1);
+          return;
+        case "ArrowLeft":
+        case "ArrowDown":
+          step(-1);
+          return;
+        case "PageUp":
+          step(3);
+          return;
+        case "PageDown":
+          step(-3);
+          return;
+        case "Home":
+          step(-last);
+          return;
+        case "End":
+          step(last);
+          return;
+        default:
+          return;
+      }
+    };
+    const ring = (strength) => `0 0 0 4px color-mix(in oklab, var(--color-primary) ${strength}%, transparent), 0 1px 3px rgba(0, 0, 0, 0.35)`;
+    return React.createElement(
+      "div",
+      {
+        className: "hb-slider",
+        "data-hb": "reasoning-range",
+        "data-state": props.levels[index] ?? "",
+        "data-dragging": dragging ? "true" : "false",
+        ref: trackRef,
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel,
+        onPointerEnter: () => setHovering(true),
+        onPointerLeave: () => setHovering(false)
+      },
+      // The visual track. The wrapper is the hit area (20px tall) so the control
+      // is grabbable without being visually heavy.
+      React.createElement("div", { className: "hb-slider-track" }),
+      React.createElement("div", {
+        className: "hb-slider-fill",
+        style: { width: `calc(${SLIDER_THUMB_PX / 2}px + (100% - ${SLIDER_THUMB_PX}px) * ${pct})` }
+      }),
+      React.createElement("div", {
+        className: "hb-slider-thumb",
+        "data-hb": "reasoning-thumb",
+        role: "slider",
+        tabIndex: 0,
+        "aria-label": props.label,
+        "aria-valuemin": 0,
+        "aria-valuemax": last,
+        "aria-valuenow": index,
+        "aria-valuetext": props.valueText,
+        "aria-orientation": "horizontal",
+        style: {
+          left: `calc((100% - ${SLIDER_THUMB_PX}px) * ${pct})`,
+          boxShadow: focused || hovering ? ring(focused ? 24 : 16) : void 0
+        },
+        onKeyDown,
+        onFocus: () => setFocused(true),
+        onBlur: () => setFocused(false)
+      })
+    );
+  }
+
   // src/ui/Composer.ts
   var MENU_LIMIT = 200;
   var INPUT_MIN_PX = 32;
@@ -5610,7 +5742,7 @@ ${refs.join("\n")}`.trim() : trimmed;
     const [menuIndex, setMenuIndex] = useState(0);
     const [menuDismissed, setMenuDismissed] = useState(false);
     const [toolsOpen, setToolsOpen] = useState(false);
-    const [reasonDraft, setReasonDraft] = useState(null);
+    const [reasonPreview, setReasonPreview] = useState(null);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
     const appliedInsertion = useRef(0);
@@ -5670,15 +5802,15 @@ ${refs.join("\n")}`.trim() : trimmed;
       if (el) setCaret(el.selectionStart ?? el.value.length);
     }, []);
     const modelLabel = props.model ? props.provider ? `${props.provider}/${props.model}` : props.model : "default";
-    const reasonValue = reasonDraft ?? (props.reasoning || "medium");
-    const reasonIndex = Math.max(0, REASONING_VALUES.indexOf(reasonValue));
-    const reasonPct = reasonIndex / (REASONING_VALUES.length - 1) * 100;
+    const committedReason = props.reasoning || "medium";
+    const reasonIndex = Math.max(0, REASONING_VALUES.indexOf(committedReason));
+    const reasonShown = reasonPreview ?? reasonIndex;
     const commitReason = useCallback(
-      (level) => {
-        setReasonDraft(null);
-        if (level !== (props.reasoning || "medium")) props.onPickReasoning(level);
+      (levelIndex) => {
+        const level = REASONING_VALUES[levelIndex];
+        if (level && level !== committedReason) props.onPickReasoning(level);
       },
-      [props.reasoning, props.onPickReasoning]
+      [committedReason, props.onPickReasoning]
     );
     const acceptCommand = useCallback(
       (entry) => {
@@ -5918,46 +6050,20 @@ ${refs.join("\n")}`.trim() : trimmed;
             { className: "hb-tools-slider", "data-hb": "reasoning-slider" },
             React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
             React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
-            React.createElement("input", {
-              type: "range",
-              "data-hb": "reasoning-range",
-              "data-state": reasonValue,
-              className: "hb-reason-slider",
-              min: 0,
-              max: REASONING_VALUES.length - 1,
-              step: 1,
-              value: reasonIndex,
-              "aria-label": t.reasoning,
-              "aria-valuetext": reasoningLabel(reasonValue, props.locale),
-              style: {
-                // The filled part of the track. Drawn on the input itself
-                // (thin, inset by half a knob, vertically centred) so the
-                // pseudo-elements only have to place the thumb — Chromium
-                // will not let a pseudo-element read an inline custom
-                // property. `backgroundImage`, not the `background`
-                // shorthand: the shorthand would reset the inset size and
-                // position set in the stylesheet, and the fill would then run
-                // the full width of the control instead of knob-centre to
-                // knob-centre.
-                backgroundImage: `linear-gradient(to right, var(--color-primary) 0 ${reasonPct}%, var(--color-muted) ${reasonPct}% 100%)`
-              },
-              onChange: (event) => {
-                const level = REASONING_VALUES[Number(event.target.value)];
-                if (level) setReasonDraft(level);
-              },
-              onPointerUp: (event) => {
-                const level = REASONING_VALUES[Number(event.currentTarget.value)];
-                if (level) commitReason(level);
-              },
-              onKeyUp: (event) => {
-                const level = REASONING_VALUES[Number(event.currentTarget.value)];
-                if (level) commitReason(level);
-              }
+            React.createElement(StepSlider, {
+              sdk,
+              levels: REASONING_VALUES,
+              index: reasonIndex,
+              preview: reasonPreview,
+              label: t.reasoning,
+              valueText: reasoningLabel(REASONING_VALUES[reasonShown] ?? committedReason, props.locale),
+              onPreview: setReasonPreview,
+              onCommit: commitReason
             }),
             React.createElement(
               "span",
               { className: "hb-tools-slider-value" },
-              reasoningLabel(reasonValue, props.locale)
+              reasoningLabel(REASONING_VALUES[reasonShown] ?? committedReason, props.locale)
             )
           ),
           React.createElement(

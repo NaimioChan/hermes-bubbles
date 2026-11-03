@@ -237,7 +237,7 @@ var HermesBubbles = (() => {
     refreshChat: "Refresh this chat",
     composerMore: "Model, reasoning, notifications",
     notifications: "Notifications",
-    pickModel: "Model and reasoning",
+    pickModel: "Model",
     workspace: "Workspace",
     workspaceForNewChat: "Directory the next new chat starts in",
     workspaceDefault: "Default directory",
@@ -273,7 +273,7 @@ var HermesBubbles = (() => {
     projectRestoreHidden: (n) => `Show ${n} hidden`,
     projectRenameFailed: "Could not rename the project",
     projectRemoveFailed: "Could not remove the project",
-    reasoning: "Reasoning",
+    reasoning: "Reasoning effort",
     reasoningLow: "Low",
     reasoningMedium: "Medium",
     reasoningHigh: "High",
@@ -444,7 +444,7 @@ var HermesBubbles = (() => {
     refreshChat: "\u5237\u65B0\u672C\u5BF9\u8BDD",
     composerMore: "\u6A21\u578B\u3001\u601D\u8003\u5F3A\u5EA6\u3001\u901A\u77E5",
     notifications: "\u901A\u77E5\u8BBE\u7F6E",
-    pickModel: "\u6A21\u578B\u4E0E\u601D\u8003\u5F3A\u5EA6",
+    pickModel: "\u6A21\u578B",
     workspace: "\u5DE5\u4F5C\u533A",
     workspaceForNewChat: "\u4E0B\u4E00\u4E2A\u65B0\u5BF9\u8BDD\u7684\u8D77\u59CB\u76EE\u5F55",
     workspaceDefault: "\u9ED8\u8BA4\u76EE\u5F55",
@@ -480,7 +480,7 @@ var HermesBubbles = (() => {
     projectRestoreHidden: (n) => `\u663E\u793A ${n} \u4E2A\u5DF2\u9690\u85CF`,
     projectRenameFailed: "\u9879\u76EE\u91CD\u547D\u540D\u5931\u8D25",
     projectRemoveFailed: "\u79FB\u9664\u9879\u76EE\u5931\u8D25",
-    reasoning: "\u601D\u8003",
+    reasoning: "\u601D\u8003\u5F3A\u5EA6",
     reasoningLow: "\u4F4E",
     reasoningMedium: "\u4E2D",
     reasoningHigh: "\u9AD8",
@@ -5610,6 +5610,7 @@ ${refs.join("\n")}`.trim() : trimmed;
     const [menuIndex, setMenuIndex] = useState(0);
     const [menuDismissed, setMenuDismissed] = useState(false);
     const [toolsOpen, setToolsOpen] = useState(false);
+    const [reasonDraft, setReasonDraft] = useState(null);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
     const appliedInsertion = useRef(0);
@@ -5668,6 +5669,17 @@ ${refs.join("\n")}`.trim() : trimmed;
       const el = inputRef.current;
       if (el) setCaret(el.selectionStart ?? el.value.length);
     }, []);
+    const modelLabel = props.model ? props.provider ? `${props.provider}/${props.model}` : props.model : "default";
+    const reasonValue = reasonDraft ?? (props.reasoning || "medium");
+    const reasonIndex = Math.max(0, REASONING_VALUES.indexOf(reasonValue));
+    const reasonPct = reasonIndex / (REASONING_VALUES.length - 1) * 100;
+    const commitReason = useCallback(
+      (level) => {
+        setReasonDraft(null);
+        if (level !== (props.reasoning || "medium")) props.onPickReasoning(level);
+      },
+      [props.reasoning, props.onPickReasoning]
+    );
     const acceptCommand = useCallback(
       (entry) => {
         if (!slashToken) return;
@@ -5893,32 +5905,60 @@ ${refs.join("\n")}`.trim() : trimmed;
             React.createElement(
               "span",
               { className: "hb-tools-value hb-truncate" },
-              props.model || "default"
+              modelLabel
             ),
             Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" })
           ),
+          // Reasoning strength: the same row shape as the two above it — label
+          // on the left, setting on the right — with the setting being a short
+          // slider rather than a cycling tap target. Eight tiers arrive in one
+          // gesture, and the menu keeps a single line per setting.
           React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-hb": "reasoning-cycle",
-              "data-state": reasoningLabel(props.reasoning || "medium", props.locale),
-              className: "hb-tools-row",
-              onClick: () => {
-                const current = props.reasoning || "medium";
-                const index = REASONING_LEVELS.indexOf(current);
-                const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
-                if (next) props.onPickReasoning(next);
-              }
-            },
+            "div",
+            { className: "hb-tools-slider", "data-hb": "reasoning-slider" },
             React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
             React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
+            React.createElement("input", {
+              type: "range",
+              "data-hb": "reasoning-range",
+              "data-state": reasonValue,
+              className: "hb-reason-slider",
+              min: 0,
+              max: REASONING_VALUES.length - 1,
+              step: 1,
+              value: reasonIndex,
+              "aria-label": t.reasoning,
+              "aria-valuetext": reasoningLabel(reasonValue, props.locale),
+              style: {
+                // The filled part of the track. Drawn on the input itself
+                // (thin, inset by half a knob, vertically centred) so the
+                // pseudo-elements only have to place the thumb — Chromium
+                // will not let a pseudo-element read an inline custom
+                // property. `backgroundImage`, not the `background`
+                // shorthand: the shorthand would reset the inset size and
+                // position set in the stylesheet, and the fill would then run
+                // the full width of the control instead of knob-centre to
+                // knob-centre.
+                backgroundImage: `linear-gradient(to right, var(--color-primary) 0 ${reasonPct}%, var(--color-muted) ${reasonPct}% 100%)`
+              },
+              onChange: (event) => {
+                const level = REASONING_VALUES[Number(event.target.value)];
+                if (level) setReasonDraft(level);
+              },
+              onPointerUp: (event) => {
+                const level = REASONING_VALUES[Number(event.currentTarget.value)];
+                if (level) commitReason(level);
+              },
+              onKeyUp: (event) => {
+                const level = REASONING_VALUES[Number(event.currentTarget.value)];
+                if (level) commitReason(level);
+              }
+            }),
             React.createElement(
               "span",
-              { className: "hb-tools-value" },
-              reasoningLabel(props.reasoning || "medium", props.locale)
-            ),
-            Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" })
+              { className: "hb-tools-slider-value" },
+              reasoningLabel(reasonValue, props.locale)
+            )
           ),
           React.createElement(
             "button",

@@ -27,7 +27,7 @@ import {
   applyCompletion,
   filterCommands,
   findSlashToken,
-  REASONING_LEVELS,
+  REASONING_VALUES,
   type CommandEntry,
 } from "../core/slash";
 import type { Usage } from "../core/types";
@@ -144,10 +144,19 @@ export function Composer(props: ComposerProps) {
    *
    * It replaces the two chips the desktop shows inline: on a 390px row there is
    * no width for a model name, and the chips were what squeezed the textarea to
-   * four characters. The reasoning row is a CYCLE here rather than a list — one
-   * tap moves to the next tier, the same thing the desktop chip does.
+   * four characters. Reasoning is a horizontal slider rather than a cycle —
+   * eight tiers are all visible at once, and picking a far tier is one gesture
+   * instead of six taps.
    */
   const [toolsOpen, setToolsOpen] = useState(false);
+  /**
+   * Reasoning tier while the thumb is being dragged.
+   *
+   * The slider is controlled by this, not by `props.reasoning`, because the
+   * value only leaves the composer on release: `config.set` is a write, and a
+   * drag across the track would otherwise fire one per tier crossed.
+   */
+  const [reasonDraft, setReasonDraft] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   /** Highest `props.insertion.seq` already written into the draft. */
@@ -237,6 +246,32 @@ export function Composer(props: ComposerProps) {
     const el = inputRef.current;
     if (el) setCaret(el.selectionStart ?? el.value.length);
   }, []);
+
+  // ── model & reasoning, as the menu shows them ────────────────────────────
+  // The model reads as `provider/model`: the same name exists under several
+  // providers (a local llama.cpp build and a hosted route are different
+  // answers at the same price point), so the bare name is not identifying.
+  const modelLabel = props.model
+    ? props.provider
+      ? `${props.provider}/${props.model}`
+      : props.model
+    : "default";
+
+  const reasonValue = reasonDraft ?? (props.reasoning || "medium");
+  const reasonIndex = Math.max(0, (REASONING_VALUES as readonly string[]).indexOf(reasonValue));
+  const reasonPct = (reasonIndex / (REASONING_VALUES.length - 1)) * 100;
+
+  /**
+   * Hand the picked tier to the controller. Only called on release (pointer up,
+   * key up) — see `reasonDraft`.
+   */
+  const commitReason = useCallback(
+    (level: string) => {
+      setReasonDraft(null);
+      if (level !== (props.reasoning || "medium")) props.onPickReasoning(level);
+    },
+    [props.reasoning, props.onPickReasoning],
+  );
 
   const acceptCommand = useCallback(
     (entry: CommandEntry) => {
@@ -489,32 +524,60 @@ export function Composer(props: ComposerProps) {
               React.createElement(
                 "span",
                 { className: "hb-tools-value hb-truncate" },
-                props.model || "default",
+                modelLabel,
               ),
               Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" }),
             ),
+            // Reasoning strength: the same row shape as the two above it — label
+            // on the left, setting on the right — with the setting being a short
+            // slider rather than a cycling tap target. Eight tiers arrive in one
+            // gesture, and the menu keeps a single line per setting.
             React.createElement(
-              "button",
-              {
-                type: "button",
-                "data-hb": "reasoning-cycle",
-                "data-state": reasoningLabel(props.reasoning || "medium", props.locale),
-                className: "hb-tools-row",
-                onClick: () => {
-                  const current = props.reasoning || "medium";
-                  const index = REASONING_LEVELS.indexOf(current as (typeof REASONING_LEVELS)[number]);
-                  const next = REASONING_LEVELS[(index + 1) % REASONING_LEVELS.length];
-                  if (next) props.onPickReasoning(next);
-                },
-              },
+              "div",
+              { className: "hb-tools-slider", "data-hb": "reasoning-slider" },
               React.createElement("span", { className: "hb-tools-icon" }, Icon(sdk, { name: "reasoning", size: 16 })),
               React.createElement("span", { className: "hb-tools-label" }, t.reasoning),
+              React.createElement("input", {
+                type: "range",
+                "data-hb": "reasoning-range",
+                "data-state": reasonValue,
+                className: "hb-reason-slider",
+                min: 0,
+                max: REASONING_VALUES.length - 1,
+                step: 1,
+                value: reasonIndex,
+                "aria-label": t.reasoning,
+                "aria-valuetext": reasoningLabel(reasonValue, props.locale),
+                style: {
+                  // The filled part of the track. Drawn on the input itself
+                  // (thin, inset by half a knob, vertically centred) so the
+                  // pseudo-elements only have to place the thumb — Chromium
+                  // will not let a pseudo-element read an inline custom
+                  // property. `backgroundImage`, not the `background`
+                  // shorthand: the shorthand would reset the inset size and
+                  // position set in the stylesheet, and the fill would then run
+                  // the full width of the control instead of knob-centre to
+                  // knob-centre.
+                  backgroundImage: `linear-gradient(to right, var(--color-primary) 0 ${reasonPct}%, var(--color-muted) ${reasonPct}% 100%)`,
+                },
+                onChange: (event: { target: { value: string } }) => {
+                  const level = REASONING_VALUES[Number(event.target.value)];
+                  if (level) setReasonDraft(level);
+                },
+                onPointerUp: (event: { currentTarget: { value: string } }) => {
+                  const level = REASONING_VALUES[Number(event.currentTarget.value)];
+                  if (level) commitReason(level);
+                },
+                onKeyUp: (event: { currentTarget: { value: string } }) => {
+                  const level = REASONING_VALUES[Number(event.currentTarget.value)];
+                  if (level) commitReason(level);
+                },
+              }),
               React.createElement(
                 "span",
-                { className: "hb-tools-value" },
-                reasoningLabel(props.reasoning || "medium", props.locale),
+                { className: "hb-tools-slider-value" },
+                reasoningLabel(reasonValue, props.locale),
               ),
-              Icon(sdk, { name: "chevron", size: 14, className: "hb-tools-chevron" }),
             ),
             React.createElement(
               "button",

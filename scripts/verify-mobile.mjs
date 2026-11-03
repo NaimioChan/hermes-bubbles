@@ -314,13 +314,22 @@ try {
     const m = document.querySelector('[data-hb="composer-menu"]');
     if (!m) return { open: false };
     const rows = [...m.querySelectorAll('button')].map((b) => b.getAttribute('data-hb'));
-    return { open: true, rows, notify: Boolean(m.querySelector('[data-hb="notify-toggle"]')) };
+    return {
+      open: true,
+      rows,
+      // Reasoning is a horizontal slider now, not a cycling row: check the
+      // control is there and spans the menu's width.
+      slider:
+        Boolean(m.querySelector('[data-hb="reasoning-slider"]')) &&
+        Boolean(m.querySelector('[data-hb="reasoning-range"][type="range"]')),
+      notify: Boolean(m.querySelector('[data-hb="notify-toggle"]')),
+    };
   })()`);
   check(
-    "composer menu carries model, reasoning, notifications",
+    "composer menu carries model, reasoning slider, notifications",
     tools.open === true &&
       tools.rows.includes("model-picker-open") &&
-      tools.rows.includes("reasoning-cycle") &&
+      tools.slider === true &&
       tools.notify === true,
     JSON.stringify(tools.rows),
   );

@@ -2,6 +2,19 @@
 
 Hermes 与 OpenCode 共用。开工先读最近 5 条，收工在「当前占用」下方追加一条。
 
+## 2026-11-03 17:45 · hermes · 输入框 ··· 菜单：模型行带提供商、思考强度改横滑杆
+
+- 需求（用户两条 + 两次现场修正）：① 菜单第一项「模型与思考强度」改成「模型」，显示模型名时前面带提供商；② 第二项「思考」改成「思考强度」，点选改成横向滑杆。修正一：滑杆不占第二行，跟「思考强度」文本同一行、右对齐、短一点。修正二：手柄圆填满整个高度，且进度条右端要正对手柄圆心（原来随滑动有偏移）。
+- 文案：`core/i18n.ts` 的 `pickModel` → `Model` / `模型`，`reasoning` → `Reasoning effort` / `思考强度`。`ModelPicker` 的标题与思考行标签共用这两条，跟着一起变（它的思考行仍是 pill 列表，未动）。
+- 模型行：值改成 `${provider}/${model}`（同一模型名在不同 provider 下不是同一个答案），provider 为空时退回裸名。
+- 思考强度：原生 `<input type="range">`（拖动 / 键盘 / 触屏 / a11y 免费），8 档 = `REASONING_VALUES`（`none` + 7 级），一行 = 图标 + 标签 + 滑杆(6rem) + 当前档位。**只在释放时提交**（`onPointerUp` / `onKeyUp`）：`config.set key=reasoning` 是写操作，`onChange` 拖动中每过一档都触发，一次拖动会写六七次。拖动中的值放 `reasonDraft`，`ChatPage.onPickReasoning` 本来就乐观更新 `props.reasoning`，松手不会闪回。
+- 进度条对齐两个坑：① 内联必须写 `backgroundImage` 而非 `background` 简写——简写把样式表的 `background-size` / `background-position` 重置成 auto，填充就铺满整个控件；② 轨道带宽 `calc(100% - 18px)` + `background-position: 9px center`，因为原生 range 手柄**圆心**只在 `[半径, 宽度-半径]` 之间移动，铺满时满档会超出圆心半个手柄。
+- 手柄 18px（= 控件高度）填满行高，`margin-top: -7px` 让 4px 轨道居中穿过。
+- 验收：`tsc` 干净；`vitest` 669 passed / 31 文件；`audit-classes` 277/277；临时 HERMES_HOME（9188，用户自己的 9119 未动）真页面量到模型值 `z-ai/glm-5.3`、标签 `Model`、思考行 `oneLine: true`、滑杆 90px、键盘往返 `medium → high → medium`。`verify-mobile.mjs` 断言从 `reasoning-cycle` 改为 `reasoning-slider` + `reasoning-range[type=range]`。用户随后叫停余下的截图复核。
+- 遗留：临时实例里 `reasoningLabel` 在 en 下回落到原始 slug（显示 `medium` 而非 `Medium`），是既有行为（`REASONING_LABELS` 的 en 表没有这些键），未动。
+
+---
+
 ## 2026-10-29 22:00 · hermes · 图标统一成 Lucide 几何、桌面历史面板加缓动、README 截图与 v0.2.0
 
 - 需求（用户三条 + 一个问题）：① 回复气泡下三个小按钮图标大小不一，找更好的图标资源；② 桌面端历史记录打开也做成缓动动效；③ 完成后更新 README 截图并创建 release 标签；④ 顺带问能不能发 npm。追加：其他图标也可以换。

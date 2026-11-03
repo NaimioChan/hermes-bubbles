@@ -2518,6 +2518,103 @@ div:hover > .hb-row-tools,
   opacity: 0.6;
 }
 
+/* ── reasoning strength slider ──────────────────────────────────────────────
+ * One line, the same shape as the rows above it: icon + label on the left, the
+ * setting on the right. The slider is short on purpose — it is a five-stop-ish
+ * scale next to a two-character value, not a full-width scrubber, and keeping
+ * it on the row means the menu does not grow a second line per setting.
+ */
+.hb-tools-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-card-foreground);
+}
+
+/* The filled portion of the track is an inline gradient on the input itself
+ * (it is the only element an inline style can reach — Chromium's
+ * `::-webkit-slider-runnable-track` cannot read an inline custom property), so
+ * here the track pseudo-element only has to be transparent and the right
+ * thickness, and the thumb only has to sit on it.
+ */
+.hb-reason-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  /* Pushes the slider and its value to the right edge, like `.hb-tools-value`
+   * does for the rows above. */
+  margin: 0 0 0 auto;
+  width: 6rem;
+  height: 18px;
+  padding: 0;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  /* Inset by half a knob on both ends: the thumb's CENTRE travels that band,
+   * so a fill that stopped at 100% would overshoot the knob by half its width
+   * at the top of the scale (and undershoot at the bottom). */
+  background-position: 9px center;
+  background-size: calc(100% - 18px) 4px;
+  border: 0;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+
+.hb-reason-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+
+.hb-reason-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  /* Full height of the control: the knob covers the track end to end instead of
+   * floating as a small dot on a line. */
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 2px solid var(--color-card);
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+}
+
+.hb-reason-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+
+.hb-reason-slider:focus-visible {
+  outline: none;
+}
+
+.hb-reason-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--color-ring, var(--color-primary));
+}
+
+.hb-reason-slider::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+
+.hb-reason-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-card);
+  border-radius: 9999px;
+  background: var(--color-primary);
+}
+
+/* Fixed width so the slider does not shift as the label goes 低 → 很高. */
+.hb-tools-slider-value {
+  flex: 0 0 auto;
+  width: 2.5rem;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
 /* ── attachments: staging tray and sent row ──────────────────────────────── */
 
 .hb-att-tray {
